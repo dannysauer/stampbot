@@ -1,0 +1,22 @@
+# Copyright 2026 Danny Sauer
+# SPDX-License-Identifier: Apache-2.0
+#
+# CI test values: default configuration
+# Tests the chart with minimal settings (single replica, no autoscaling)
+#
+# To add a new test case:
+#   1. Create a new file: charts/stampbot/ci/<name>-values.yaml
+#   2. The test case will be automatically discovered and run in CI
+#   3. Each test case runs in its own kind cluster in parallel
+
+replicaCount: 1
+
+autoscaling:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: false
+
+# Use existing secret (created by CI)
+github:
+  existingSecret: stampbot-github

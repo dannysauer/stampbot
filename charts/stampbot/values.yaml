@@ -1,0 +1,249 @@
+# Copyright 2026 Danny Sauer
+# SPDX-License-Identifier: Apache-2.0
+
+# Default values for stampbot Helm chart.
+# See https://github.com/dannysauer/stampbot for documentation.
+
+# @schema
+# type: integer
+# minimum: 1
+# @schema
+replicaCount: 2
+
+# @schema
+# type: object
+# properties:
+#   repository:
+#     type: string
+#   pullPolicy:
+#     type: string
+#     enum: [Always, IfNotPresent, Never]
+#   tag:
+#     type: string
+# @schema
+image:
+  repository: ghcr.io/dannysauer/stampbot
+  pullPolicy: IfNotPresent
+  tag: ""  # Defaults to chart appVersion
+
+# @schema
+# type: array
+# items:
+#   type: object
+# @schema
+imagePullSecrets: []
+
+# @schema
+# type: string
+# @schema
+nameOverride: ""
+
+# @schema
+# type: string
+# @schema
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8000"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+  annotations: {}
+
+# Metrics are served on the main HTTP port (default 8000).
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: stampbot.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  # Custom metrics for HPA
+  customMetrics:
+    enabled: false
+    metrics:
+      - type: Pods
+        pods:
+          metric:
+            name: stampbot_http_requests_total
+          target:
+            type: AverageValue
+            averageValue: "100"
+
+vpa:
+  enabled: false
+  updateMode: "Auto"  # Options: "Off", "Initial", "Recreate", "Auto"
+  minAllowed:
+    cpu: 50m
+    memory: 64Mi
+  maxAllowed:
+    cpu: 1000m
+    memory: 1Gi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - stampbot
+          topologyKey: kubernetes.io/hostname
+
+config:
+  logLevel: INFO
+  otelEnabled: false
+  otelEndpoint: ""
+  otelServiceName: stampbot
+
+# Setup mode configuration
+# When enabled, allows creating GitHub App via /setup endpoint
+# Disable in production after initial setup
+setup:
+  enabled: false  # Disable /setup in production by default
+  baseUrl: ""     # Override auto-detected base URL (e.g., https://stampbot.example.com)
+
+github:
+  appId: ""
+  # Private key can be provided via:
+  # 1. Direct value (not recommended for production)
+  # 2. existingSecret with key "private-key"
+  # 3. AWS Secrets Manager (see awsSecretsManager section)
+  privateKey: ""
+  webhookSecret: ""
+  existingSecret: ""
+
+# AWS Secrets Manager integration (for EKS)
+awsSecretsManager:
+  enabled: false
+  secretName: "stampbot/github-credentials"
+  region: "us-east-1"
+  # IAM role for service account (IRSA)
+  roleArn: ""
+
+# External Secrets Operator integration
+externalSecrets:
+  enabled: false
+  secretStore:
+    name: aws-secrets-manager
+    kind: SecretStore
+  refreshInterval: 1h
+  data:
+    - secretKey: STAMPBOT_APP_ID
+      remoteRef:
+        key: stampbot/github-credentials
+        property: app_id
+    - secretKey: STAMPBOT_PRIVATE_KEY
+      remoteRef:
+        key: stampbot/github-credentials
+        property: private_key
+    - secretKey: STAMPBOT_WEBHOOK_SECRET
+      remoteRef:
+        key: stampbot/github-credentials
+        property: webhook_secret
+
+# OpenTelemetry configuration
+opentelemetry:
+  enabled: false
+  endpoint: "http://otel-collector:4317"
+  serviceName: stampbot
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Network policy
+networkPolicy:
+  enabled: false
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+      - namespaceSelector: {}
+  egress:
+    - to:
+      - namespaceSelector: {}
+    - to:
+      - podSelector: {}
+    - ports:
+      - protocol: TCP
+        port: 443  # GitHub API
+      - protocol: TCP
+        port: 53   # DNS
+      - protocol: UDP
+        port: 53   # DNS
+
+# Grafana dashboard ConfigMap (for Grafana sidecar)
+# @schema
+# type: object
+# properties:
+#   enabled:
+#     type: boolean
+#   labels:
+#     type: object
+#   annotations:
+#     type: object
+# @schema
+grafanaDashboard:
+  enabled: false
+  # Labels to add to the ConfigMap (e.g., for Grafana sidecar discovery)
+  labels:
+    grafana_dashboard: "1"
+  # Annotations to add to the ConfigMap
+  annotations: {}

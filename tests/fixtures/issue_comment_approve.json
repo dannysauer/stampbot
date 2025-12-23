@@ -1,0 +1,78 @@
+{
+  "action": "created",
+  "issue": {
+    "url": "https://api.github.com/repos/octocat/hello-world/issues/42",
+    "repository_url": "https://api.github.com/repos/octocat/hello-world",
+    "labels_url": "https://api.github.com/repos/octocat/hello-world/issues/42/labels{/name}",
+    "comments_url": "https://api.github.com/repos/octocat/hello-world/issues/42/comments",
+    "events_url": "https://api.github.com/repos/octocat/hello-world/issues/42/events",
+    "html_url": "https://github.com/octocat/hello-world/pull/42",
+    "id": 123456789,
+    "node_id": "I_kwDOBtest",
+    "number": 42,
+    "title": "Add new feature",
+    "user": {
+      "login": "contributor",
+      "id": 987654,
+      "type": "User"
+    },
+    "labels": [],
+    "state": "open",
+    "locked": false,
+    "assignee": null,
+    "assignees": [],
+    "milestone": null,
+    "comments": 1,
+    "created_at": "2025-01-10T10:00:00Z",
+    "updated_at": "2025-01-10T15:00:00Z",
+    "closed_at": null,
+    "body": "This PR adds a new feature.",
+    "pull_request": {
+      "url": "https://api.github.com/repos/octocat/hello-world/pulls/42",
+      "html_url": "https://github.com/octocat/hello-world/pull/42",
+      "diff_url": "https://github.com/octocat/hello-world/pull/42.diff",
+      "patch_url": "https://github.com/octocat/hello-world/pull/42.patch"
+    }
+  },
+  "comment": {
+    "url": "https://api.github.com/repos/octocat/hello-world/issues/comments/111222333",
+    "html_url": "https://github.com/octocat/hello-world/pull/42#issuecomment-111222333",
+    "issue_url": "https://api.github.com/repos/octocat/hello-world/issues/42",
+    "id": 111222333,
+    "node_id": "IC_kwDOBtest",
+    "user": {
+      "login": "maintainer",
+      "id": 111222,
+      "node_id": "U_kgtest",
+      "type": "User",
+      "site_admin": false
+    },
+    "created_at": "2025-01-10T15:00:00Z",
+    "updated_at": "2025-01-10T15:00:00Z",
+    "body": "@stampbot approve\n\nLGTM, approving this PR."
+  },
+  "repository": {
+    "id": 12345678,
+    "node_id": "R_kgtest",
+    "name": "hello-world",
+    "full_name": "octocat/hello-world",
+    "private": false,
+    "owner": {
+      "login": "octocat",
+      "id": 123456,
+      "type": "User"
+    },
+    "html_url": "https://github.com/octocat/hello-world",
+    "default_branch": "main"
+  },
+  "sender": {
+    "login": "maintainer",
+    "id": 111222,
+    "type": "User",
+    "site_admin": false
+  },
+  "installation": {
+    "id": 12345,
+    "node_id": "MDIzOkludGVncmF0aW9uSW5zdGFsbGF0aW9uMTIzNDU="
+  }
+}

@@ -1,0 +1,40 @@
+# Stampbot Configuration
+# This file contains default settings for stampbot.
+# Override these via environment variables (STAMPBOT_*) or .secrets.toml
+
+# Application name
+app_name = "stampbot"
+
+# Server settings
+host = "0.0.0.0"
+port = 8000
+log_level = "INFO"
+log_format = "auto"  # "json", "console", or "auto" (auto-detect K8s)
+
+# OpenTelemetry settings
+otel_enabled = false
+otel_service_name = "stampbot"
+# otel_endpoint = ""  # Set via env var or .secrets.toml
+
+# Metrics
+metrics_enabled = true
+metrics_port = 8000
+
+# Setup mode settings
+setup_enabled = true
+# base_url = ""  # Auto-detected from request, override if behind proxy
+
+# GitHub App credentials (required for operation, set via env vars or .secrets.toml)
+# app_id = 12345
+# private_key = "..."
+# webhook_secret = "..."
+
+# Default repo configuration
+# These defaults apply to all repos unless overridden in their stampbot.toml
+[defaults]
+approval_labels = ["autoapprove", "stamp"]
+auto_approve_on_label = true
+chatops_enabled = true
+chatops_required_permission = "maintain"
+approve_commands = ["approve", "stamp"]
+unapprove_commands = ["unapprove", "unstamp"]

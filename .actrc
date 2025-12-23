@@ -1,0 +1,11 @@
+# Default configuration for nektos/act
+# Run GitHub Actions locally: https://github.com/nektos/act
+
+# Use medium-sized runner image (good balance of size vs compatibility)
+-P ubuntu-latest=catthehacker/ubuntu:act-latest
+
+# Container architecture
+--container-architecture linux/amd64
+
+# Use local event files from .github/act/ directory
+--eventpath .github/act/push.json

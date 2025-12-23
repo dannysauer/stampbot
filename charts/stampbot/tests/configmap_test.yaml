@@ -1,0 +1,77 @@
+# Copyright 2026 Danny Sauer
+# SPDX-License-Identifier: Apache-2.0
+
+suite: ConfigMap tests
+templates:
+  - configmap.yaml
+values:
+  - ../values.yaml
+tests:
+  - it: should render configmap with default values
+    asserts:
+      - isKind:
+          of: ConfigMap
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-stampbot
+
+  - it: should set log level
+    set:
+      config.logLevel: DEBUG
+    asserts:
+      - equal:
+          path: data.LOG_LEVEL
+          value: "DEBUG"
+
+  - it: should set OTEL disabled by default
+    asserts:
+      - equal:
+          path: data.OTEL_ENABLED
+          value: "false"
+      - isNull:
+          path: data.OTEL_ENDPOINT
+      - isNull:
+          path: data.OTEL_SERVICE_NAME
+
+  - it: should set OTEL config when enabled
+    set:
+      config.otelEnabled: true
+      config.otelEndpoint: "http://otel:4317"
+      config.otelServiceName: "my-stampbot"
+    asserts:
+      - equal:
+          path: data.OTEL_ENABLED
+          value: "true"
+      - equal:
+          path: data.OTEL_ENDPOINT
+          value: "http://otel:4317"
+      - equal:
+          path: data.OTEL_SERVICE_NAME
+          value: "my-stampbot"
+
+  - it: should set setup disabled by default
+    asserts:
+      - equal:
+          path: data.STAMPBOT_SETUP_ENABLED
+          value: "false"
+
+  - it: should set setup base URL when provided
+    set:
+      setup.enabled: true
+      setup.baseUrl: "https://stampbot.example.com"
+    asserts:
+      - equal:
+          path: data.STAMPBOT_SETUP_ENABLED
+          value: "true"
+      - equal:
+          path: data.STAMPBOT_BASE_URL
+          value: "https://stampbot.example.com"
+
+  - it: should have standard labels
+    asserts:
+      - equal:
+          path: metadata.labels["app.kubernetes.io/name"]
+          value: stampbot
+      - equal:
+          path: metadata.labels["app.kubernetes.io/managed-by"]
+          value: Helm

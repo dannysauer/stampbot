@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "stampbot.fullname" . }}
+  labels:
+    {{- include "stampbot.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "stampbot.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "stampbot.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "stampbot.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+      - name: {{ .Chart.Name }}
+        securityContext:
+          {{- toYaml .Values.securityContext | nindent 12 }}
+        image: "{{ .Values.image.repository }}:{{ include "stampbot.imageTag" . }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        env:
+        - name: STAMPBOT_HOST
+          value: "0.0.0.0"
+        - name: STAMPBOT_PORT
+          value: "8000"
+        - name: STAMPBOT_SETUP_ENABLED
+          value: {{ .Values.setup.enabled | quote }}
+        {{- if .Values.setup.baseUrl }}
+        - name: STAMPBOT_BASE_URL
+          value: {{ .Values.setup.baseUrl | quote }}
+        {{- end }}
+        - name: STAMPBOT_LOG_LEVEL
+          value: {{ .Values.config.logLevel }}
+        - name: STAMPBOT_OTEL_ENABLED
+          value: {{ .Values.config.otelEnabled | quote }}
+        {{- if .Values.config.otelEnabled }}
+        - name: STAMPBOT_OTEL_ENDPOINT
+          value: {{ .Values.config.otelEndpoint }}
+        - name: STAMPBOT_OTEL_SERVICE_NAME
+          value: {{ .Values.config.otelServiceName }}
+        {{- end }}
+        - name: STAMPBOT_APP_ID
+          valueFrom:
+            secretKeyRef:
+              name: {{ if .Values.github.existingSecret }}{{ .Values.github.existingSecret }}{{ else if .Values.externalSecrets.enabled }}{{ include "stampbot.fullname" . }}-external{{ else }}{{ include "stampbot.fullname" . }}{{ end }}
+              key: STAMPBOT_APP_ID
+        - name: STAMPBOT_PRIVATE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ if .Values.github.existingSecret }}{{ .Values.github.existingSecret }}{{ else if .Values.externalSecrets.enabled }}{{ include "stampbot.fullname" . }}-external{{ else }}{{ include "stampbot.fullname" . }}{{ end }}
+              key: STAMPBOT_PRIVATE_KEY
+        - name: STAMPBOT_WEBHOOK_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ if .Values.github.existingSecret }}{{ .Values.github.existingSecret }}{{ else if .Values.externalSecrets.enabled }}{{ include "stampbot.fullname" . }}-external{{ else }}{{ include "stampbot.fullname" . }}{{ end }}
+              key: STAMPBOT_WEBHOOK_SECRET
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        resources:
+          {{- toYaml .Values.resources | nindent 12 }}
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

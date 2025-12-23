@@ -1,0 +1,220 @@
+name: Chart Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'charts/**'
+  workflow_dispatch:
+    inputs:
+      app_version:
+        description: 'App version to set as appVersion (optional, defaults to latest v* tag)'
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      app_version:
+        description: 'App version to set as appVersion'
+        required: false
+        type: string
+
+env:
+  CHART_DIR: charts/stampbot
+  REGISTRY: ghcr.io
+  CHART_REPO: ghcr.io/${{ github.repository_owner }}/charts
+
+jobs:
+  release-chart:
+    name: Release Helm Chart
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for version calculation
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Calculate next chart version
+        id: version
+        run: |
+          # Get the latest chart tag
+          LATEST_CHART_TAG=$(git tag -l 'chart-v*' --sort=-v:refname | head -n1)
+
+          if [ -z "$LATEST_CHART_TAG" ]; then
+            echo "No previous chart tag found, starting at 0.1.0"
+            CURRENT_VERSION="0.0.0"
+            COMMIT_RANGE="HEAD"
+          else
+            CURRENT_VERSION="${LATEST_CHART_TAG#chart-v}"
+            COMMIT_RANGE="${LATEST_CHART_TAG}..HEAD"
+          fi
+
+          echo "Current version: $CURRENT_VERSION"
+          echo "Analyzing commits in range: $COMMIT_RANGE"
+
+          # Parse current version
+          MAJOR=$(echo "$CURRENT_VERSION" | cut -d. -f1)
+          MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f2)
+          PATCH=$(echo "$CURRENT_VERSION" | cut -d. -f3)
+
+          # Analyze commits for version bump type
+          BUMP_TYPE="patch"
+
+          # Check for breaking changes (BREAKING CHANGE in body or ! after type)
+          if git log "$COMMIT_RANGE" --pretty=format:"%B" | grep -qE "(^BREAKING CHANGE:|^[a-z]+(\([^)]*\))?!:)"; then
+            BUMP_TYPE="major"
+          # Check for features
+          elif git log "$COMMIT_RANGE" --pretty=format:"%s" | grep -qE "^feat(\([^)]*\))?:"; then
+            BUMP_TYPE="minor"
+          fi
+
+          echo "Bump type: $BUMP_TYPE"
+
+          # Calculate new version
+          case "$BUMP_TYPE" in
+            major)
+              NEW_VERSION="$((MAJOR + 1)).0.0"
+              ;;
+            minor)
+              NEW_VERSION="${MAJOR}.$((MINOR + 1)).0"
+              ;;
+            patch)
+              NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+              ;;
+          esac
+
+          echo "New version: $NEW_VERSION"
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "tag=chart-v$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Get app version
+        id: app_version
+        run: |
+          if [ -n "${{ inputs.app_version }}" ]; then
+            APP_VERSION="${{ inputs.app_version }}"
+          else
+            # Get latest app version tag
+            APP_VERSION=$(git tag -l 'v*' --sort=-v:refname | head -n1 | sed 's/^v//')
+            if [ -z "$APP_VERSION" ]; then
+              echo "::warning::No app version tag (v*) found. Using 0.1.0 as initial appVersion."
+              APP_VERSION="0.1.0"
+            fi
+          fi
+          echo "App version: $APP_VERSION"
+          echo "app_version=$APP_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Check if release needed
+        id: check
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists, skipping release"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update Chart.yaml versions
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          CHART_VERSION="${{ steps.version.outputs.version }}"
+          APP_VERSION="${{ steps.app_version.outputs.app_version }}"
+
+          echo "Setting chart version to: $CHART_VERSION"
+          echo "Setting app version to: $APP_VERSION"
+
+          sed -i "s/^version: 0.0.0-placeholder$/version: ${CHART_VERSION}/" "${{ env.CHART_DIR }}/Chart.yaml"
+          sed -i "s/^appVersion: 0.0.0-placeholder$/appVersion: ${APP_VERSION}/" "${{ env.CHART_DIR }}/Chart.yaml"
+
+          echo "Updated Chart.yaml:"
+          cat "${{ env.CHART_DIR }}/Chart.yaml"
+
+      - name: Lint chart
+        if: steps.check.outputs.skip != 'true'
+        run: helm lint "${{ env.CHART_DIR }}"
+
+      - name: Package chart
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          helm package "${{ env.CHART_DIR }}" --destination .
+          ls -la *.tgz
+
+      - name: Log in to Container Registry
+        if: steps.check.outputs.skip != 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push chart to OCI registry
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          CHART_VERSION="${{ steps.version.outputs.version }}"
+          helm push "stampbot-${CHART_VERSION}.tgz" "oci://${{ env.CHART_REPO }}"
+
+      - name: Create Git tag
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      - name: Generate changelog
+        if: steps.check.outputs.skip != 'true'
+        id: changelog
+        run: |
+          LATEST_CHART_TAG=$(git tag -l 'chart-v*' --sort=-v:refname | head -n2 | tail -n1)
+          if [ -z "$LATEST_CHART_TAG" ] || [ "$LATEST_CHART_TAG" = "${{ steps.version.outputs.tag }}" ]; then
+            COMMIT_RANGE="HEAD"
+          else
+            COMMIT_RANGE="${LATEST_CHART_TAG}..HEAD"
+          fi
+
+          echo "## What's Changed" > changelog.md
+          echo "" >> changelog.md
+
+          # Group commits by type
+          for type in feat fix docs chore refactor test ci; do
+            COMMITS=$(git log "$COMMIT_RANGE" --pretty=format:"- %s" --grep="^${type}:" --grep="^${type}(" -E 2>/dev/null || true)
+            if [ -n "$COMMITS" ]; then
+              case $type in
+                feat) echo "### Features" >> changelog.md ;;
+                fix) echo "### Bug Fixes" >> changelog.md ;;
+                docs) echo "### Documentation" >> changelog.md ;;
+                chore) echo "### Chores" >> changelog.md ;;
+                refactor) echo "### Refactoring" >> changelog.md ;;
+                test) echo "### Tests" >> changelog.md ;;
+                ci) echo "### CI/CD" >> changelog.md ;;
+              esac
+              echo "$COMMITS" >> changelog.md
+              echo "" >> changelog.md
+            fi
+          done
+
+          echo "" >> changelog.md
+          echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${LATEST_CHART_TAG}...${{ steps.version.outputs.tag }}" >> changelog.md
+
+          cat changelog.md
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "Helm Chart ${{ steps.version.outputs.version }}"
+          body_path: changelog.md
+          files: |
+            stampbot-${{ steps.version.outputs.version }}.tgz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

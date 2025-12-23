@@ -1,0 +1,104 @@
+# Copyright 2026 Danny Sauer
+# SPDX-License-Identifier: Apache-2.0
+
+suite: Ingress tests
+templates:
+  - ingress.yaml
+values:
+  - ../values.yaml
+tests:
+  - it: should not render ingress by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should render ingress when enabled
+    set:
+      ingress.enabled: true
+      ingress.hosts:
+        - host: stampbot.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+    asserts:
+      - isKind:
+          of: Ingress
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-stampbot
+
+  - it: should set ingress class name
+    set:
+      ingress.enabled: true
+      ingress.className: nginx
+      ingress.hosts:
+        - host: stampbot.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+    asserts:
+      - equal:
+          path: spec.ingressClassName
+          value: nginx
+
+  - it: should configure TLS when specified
+    set:
+      ingress.enabled: true
+      ingress.hosts:
+        - host: stampbot.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+      ingress.tls:
+        - secretName: stampbot-tls
+          hosts:
+            - stampbot.example.com
+    asserts:
+      - equal:
+          path: spec.tls[0].secretName
+          value: stampbot-tls
+      - contains:
+          path: spec.tls[0].hosts
+          content: stampbot.example.com
+
+  - it: should apply annotations
+    set:
+      ingress.enabled: true
+      ingress.annotations:
+        cert-manager.io/cluster-issuer: letsencrypt-prod
+        nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      ingress.hosts:
+        - host: stampbot.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+    asserts:
+      - equal:
+          path: metadata.annotations["cert-manager.io/cluster-issuer"]
+          value: letsencrypt-prod
+      - equal:
+          path: metadata.annotations["nginx.ingress.kubernetes.io/ssl-redirect"]
+          value: "true"
+
+  - it: should configure multiple hosts
+    set:
+      ingress.enabled: true
+      ingress.hosts:
+        - host: stampbot.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+        - host: api.example.com
+          paths:
+            - path: /webhook
+              pathType: Exact
+    asserts:
+      - lengthEqual:
+          path: spec.rules
+          count: 2
+      - equal:
+          path: spec.rules[0].host
+          value: stampbot.example.com
+      - equal:
+          path: spec.rules[1].host
+          value: api.example.com

@@ -1,0 +1,352 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+  push:
+    branches:
+      - main
+      - develop
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: '.python-version'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install ruff mypy types-toml
+
+      - name: Run ruff format
+        run: ruff format --check stampbot/ tests/
+
+      - name: Run ruff check
+        run: ruff check stampbot/ tests/
+
+      - name: Run mypy
+        run: mypy stampbot/
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio
+
+      - name: Run tests
+        run: |
+          pytest tests/ -v \
+            --cov=stampbot \
+            --cov-branch \
+            --cov-report=xml \
+            --cov-report=term-missing
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        if: matrix.python-version == '3.14'
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: unittests
+          name: python-${{ matrix.python-version }}
+          fail_ci_if_error: true
+
+  build-image:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+          platforms: linux/amd64
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: [build-image]
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy scan results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  security-scan-pr:
+    name: Security Scan (PR)
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image for scanning
+        run: docker build -t stampbot:scan .
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'stampbot:scan'
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+
+  helm-lint:
+    name: Lint Helm Chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Lint Helm chart
+        run: helm lint charts/stampbot
+
+      - name: Template Helm chart
+        run: |
+          helm template stampbot charts/stampbot \
+            --set github.appId=123456 \
+            --set github.privateKey="test" \
+            --set github.webhookSecret="test"
+
+  helm-validate:
+    name: Validate Helm Templates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Install kubeconform
+        run: |
+          curl -sSLo kubeconform.tar.gz https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz
+          tar xzf kubeconform.tar.gz
+          sudo mv kubeconform /usr/local/bin/
+
+      - name: Validate with kubeconform
+        run: |
+          helm template stampbot charts/stampbot \
+            --set github.appId=123456 \
+            --set github.privateKey="test" \
+            --set github.webhookSecret="test" \
+            | kubeconform -strict -ignore-missing-schemas -summary
+
+      - name: Validate with all features enabled
+        run: |
+          helm template stampbot charts/stampbot \
+            --set github.appId=123456 \
+            --set github.privateKey="test" \
+            --set github.webhookSecret="test" \
+            --set ingress.enabled=true \
+            --set ingress.hosts[0].host=stampbot.example.com \
+            --set ingress.hosts[0].paths[0].path=/ \
+            --set ingress.hosts[0].paths[0].pathType=Prefix \
+            --set metrics.serviceMonitor.enabled=true \
+            --set networkPolicy.enabled=true \
+            --set vpa.enabled=true \
+            --set grafanaDashboard.enabled=true \
+            | kubeconform -strict -ignore-missing-schemas -summary
+
+  helm-unittest:
+    name: Helm Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Install helm-unittest plugin
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest.git
+
+      - name: Run unit tests
+        run: helm unittest charts/stampbot
+
+  helm-install-test-matrix:
+    name: Discover Helm Test Cases
+    runs-on: ubuntu-latest
+    outputs:
+      test-cases: ${{ steps.discover.outputs.test-cases }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Discover test cases
+        id: discover
+        run: |
+          # Find all *-values.yaml files and extract test case names
+          if ls charts/stampbot/ci/*-values.yaml >/dev/null 2>&1; then
+            TEST_CASES=$(ls charts/stampbot/ci/*-values.yaml | \
+              xargs -I {} basename {} -values.yaml | \
+              jq -R -s -c 'split("\n") | map(select(length > 0))')
+          else
+            echo "::warning::No test cases found in charts/stampbot/ci/"
+            TEST_CASES='["default"]'
+          fi
+          echo "test-cases=$TEST_CASES" >> $GITHUB_OUTPUT
+          echo "Discovered test cases: $TEST_CASES"
+
+  helm-install-test:
+    name: Helm Install Test (${{ matrix.test-case }})
+    runs-on: ubuntu-latest
+    needs: helm-install-test-matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        test-case: ${{ fromJson(needs.helm-install-test-matrix.outputs.test-cases) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: stampbot-${{ matrix.test-case }}
+
+      - name: Create test namespace
+        run: kubectl create namespace stampbot-test
+
+      - name: Create test secret
+        run: |
+          kubectl create secret generic stampbot-github \
+            --namespace stampbot-test \
+            --from-literal=STAMPBOT_APP_ID=123456 \
+            --from-literal=STAMPBOT_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
+          MIIEpQIBAAKCAQEA0Z3VS5JJcds3xfn/ygWyF8PbnGy0AHB7MxszR3xyEhXxAbdM
+          zQPf3+eBe5KMBbOuXKHqfTl3lAwn4nMiPbQGSoNRS9pp0YQWfSSSKFBPSldF3VB5
+          k5mUMOiSCXR3JqvXcEpeltwMXJdPOYWh4pmhLMnPJNWGiGJ1SsLVRm8aQsLNwBkS
+          fsxNNHxPgDT3AZ3CfzP9tBK0W3o3xP9LPf3lHhXD1v9XhdcGJkBC3qU5vdqN5Pj5
+          mJkPS1BzW5wp0kIxFkPf5ta2lJWjnc0TzyiX4dJSASeAljVwxPf5k9y0BANK7g9D
+          NNMTMb5A5k3xj1P9wTNFI4dD9gLxXBPq9QI4XQIDAQABAoIBAF8iu4L0Q8OLFNAB
+          rC1zT3HPFnjb0jLYhJl3ozdNsbq2cL9IpoReM27v0VEMC0DKKO4l7xOz2KqYVMaY
+          nk4ob9GNdGr2mSYNKY9/+3wvEObLLY2E8E9PBgGOaOkimL7h5z9B7k+RX0aHzlOC
+          TEST_KEY_NOT_REAL_PLACEHOLDER_FOR_CI_TESTING_PURPOSES_ONLY
+          -----END RSA PRIVATE KEY-----" \
+            --from-literal=STAMPBOT_WEBHOOK_SECRET=test-webhook-secret
+
+      - name: Install chart
+        run: |
+          helm install stampbot charts/stampbot \
+            --namespace stampbot-test \
+            --values charts/stampbot/ci/${{ matrix.test-case }}-values.yaml \
+            --wait \
+            --timeout 120s
+
+      - name: Verify deployment
+        run: |
+          kubectl get pods -n stampbot-test
+          kubectl get svc -n stampbot-test
+          kubectl rollout status deployment/stampbot -n stampbot-test --timeout=60s
+
+      - name: Check pod is ready
+        run: |
+          kubectl wait --for=condition=ready pod \
+            -l app.kubernetes.io/name=stampbot \
+            -n stampbot-test \
+            --timeout=60s
+
+      - name: Test health endpoint
+        run: |
+          kubectl port-forward svc/stampbot 8080:80 -n stampbot-test &
+          sleep 5
+          curl -sf http://localhost:8080/health || exit 1
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          kubectl describe pods -n stampbot-test
+          kubectl logs -l app.kubernetes.io/name=stampbot -n stampbot-test --tail=100
+
+      - name: Cleanup
+        if: always()
+        run: |
+          helm uninstall stampbot -n stampbot-test || true
+          kubectl delete namespace stampbot-test || true

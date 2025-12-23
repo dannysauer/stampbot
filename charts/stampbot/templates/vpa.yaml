@@ -1,0 +1,22 @@
+{{- if .Values.vpa.enabled }}
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: {{ include "stampbot.fullname" . }}
+  labels:
+    {{- include "stampbot.labels" . | nindent 4 }}
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "stampbot.fullname" . }}
+  updatePolicy:
+    updateMode: {{ .Values.vpa.updateMode }}
+  resourcePolicy:
+    containerPolicies:
+    - containerName: {{ .Chart.Name }}
+      minAllowed:
+        {{- toYaml .Values.vpa.minAllowed | nindent 8 }}
+      maxAllowed:
+        {{- toYaml .Values.vpa.maxAllowed | nindent 8 }}
+{{- end }}

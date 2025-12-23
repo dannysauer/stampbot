@@ -1,0 +1,91 @@
+# Pre-commit hooks for stampbot
+# Install: make pre-commit-install
+# Run manually: make pre-commit
+# See https://pre-commit.com for more information
+
+repos:
+  # Standard pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--unsafe]  # Allow custom tags
+        exclude: ^charts/.*templates/  # Exclude Helm templates (contain Go templates)
+      - id: check-toml
+      - id: check-json
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+      - id: detect-private-key
+        exclude: ^(tests/|INSTALLATION\.md)  # Exclude test mocks and docs
+      - id: check-ast
+      - id: check-case-conflict
+      - id: no-commit-to-branch
+        args: ['--branch', 'main', '--branch', 'develop']
+
+  # Conventional commit message validation
+  - repo: https://github.com/alessandrojcm/commitlint-pre-commit-hook
+    rev: v9.24.0
+    hooks:
+      - id: commitlint
+        stages: [commit-msg]
+        additional_dependencies: ['@commitlint/config-conventional']
+
+  # Ruff - fast Python linter and formatter
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.11
+    hooks:
+      # Run formatter first
+      - id: ruff-format
+        args: [--check]
+        types_or: [python, pyi]
+      # Then run linter
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+        types_or: [python, pyi]
+
+  # MyPy - static type checking
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.19.1
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - types-toml
+          - pydantic
+          - fastapi
+          - structlog
+          - httpx
+          - PyGithub
+          - prometheus-client
+        args: [--config-file=pyproject.toml]
+        pass_filenames: false
+        files: ^stampbot/
+
+  # Renovate config validation
+  - repo: https://github.com/renovatebot/pre-commit-hooks
+    rev: 42.81.4
+    hooks:
+      - id: renovate-config-validator
+
+  # Helm chart linting (if helm is installed)
+  - repo: https://github.com/gruntwork-io/pre-commit
+    rev: v0.1.23
+    hooks:
+      - id: helmlint
+        files: ^charts/
+
+  # Helm template validation with kubeconform
+  - repo: local
+    hooks:
+      - id: helm-kubeconform
+        name: Validate Helm templates with kubeconform
+        entry: bash -c 'helm template test charts/stampbot --set github.appId=123456 --set github.privateKey=test --set github.webhookSecret=test | kubeconform -strict -ignore-missing-schemas -summary'
+        language: system
+        files: ^charts/
+        pass_filenames: false
+
+# Skip hooks on specific files
+ci:
+  skip: [helmlint, helm-kubeconform, commitlint]  # Skip helm hooks in CI (handled by workflows)
