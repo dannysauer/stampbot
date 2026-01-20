@@ -137,14 +137,14 @@ class TestLoadPrivateKey:
             assert result == pem_key
 
     def test_load_private_key_raises_on_file_error(self):
-        """Test that _load_private_key raises when file cannot be read."""
+        """Test that _load_private_key raises when file doesn't exist."""
         with patch("stampbot.github_client.settings") as mock_settings:
             mock_settings.private_key = "/nonexistent/path/to/key.pem"
 
             from stampbot.github_client import GitHubAppClient
 
             client = GitHubAppClient()
-            with pytest.raises(FileNotFoundError):
+            with pytest.raises(ValueError, match="Invalid private key path"):
                 client._load_private_key()
 
 

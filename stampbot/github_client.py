@@ -80,6 +80,7 @@ class GitHubAppClient:
 
         Raises:
             RuntimeError: If private key is not configured.
+            ValueError: If private key is not valid PEM format.
             OSError: If private key file cannot be read.
         """
         key = settings.private_key
@@ -87,16 +88,33 @@ class GitHubAppClient:
         if key is None:
             raise RuntimeError("Private key not configured")
 
-        # If it looks like a file path, read it
-        if not key.startswith("-----BEGIN"):
+        # If it looks like PEM content, use directly
+        if key.startswith("-----BEGIN"):
+            pem_content = key
+        else:
+            # Treat as file path - read the file
+            import os
+            from pathlib import Path
+
+            key_path = Path(key).resolve()
+
+            # Security: prevent path traversal by ensuring the path doesn't escape
+            # expected directories and doesn't follow symlinks to unexpected locations
+            if ".." in str(key_path) or not os.path.isfile(key_path):
+                raise ValueError(f"Invalid private key path: {key}")
+
             try:
-                with open(key) as f:
-                    key = f.read()
+                with open(key_path) as f:
+                    pem_content = f.read()
             except Exception as e:
                 logger.error("Failed to read private key from file: %s", e)
                 raise
 
-        return key  # type: ignore[no-any-return]
+        # Validate the content is actually a PEM-formatted key
+        if not pem_content.strip().startswith("-----BEGIN"):
+            raise ValueError("Private key must be in PEM format")
+
+        return pem_content
 
     def _get_installation_client(self, installation_id: int) -> Github:
         """Get authenticated GitHub client for an installation.

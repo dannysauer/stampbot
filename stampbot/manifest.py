@@ -6,12 +6,37 @@
 import json
 import urllib.parse
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
 from stampbot.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _validate_url(url: str, name: str) -> None:
+    """Validate that a URL is well-formed and uses HTTPS (or localhost).
+
+    Args:
+        url: URL to validate
+        name: Name of the URL parameter for error messages
+
+    Raises:
+        ValueError: If URL is invalid or doesn't use HTTPS
+    """
+    parsed = urlparse(url)
+
+    if not parsed.scheme or not parsed.netloc:
+        raise ValueError(f"Invalid {name}: must be a complete URL")
+
+    # Allow http only for localhost (development)
+    if parsed.scheme == "http":
+        if parsed.hostname not in ("localhost", "127.0.0.1", "::1"):
+            raise ValueError(f"Invalid {name}: must use HTTPS (HTTP only allowed for localhost)")
+    elif parsed.scheme != "https":
+        raise ValueError(f"Invalid {name}: must use HTTPS")
+
 
 # GitHub App Manifest URLs
 GITHUB_MANIFEST_URL = "https://github.com/settings/apps/new"
@@ -49,7 +74,14 @@ def create_manifest(
 
     Returns:
         GitHub App manifest dictionary
+
+    Raises:
+        ValueError: If URLs are invalid or don't use HTTPS
     """
+    # Validate URLs to prevent SSRF and other attacks
+    _validate_url(webhook_url, "webhook_url")
+    _validate_url(redirect_url, "redirect_url")
+
     # Extract base URL from webhook URL
     base_url = webhook_url.rsplit("/webhook", 1)[0]
 
@@ -104,7 +136,12 @@ async def exchange_code_for_credentials(code: str) -> dict[str, Any]:
 
     Raises:
         httpx.HTTPStatusError: If API call fails
+        ValueError: If code contains invalid characters
     """
+    # Validate code to prevent SSRF - GitHub codes are alphanumeric
+    if not code or not code.isalnum():
+        raise ValueError("Invalid manifest code format")
+
     url = GITHUB_MANIFEST_CONVERSION_URL.format(code=code)
 
     logger.info("Exchanging manifest code for credentials")

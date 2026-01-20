@@ -14,6 +14,48 @@ from stampbot.manifest import (
 )
 
 
+class TestUrlValidation:
+    """Tests for URL validation in manifest creation."""
+
+    def test_rejects_http_non_localhost(self):
+        """Test that HTTP URLs for non-localhost are rejected."""
+        import pytest
+
+        with pytest.raises(ValueError, match="must use HTTPS"):
+            create_manifest(
+                webhook_url="http://example.com/webhook",
+                redirect_url="https://example.com/setup/callback",
+            )
+
+    def test_allows_http_localhost(self):
+        """Test that HTTP URLs for localhost are allowed."""
+        manifest = create_manifest(
+            webhook_url="http://localhost:8000/webhook",
+            redirect_url="http://localhost:8000/setup/callback",
+        )
+        assert manifest["hook_attributes"]["url"] == "http://localhost:8000/webhook"
+
+    def test_rejects_invalid_url(self):
+        """Test that invalid URLs are rejected."""
+        import pytest
+
+        with pytest.raises(ValueError, match="must be a complete URL"):
+            create_manifest(
+                webhook_url="not-a-url",
+                redirect_url="https://example.com/setup/callback",
+            )
+
+    def test_rejects_non_https_scheme(self):
+        """Test that non-HTTPS schemes are rejected."""
+        import pytest
+
+        with pytest.raises(ValueError, match="must use HTTPS"):
+            create_manifest(
+                webhook_url="ftp://example.com/webhook",
+                redirect_url="https://example.com/setup/callback",
+            )
+
+
 class TestCreateManifest:
     """Tests for manifest creation."""
 
@@ -153,14 +195,14 @@ class TestExchangeCode:
 
         # Create a proper mock response with request attached
         mock_request = httpx.Request(
-            "POST", "https://api.github.com/app-manifests/test/conversions"
+            "POST", "https://api.github.com/app-manifests/testcode123/conversions"
         )
         mock_response = httpx.Response(200, json=mock_response_data, request=mock_request)
 
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
             mock_post.return_value = mock_response
 
-            result = await exchange_code_for_credentials("test-code")
+            result = await exchange_code_for_credentials("testcode123")
 
             assert result["id"] == 12345
             assert "pem" in result
@@ -173,7 +215,7 @@ class TestExchangeCode:
         import httpx
 
         mock_request = httpx.Request(
-            "POST", "https://api.github.com/app-manifests/test/conversions"
+            "POST", "https://api.github.com/app-manifests/mytestcode/conversions"
         )
         mock_response = httpx.Response(
             200, json={"id": 1, "pem": "", "webhook_secret": ""}, request=mock_request
@@ -182,9 +224,46 @@ class TestExchangeCode:
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
             mock_post.return_value = mock_response
 
-            await exchange_code_for_credentials("my-test-code")
+            await exchange_code_for_credentials("mytestcode")
 
             mock_post.assert_called_once()
             call_args = mock_post.call_args
-            assert "my-test-code" in call_args[0][0]
+            assert "mytestcode" in call_args[0][0]
             assert "app-manifests" in call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_exchange_code_rejects_empty_code(self):
+        """Test that empty code raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid manifest code format"):
+            await exchange_code_for_credentials("")
+
+    @pytest.mark.asyncio
+    async def test_exchange_code_rejects_invalid_characters(self):
+        """Test that code with special characters raises ValueError to prevent SSRF."""
+        with pytest.raises(ValueError, match="Invalid manifest code format"):
+            await exchange_code_for_credentials("../../../etc/passwd")
+
+        with pytest.raises(ValueError, match="Invalid manifest code format"):
+            await exchange_code_for_credentials("code?param=value")
+
+        with pytest.raises(ValueError, match="Invalid manifest code format"):
+            await exchange_code_for_credentials("code/path")
+
+    @pytest.mark.asyncio
+    async def test_exchange_code_accepts_valid_alphanumeric(self):
+        """Test that valid alphanumeric codes are accepted."""
+        import httpx
+
+        mock_request = httpx.Request(
+            "POST", "https://api.github.com/app-manifests/abc123/conversions"
+        )
+        mock_response = httpx.Response(
+            200, json={"id": 1, "pem": "", "webhook_secret": ""}, request=mock_request
+        )
+
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+
+            # Valid alphanumeric codes should work
+            await exchange_code_for_credentials("abc123XYZ")
+            mock_post.assert_called_once()

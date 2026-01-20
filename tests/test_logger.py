@@ -100,9 +100,7 @@ def test_configure_logging_with_otel_enabled():
         configure_logging()
 
         # Verify LoggingInstrumentor was called
-        mock_instrumentor.return_value.instrument.assert_called_once_with(
-            set_logging_format=True
-        )
+        mock_instrumentor.return_value.instrument.assert_called_once_with(set_logging_format=True)
 
 
 def test_configure_logging_without_otel():

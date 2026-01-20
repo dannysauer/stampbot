@@ -28,6 +28,9 @@ from stampbot.telemetry import add_span_attributes, create_span, set_span_error,
 
 logger = get_logger(__name__)
 
+# Security: Maximum length for user-controlled strings to prevent DoS
+MAX_COMMENT_LENGTH = 65536  # 64KB - generous but prevents abuse
+
 
 class WebhookHandler:
     """Handle GitHub webhook events."""
@@ -322,7 +325,13 @@ class WebhookHandler:
             Response dictionary
         """
         comment = payload.get("comment", {})
-        comment_body = comment.get("body", "").lower().strip()
+        comment_body = comment.get("body", "")
+
+        # Security: limit comment length to prevent DoS
+        if len(comment_body) > MAX_COMMENT_LENGTH:
+            return {"status": "ignored", "message": "Comment too long"}
+
+        comment_body = comment_body.lower().strip()
 
         # Check if bot is mentioned
         if "@stampbot" not in comment_body:

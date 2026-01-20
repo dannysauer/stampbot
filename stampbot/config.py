@@ -3,6 +3,8 @@
 
 """Configuration management using dynaconf."""
 
+from __future__ import annotations
+
 from typing import Any
 
 from dynaconf import Dynaconf  # type: ignore[import-untyped]

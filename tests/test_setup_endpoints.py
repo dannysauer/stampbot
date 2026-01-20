@@ -64,7 +64,8 @@ class TestSetupEndpointsUnconfigured:
             patch("stampbot.main.settings") as mock_settings,
         ):
             mock_settings.setup_enabled = True
-            mock_settings.base_url = None
+            # Use HTTPS base_url for URL validation
+            mock_settings.base_url = "https://stampbot.example.com"
 
             from fastapi.testclient import TestClient
 

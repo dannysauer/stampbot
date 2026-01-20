@@ -242,7 +242,7 @@ jobs:
           version: 'latest'
 
       - name: Install helm-unittest plugin
-        run: helm plugin install https://github.com/helm-unittest/helm-unittest.git
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest.git --verify=false
 
       - name: Run unit tests
         run: helm unittest charts/stampbot
@@ -290,6 +290,11 @@ jobs:
         uses: helm/kind-action@v1
         with:
           cluster_name: stampbot-${{ matrix.test-case }}
+
+      - name: Build and load image into kind
+        run: |
+          docker build -t stampbot:ci-test .
+          kind load docker-image stampbot:ci-test --name stampbot-${{ matrix.test-case }}
 
       - name: Create test namespace
         run: kubectl create namespace stampbot-test

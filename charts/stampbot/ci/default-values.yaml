@@ -11,6 +11,12 @@
 
 replicaCount: 1
 
+# Use locally built image in kind cluster
+image:
+  repository: stampbot
+  tag: ci-test
+  pullPolicy: Never
+
 autoscaling:
   enabled: false
 

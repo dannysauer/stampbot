@@ -139,9 +139,7 @@ async def test_pr_unlabeled_autoapprove(webhook_handler, mock_github_client):
 
 
 @pytest.mark.asyncio
-async def test_pr_unlabeled_ignored_when_auto_approve_disabled(
-    webhook_handler, mock_github_client
-):
+async def test_pr_unlabeled_ignored_when_auto_approve_disabled(webhook_handler, mock_github_client):
     """Test label removal is ignored when auto_approve_on_label is disabled."""
     payload = load_fixture("pr_unlabeled_autoapprove")
     mock_github_client.get_repo_file.return_value = "auto_approve_on_label = false"
@@ -229,6 +227,20 @@ async def test_issue_comment_no_bot_mention(webhook_handler, mock_github_client)
 
     assert result["status"] == "ignored"
     assert "not mentioned" in result["message"].lower()
+    mock_github_client.approve_pr.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_issue_comment_too_long_rejected(webhook_handler, mock_github_client):
+    """Test that comments exceeding max length are rejected to prevent DoS."""
+    payload = load_fixture("issue_comment_approve")
+    # Create an excessively long comment (> 64KB)
+    payload["comment"]["body"] = "@stampbot approve " + "x" * 100000
+
+    result = await webhook_handler.handle_event("issue_comment", payload)
+
+    assert result["status"] == "ignored"
+    assert "too long" in result["message"].lower()
     mock_github_client.approve_pr.assert_not_called()
 
 
@@ -378,9 +390,7 @@ async def test_org_github_repo_config_fallback(webhook_handler, mock_github_clie
 
 
 @pytest.mark.asyncio
-async def test_org_github_repo_config_missing_uses_defaults(
-    webhook_handler, mock_github_client
-):
+async def test_org_github_repo_config_missing_uses_defaults(webhook_handler, mock_github_client):
     """Test org .github missing falls back to default config."""
     payload = load_fixture("pr_opened_with_autoapprove_label")
     payload["repository"]["full_name"] = "acme/widgets"
@@ -437,9 +447,7 @@ async def test_invalid_repo_config_posts_review(webhook_handler, mock_github_cli
 
 
 @pytest.mark.asyncio
-async def test_invalid_repo_config_no_review_on_non_opened(
-    webhook_handler, mock_github_client
-):
+async def test_invalid_repo_config_no_review_on_non_opened(webhook_handler, mock_github_client):
     """Test invalid config skips review comment for non-opened events."""
     payload = load_fixture("pr_opened_with_autoapprove_label")
     payload["action"] = "labeled"

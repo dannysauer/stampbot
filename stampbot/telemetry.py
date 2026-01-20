@@ -20,9 +20,6 @@ from stampbot.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Module-level tracer instance
-_tracer: trace.Tracer | None = None
-
 
 def configure_telemetry() -> TracerProvider | None:
     """Configure OpenTelemetry if enabled.
@@ -30,8 +27,6 @@ def configure_telemetry() -> TracerProvider | None:
     Returns:
         TracerProvider if telemetry is enabled, None otherwise
     """
-    global _tracer
-
     if not settings.otel_enabled:
         logger.info("OpenTelemetry disabled")
         return None
@@ -63,9 +58,6 @@ def configure_telemetry() -> TracerProvider | None:
 
         # Set as global tracer provider
         trace.set_tracer_provider(provider)
-
-        # Initialize module tracer
-        _tracer = trace.get_tracer(__name__)
 
         logger.info(
             "OpenTelemetry configured with endpoint: %s",
