@@ -83,7 +83,7 @@ class GitHubAppClient:
             ValueError: If private key is not valid PEM format.
             OSError: If private key file cannot be read.
         """
-        key = settings.private_key
+        key: str | None = settings.private_key
 
         if key is None:
             raise RuntimeError("Private key not configured")

@@ -35,7 +35,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code
 COPY --chown=stampbot:stampbot stampbot/ ./stampbot/
-COPY --chown=stampbot:stampbot pyproject.toml .
+COPY --chown=stampbot:stampbot pyproject.toml settings.toml ./
 
 # Switch to non-root user
 USER stampbot

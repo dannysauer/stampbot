@@ -88,4 +88,4 @@ repos:
 
 # Skip hooks on specific files
 ci:
-  skip: [helmlint, helm-kubeconform, commitlint]  # Skip helm hooks in CI (handled by workflows)
+  skip: [helmlint, helm-kubeconform, commitlint, renovate-config-validator]  # Skip in CI (handled by workflows or too large)
