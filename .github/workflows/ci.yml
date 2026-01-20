@@ -301,10 +301,8 @@ jobs:
 
       - name: Create test secret
         run: |
-          kubectl create secret generic stampbot-github \
-            --namespace stampbot-test \
-            --from-literal=STAMPBOT_APP_ID=123456 \
-            --from-literal=STAMPBOT_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
+          # Fake test key for CI (not a real key)
+          TEST_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
           MIIEpQIBAAKCAQEA0Z3VS5JJcds3xfn/ygWyF8PbnGy0AHB7MxszR3xyEhXxAbdM
           zQPf3+eBe5KMBbOuXKHqfTl3lAwn4nMiPbQGSoNRS9pp0YQWfSSSKFBPSldF3VB5
           k5mUMOiSCXR3JqvXcEpeltwMXJdPOYWh4pmhLMnPJNWGiGJ1SsLVRm8aQsLNwBkS
@@ -314,7 +312,11 @@ jobs:
           rC1zT3HPFnjb0jLYhJl3ozdNsbq2cL9IpoReM27v0VEMC0DKKO4l7xOz2KqYVMaY
           nk4ob9GNdGr2mSYNKY9/+3wvEObLLY2E8E9PBgGOaOkimL7h5z9B7k+RX0aHzlOC
           TEST_KEY_NOT_REAL_PLACEHOLDER_FOR_CI_TESTING_PURPOSES_ONLY
-          -----END RSA PRIVATE KEY-----" \
+          -----END RSA PRIVATE KEY-----"  # pragma: allowlist secret
+          kubectl create secret generic stampbot-github \
+            --namespace stampbot-test \
+            --from-literal=STAMPBOT_APP_ID=123456 \
+            --from-literal=STAMPBOT_PRIVATE_KEY="$TEST_PRIVATE_KEY" \
             --from-literal=STAMPBOT_WEBHOOK_SECRET=test-webhook-secret
 
       - name: Install chart

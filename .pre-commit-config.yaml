@@ -18,8 +18,7 @@ repos:
       - id: check-added-large-files
         args: ['--maxkb=1000']
       - id: check-merge-conflict
-      - id: detect-private-key
-        exclude: ^(tests/|INSTALLATION\.md)  # Exclude test mocks and docs
+      - id: check-shebang-scripts-are-executable
       - id: check-ast
       - id: check-case-conflict
       - id: no-commit-to-branch
@@ -32,6 +31,13 @@ repos:
       - id: commitlint
         stages: [commit-msg]
         additional_dependencies: ['@commitlint/config-conventional']
+
+  # Secret detection (supports pragma: allowlist secret for false positives)
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
 
   # Ruff - fast Python linter and formatter
   - repo: https://github.com/astral-sh/ruff-pre-commit
@@ -46,22 +52,17 @@ repos:
         args: [--fix, --exit-non-zero-on-fix]
         types_or: [python, pyi]
 
-  # MyPy - static type checking
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.19.1
+  # MyPy - static type checking (uses project venv; skipped in pre-commit.ci, runs in CI workflow)
+  - repo: local
     hooks:
       - id: mypy
-        additional_dependencies:
-          - types-toml
-          - pydantic
-          - fastapi
-          - structlog
-          - httpx
-          - PyGithub
-          - prometheus-client
-        args: [--config-file=pyproject.toml]
+        name: mypy
+        entry: .venv/bin/mypy
+        args: [--config-file=pyproject.toml, stampbot/]
+        language: system
         pass_filenames: false
         files: ^stampbot/
+        types: [python]
 
   # Renovate config validation
   - repo: https://github.com/renovatebot/pre-commit-hooks
@@ -88,4 +89,4 @@ repos:
 
 # Skip hooks on specific files
 ci:
-  skip: [helmlint, helm-kubeconform, commitlint, renovate-config-validator]  # Skip in CI (handled by workflows or too large)
+  skip: [helmlint, helm-kubeconform, commitlint, renovate-config-validator, mypy]  # Skip in CI (handled by workflows or too large)

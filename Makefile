@@ -1,4 +1,4 @@
-.PHONY: help venv install install-dev test lint format clean build docker-build docker-push helm-lint helm-template helm-validate helm-unittest helm-test helm-package run dev pre-commit pre-commit-install act-lint act-test act-helm act-ci
+.PHONY: help venv install install-dev test lint format clean build docker-build docker-push helm-lint helm-template helm-validate helm-unittest helm-test helm-package run dev pre-commit pre-commit-install secrets-baseline act-lint act-test act-helm act-ci
 
 # Variables
 IMAGE_NAME ?= stampbot
@@ -149,6 +149,20 @@ pre-commit: venv ## Run pre-commit checks on all files
 pre-commit-install: venv ## Install pre-commit hooks
 	$(PIP) install pre-commit
 	$(VENV)/bin/pre-commit install
+
+# Secret detection
+secrets-baseline: venv ## Update .secrets.baseline file for false positive management
+	$(PIP) install -q detect-secrets==1.5.0
+	@if [ -f .secrets.baseline ]; then \
+		$(VENV)/bin/detect-secrets scan --baseline .secrets.baseline; \
+	else \
+		$(VENV)/bin/detect-secrets scan > .secrets.baseline; \
+	fi
+	@echo ""
+	@echo "Baseline changes:"
+	@git diff .secrets.baseline || true
+	@echo ""
+	@echo "Review false positives with: $(VENV)/bin/detect-secrets audit .secrets.baseline"
 
 # GitHub Actions local testing with act (requires: docker, act)
 # Install act: brew install act (macOS) or see https://github.com/nektos/act

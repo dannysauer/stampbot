@@ -211,6 +211,23 @@ make lint
 make format
 ```
 
+### Secret Detection
+
+We use [detect-secrets](https://github.com/Yelp/detect-secrets) to prevent accidental secret commits. False positives are tracked in `.secrets.baseline`.
+
+To update the baseline when adding intentional test secrets:
+
+```bash
+make secrets-baseline
+git add .secrets.baseline
+```
+
+To audit the baseline and mark false positives:
+
+```bash
+.venv/bin/detect-secrets audit .secrets.baseline
+```
+
 ## Architecture
 
 Stampbot is built with:
