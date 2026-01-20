@@ -1,0 +1,10 @@
+# Trivy ignore file for unfixable vulnerabilities
+# See: https://aquasecurity.github.io/trivy/latest/docs/configuration/filtering/#by-vulnerability-ids
+
+# glibc integer overflow in memalign - no fix available in Debian base image yet
+# https://avd.aquasec.com/nvd/cve-2026-0861
+CVE-2026-0861
+
+# jaraco.context path traversal - transitive dependency, no direct control
+# https://github.com/advisories/GHSA-58pv-8j8x-9vj2
+GHSA-58pv-8j8x-9vj2
