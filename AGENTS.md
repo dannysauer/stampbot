@@ -234,6 +234,42 @@ replicaCount: 2
 3. Update Dockerfile if needed
 4. Test build: `make docker-build`
 
+### Version Pinning Conventions
+
+All dependencies must be pinned to exact versions for reproducibility and security. Renovate manages updates automatically.
+
+**GitHub Actions:** Pin to full SHA with version comment (Renovate-compatible format):
+```yaml
+- uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+```
+- Always use the 40-character commit SHA, never just a tag
+- Add a `# vX.Y.Z` comment with the full semantic version for readability
+- Renovate will update both the SHA and the version comment automatically
+
+**Docker images:** Pin to digest with tag comment:
+```dockerfile
+FROM python:3.11-slim@sha256:5be45dbade29bebd6886af6b438fd7e0b4eb7b611f39ba62b430263f82de36d2
+```
+- Use `image:tag@sha256:digest` format
+- Renovate will update digests automatically
+
+**Python packages:** Pin to exact versions:
+```
+fastapi==0.128.0
+```
+
+**Pre-commit hooks:** Pin to version tags (Renovate manages these):
+```yaml
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v6.0.0
+```
+
+**Secret Detection Baseline:** When adding intentional test secrets (e.g., fake keys for CI):
+```bash
+make secrets-baseline  # Update .secrets.baseline
+git add .secrets.baseline
+```
+
 ## Important Files to Review
 
 When making changes, consider the impact on:

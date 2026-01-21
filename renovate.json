@@ -4,7 +4,9 @@
     "config:recommended",
     ":semanticCommits",
     ":semanticCommitTypeAll(chore)",
-    "group:allNonMajor"
+    "group:allNonMajor",
+    "helpers:pinGitHubActionDigestsToSemver",
+    "docker:pinDigests"
   ],
   "labels": ["dependencies"],
   "rangeStrategy": "pin",
