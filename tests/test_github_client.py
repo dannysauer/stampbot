@@ -147,6 +147,37 @@ class TestLoadPrivateKey:
             with pytest.raises(ValueError, match="Invalid private key path"):
                 client._load_private_key()
 
+    def test_load_private_key_raises_on_read_error(self, tmp_path):
+        """Test that _load_private_key raises when file read fails."""
+        key_file = tmp_path / "private-key.pem"
+        key_file.write_text("dummy")
+
+        with patch("stampbot.github_client.settings") as mock_settings:
+            mock_settings.private_key = str(key_file)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+
+            # Mock open to raise an exception after the file existence check passes
+            with patch("builtins.open", side_effect=PermissionError("Access denied")):
+                with pytest.raises(PermissionError, match="Access denied"):
+                    client._load_private_key()
+
+    def test_load_private_key_raises_on_invalid_pem_format(self, tmp_path):
+        """Test that _load_private_key raises when file content is not PEM format."""
+        key_file = tmp_path / "private-key.pem"
+        key_file.write_text("this is not a valid PEM key")
+
+        with patch("stampbot.github_client.settings") as mock_settings:
+            mock_settings.private_key = str(key_file)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+            with pytest.raises(ValueError, match="Private key must be in PEM format"):
+                client._load_private_key()
+
 
 class TestGetInstallationClient:
     """Tests for _get_installation_client method."""
