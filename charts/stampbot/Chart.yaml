@@ -1,0 +1,21 @@
+# Copyright 2026 Danny Sauer
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: v2
+name: stampbot
+description: GitHub PR Auto-Approval App - automatically approve PRs via labels or chatops
+type: application
+version: 0.0.0-placeholder
+appVersion: 0.0.0-placeholder
+keywords:
+  - github
+  - automation
+  - pr-automation
+  - chatops
+  - approval
+home: https://github.com/dannysauer/stampbot
+sources:
+  - https://github.com/dannysauer/stampbot
+maintainers:
+  - name: Danny Sauer
+    url: https://github.com/dannysauer

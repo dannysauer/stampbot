@@ -1,0 +1,54 @@
+name: Sync Google Python Style Guide
+
+on:
+  schedule:
+    # Run on the 1st of each month at 00:00 UTC
+    - cron: '0 0 1 * *'
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync-style-guide:
+    name: Sync Style Guide
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Fetch latest style guide
+        run: |
+          curl -sSL "https://raw.githubusercontent.com/google/styleguide/gh-pages/pyguide.md" \
+            -o docs/external/google-python-style-guide.md
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet docs/external/google-python-style-guide.md; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No changes detected in Google Python Style Guide"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Changes detected in Google Python Style Guide"
+          fi
+
+      - name: Create Pull Request
+        if: steps.changes.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8.1.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "docs: update Google Python Style Guide"
+          title: "docs: update Google Python Style Guide"
+          body: |
+            This PR updates the vendored Google Python Style Guide to the latest version.
+
+            Source: https://github.com/google/styleguide/blob/gh-pages/pyguide.md
+
+            This is an automated monthly sync. Please review the changes to ensure
+            they don't conflict with our local overrides (e.g., 100-char line length).
+          branch: chore/sync-style-guide
+          delete-branch: true
+          labels: |
+            documentation
+            automated

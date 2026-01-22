@@ -1,0 +1,2 @@
+# Python version is in .python-version (asdf users: set legacy_version_file = yes in ~/.asdfrc)
+helm 3.16.4

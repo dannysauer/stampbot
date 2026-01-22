@@ -1,0 +1,22 @@
+{
+  "action": "opened",
+  "number": 1,
+  "pull_request": {
+    "number": 1,
+    "title": "Test PR",
+    "head": {
+      "ref": "feature-branch",
+      "sha": "abc123"
+    },
+    "base": {
+      "ref": "main"
+    }
+  },
+  "repository": {
+    "name": "stampbot",
+    "full_name": "local/stampbot",
+    "owner": {
+      "login": "local"
+    }
+  }
+}

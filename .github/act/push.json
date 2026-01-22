@@ -1,0 +1,17 @@
+{
+  "ref": "refs/heads/main",
+  "repository": {
+    "name": "stampbot",
+    "full_name": "local/stampbot",
+    "owner": {
+      "login": "local"
+    }
+  },
+  "head_commit": {
+    "id": "abc123",
+    "message": "Test commit"
+  },
+  "pusher": {
+    "name": "local-user"
+  }
+}

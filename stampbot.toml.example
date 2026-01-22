@@ -1,0 +1,21 @@
+# Stampbot Repository Configuration Example
+# Place this file in the root of your repository as "stampbot.toml"
+
+# Labels that trigger auto-approval when added to a PR
+approval_labels = ["autoapprove", "stamp", "ready-to-merge"]
+
+# Auto-approve when label is added (default: true)
+auto_approve_on_label = true
+
+# Enable chatops commands (default: true)
+chatops_enabled = true
+
+# Minimum repo permission required for chatops (default: "maintain")
+# Valid values: "none", "read", "triage", "write", "maintain", "admin"
+chatops_required_permission = "maintain"
+
+# Commands that trigger approval (use with @stampbot)
+approve_commands = ["approve", "stamp"]
+
+# Commands that dismiss approvals (use with @stampbot)
+unapprove_commands = ["unapprove", "unstamp"]

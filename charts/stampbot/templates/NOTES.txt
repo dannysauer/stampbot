@@ -1,0 +1,49 @@
+Stampbot has been deployed!
+
+{{- if .Values.ingress.enabled }}
+Access Stampbot at:
+{{- range $host := .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}
+{{- end }}
+{{- else }}
+Get the application URL by running these commands:
+{{- if contains "NodePort" .Values.service.type }}
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "stampbot.fullname" . }})
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo http://$NODE_IP:$NODE_PORT
+{{- else if contains "LoadBalancer" .Values.service.type }}
+  NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+        Watch status with: kubectl get --namespace {{ .Release.Namespace }} svc -w {{ include "stampbot.fullname" . }}
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "stampbot.fullname" . }} --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+  echo http://$SERVICE_IP:{{ .Values.service.port }}
+{{- else if contains "ClusterIP" .Values.service.type }}
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "stampbot.fullname" . }} 8080:{{ .Values.service.port }}
+  echo "Visit http://127.0.0.1:8080 to use Stampbot"
+{{- end }}
+{{- end }}
+
+Configuration:
+{{- if .Values.github.existingSecret }}
+  Using existing secret: {{ .Values.github.existingSecret }}
+{{- else if .Values.externalSecrets.enabled }}
+  Using External Secrets from: {{ .Values.externalSecrets.secretStore.name }}
+{{- else }}
+  Using inline secret values (consider using existingSecret or externalSecrets for production)
+{{- end }}
+
+{{- if .Values.setup.enabled }}
+
+WARNING: Setup mode is enabled. The /setup endpoint is accessible.
+         Disable setup.enabled after initial configuration for production use.
+{{- end }}
+
+GitHub Webhook URL:
+{{- if .Values.ingress.enabled }}
+{{- range $host := .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}/webhook
+{{- end }}
+{{- else }}
+  Configure your ingress or use port-forwarding, then set webhook to: <your-url>/webhook
+{{- end }}
+
+For more information, visit: https://github.com/dannysauer/stampbot

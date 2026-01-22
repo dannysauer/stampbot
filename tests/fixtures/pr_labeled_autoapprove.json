@@ -1,0 +1,82 @@
+{
+  "action": "labeled",
+  "number": 42,
+  "label": {
+    "id": 111111,
+    "node_id": "LA_test1",
+    "url": "https://api.github.com/repos/octocat/hello-world/labels/autoapprove",
+    "name": "autoapprove",
+    "description": "Auto-approve this PR",
+    "color": "0e8a16",
+    "default": false
+  },
+  "pull_request": {
+    "url": "https://api.github.com/repos/octocat/hello-world/pulls/42",
+    "id": 123456789,
+    "node_id": "PR_kwDOBtest",
+    "html_url": "https://github.com/octocat/hello-world/pull/42",
+    "number": 42,
+    "state": "open",
+    "locked": false,
+    "title": "Add new feature",
+    "user": {
+      "login": "contributor",
+      "id": 987654,
+      "type": "User"
+    },
+    "body": "This PR adds a new feature.",
+    "created_at": "2025-01-10T10:00:00Z",
+    "updated_at": "2025-01-10T12:00:00Z",
+    "closed_at": null,
+    "merged_at": null,
+    "labels": [
+      {
+        "id": 111111,
+        "node_id": "LA_test1",
+        "url": "https://api.github.com/repos/octocat/hello-world/labels/autoapprove",
+        "name": "autoapprove",
+        "description": "Auto-approve this PR",
+        "color": "0e8a16",
+        "default": false
+      }
+    ],
+    "draft": false,
+    "head": {
+      "label": "contributor:feature-branch",
+      "ref": "feature-branch",
+      "sha": "abc123def456"
+    },
+    "base": {
+      "label": "octocat:main",
+      "ref": "main",
+      "sha": "def456abc789"
+    },
+    "merged": false,
+    "mergeable": true,
+    "mergeable_state": "clean"
+  },
+  "repository": {
+    "id": 12345678,
+    "node_id": "R_kgtest",
+    "name": "hello-world",
+    "full_name": "octocat/hello-world",
+    "private": false,
+    "owner": {
+      "login": "octocat",
+      "id": 123456,
+      "type": "User"
+    },
+    "html_url": "https://github.com/octocat/hello-world",
+    "default_branch": "main"
+  },
+  "sender": {
+    "login": "maintainer",
+    "id": 111222,
+    "type": "User",
+    "site_admin": false
+  },
+  "installation": {
+    "id": 12345,
+    "node_id": "MDIzOkludGVncmF0aW9uSW5zdGFsbGF0aW9uMTIzNDU="
+  }
+}

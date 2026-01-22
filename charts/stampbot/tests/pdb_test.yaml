@@ -1,0 +1,41 @@
+# Copyright 2026 Danny Sauer
+# SPDX-License-Identifier: Apache-2.0
+
+suite: PodDisruptionBudget tests
+templates:
+  - pdb.yaml
+values:
+  - ../values.yaml
+tests:
+  - it: should render PDB with default values (enabled by default)
+    asserts:
+      - isKind:
+          of: PodDisruptionBudget
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-stampbot
+
+  - it: should not render PDB when disabled
+    set:
+      podDisruptionBudget.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should set minAvailable
+    set:
+      podDisruptionBudget.enabled: true
+      podDisruptionBudget.minAvailable: 2
+    asserts:
+      - equal:
+          path: spec.minAvailable
+          value: 2
+
+  - it: should have correct selector
+    asserts:
+      - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/name"]
+          value: stampbot
+      - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/instance"]
+          value: RELEASE-NAME

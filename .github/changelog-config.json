@@ -1,0 +1,62 @@
+{
+  "categories": [
+    {
+      "title": "## 🚀 Features",
+      "labels": ["feature", "enhancement", "feat"]
+    },
+    {
+      "title": "## 🐛 Fixes",
+      "labels": ["fix", "bugfix", "bug"]
+    },
+    {
+      "title": "## 📚 Documentation",
+      "labels": ["docs", "documentation"]
+    },
+    {
+      "title": "## 🧪 Tests",
+      "labels": ["test", "tests"]
+    },
+    {
+      "title": "## 🔧 Maintenance",
+      "labels": ["chore", "refactor", "style"]
+    },
+    {
+      "title": "## 🏗️ CI/CD",
+      "labels": ["ci", "cd", "build"]
+    }
+  ],
+  "ignore_labels": [
+    "ignore",
+    "dependencies"
+  ],
+  "sort": "ASC",
+  "template": "${{CHANGELOG}}\n\n**Full Changelog**: ${{RELEASE_DIFF}}",
+  "pr_template": "- ${{TITLE}} (#${{NUMBER}})",
+  "empty_template": "- No changes",
+  "label_extractor": [
+    {
+      "pattern": "^(feat|feature)(\\(.+\\))?:",
+      "target": "feature"
+    },
+    {
+      "pattern": "^(fix|bugfix)(\\(.+\\))?:",
+      "target": "fix"
+    },
+    {
+      "pattern": "^docs(\\(.+\\))?:",
+      "target": "docs"
+    },
+    {
+      "pattern": "^test(\\(.+\\))?:",
+      "target": "test"
+    },
+    {
+      "pattern": "^(chore|refactor|style)(\\(.+\\))?:",
+      "target": "chore"
+    },
+    {
+      "pattern": "^(ci|cd|build)(\\(.+\\))?:",
+      "target": "ci"
+    }
+  ]
+}

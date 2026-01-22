@@ -1,0 +1,121 @@
+[tool.poetry]
+name = "stampbot"
+version = "0.1.0"
+description = "A GitHub app that auto-approves PRs based on labels and chatops commands"
+authors = ["Your Name <your.email@example.com>"]
+readme = "README.md"
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.128.0"
+uvicorn = {extras = ["standard"], version = "^0.40.0"}
+pydantic = "^2.12.5"
+pydantic-settings = "^2.12.0"
+dynaconf = "^3.2.12"
+PyGithub = "^2.8.1"
+PyJWT = {extras = ["crypto"], version = "^2.10.1"}
+cryptography = "^46.0.3"
+prometheus-client = "^0.23.1"
+opentelemetry-api = "^1.39.1"
+opentelemetry-sdk = "^1.39.1"
+opentelemetry-instrumentation-fastapi = "^0.60b1"
+opentelemetry-instrumentation-logging = "^0.60b1"
+opentelemetry-exporter-otlp = "^1.39.1"
+structlog = "^25.5.0"
+httpx = "^0.28.1"
+toml = "^0.10.2"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^9.0.2"
+pytest-cov = "^7.0.0"
+pytest-asyncio = "^1.3.0"
+ruff = "^0.14.11"
+mypy = "^1.19.1"
+types-toml = "^0.10.8"
+pre-commit = "^4.0.1"
+
+[tool.poetry.group.secrets.dependencies]
+detect-secrets = "1.5.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "W",      # pycodestyle warnings
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "D",      # pydocstyle (Google style docstrings)
+    "S",      # flake8-bandit (security)
+    "TCH",    # flake8-type-checking
+    "RUF",    # Ruff-specific rules
+]
+ignore = [
+    "D100",   # Missing docstring in public module (too noisy for now)
+    "D104",   # Missing docstring in public package
+    "D107",   # Missing docstring in __init__ (Google style allows omitting)
+    "S101",   # Use of assert (needed for tests)
+    "S110",   # try-except-pass (sometimes intentional for optional operations)
+    "TC002",  # Move third-party import to type-checking block (not worth churn)
+    "TC003",  # Move stdlib import to type-checking block (not worth churn)
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D", "S101", "S104"]  # No docstrings in tests, allow assert, allow 0.0.0.0 in mocks
+
+[tool.ruff.format]
+# Use double quotes like Black
+quote-style = "double"
+# Indent with spaces like Black
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.14"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+module = ["dynaconf", "dynaconf.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "--cov=stampbot --cov-report=term-missing --cov-report=html --cov-report=xml"
+
+[tool.coverage.run]
+branch = true
+source = ["stampbot"]
+omit = ["stampbot/__main__.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+show_missing = true
+precision = 2

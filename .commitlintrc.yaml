@@ -1,0 +1,45 @@
+# Commitlint configuration for conventional commits
+# See: https://commitlint.js.org/
+
+extends:
+  - '@commitlint/config-conventional'
+
+rules:
+  # Allow these types (matching AGENTS.md conventions)
+  type-enum:
+    - 2
+    - always
+    - - feat      # New feature
+      - fix       # Bug fix
+      - docs      # Documentation
+      - test      # Tests
+      - refactor  # Code refactoring
+      - chore     # Maintenance
+      - ci        # CI/CD changes
+      - style     # Code style (formatting)
+      - perf      # Performance improvement
+      - build     # Build system changes
+      - revert    # Revert previous commit
+
+  # Enforce lowercase for type
+  type-case:
+    - 2
+    - always
+    - lower-case
+
+  # Subject should not be empty
+  subject-empty:
+    - 2
+    - never
+
+  # Subject should not end with period
+  subject-full-stop:
+    - 2
+    - never
+    - '.'
+
+  # Max header length (type + scope + subject)
+  header-max-length:
+    - 2
+    - always
+    - 100

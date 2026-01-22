@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "stampbot.fullname" . }}
+  labels:
+    {{- include "stampbot.labels" . | nindent 4 }}
+data:
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  OTEL_ENABLED: {{ .Values.config.otelEnabled | quote }}
+  {{- if .Values.config.otelEnabled }}
+  OTEL_ENDPOINT: {{ .Values.config.otelEndpoint | quote }}
+  OTEL_SERVICE_NAME: {{ .Values.config.otelServiceName | quote }}
+  {{- end }}
+  STAMPBOT_SETUP_ENABLED: {{ .Values.setup.enabled | quote }}
+  {{- if .Values.setup.baseUrl }}
+  STAMPBOT_BASE_URL: {{ .Values.setup.baseUrl | quote }}
+  {{- end }}

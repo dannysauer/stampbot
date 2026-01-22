@@ -1,0 +1,96 @@
+# Copyright 2026 Danny Sauer
+# SPDX-License-Identifier: Apache-2.0
+
+suite: VerticalPodAutoscaler tests
+templates:
+  - vpa.yaml
+values:
+  - ../values.yaml
+tests:
+  - it: should not render by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should render when VPA is enabled
+    set:
+      vpa.enabled: true
+    asserts:
+      - isKind:
+          of: VerticalPodAutoscaler
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-stampbot
+
+  - it: should reference correct deployment
+    set:
+      vpa.enabled: true
+    asserts:
+      - equal:
+          path: spec.targetRef.apiVersion
+          value: apps/v1
+      - equal:
+          path: spec.targetRef.kind
+          value: Deployment
+      - equal:
+          path: spec.targetRef.name
+          value: RELEASE-NAME-stampbot
+
+  - it: should set update mode
+    set:
+      vpa.enabled: true
+      vpa.updateMode: "Off"
+    asserts:
+      - equal:
+          path: spec.updatePolicy.updateMode
+          value: "Off"
+
+  - it: should use Auto update mode by default
+    set:
+      vpa.enabled: true
+    asserts:
+      - equal:
+          path: spec.updatePolicy.updateMode
+          value: "Auto"
+
+  - it: should set resource limits
+    set:
+      vpa.enabled: true
+      vpa.minAllowed:
+        cpu: 100m
+        memory: 128Mi
+      vpa.maxAllowed:
+        cpu: 2000m
+        memory: 2Gi
+    asserts:
+      - equal:
+          path: spec.resourcePolicy.containerPolicies[0].minAllowed.cpu
+          value: 100m
+      - equal:
+          path: spec.resourcePolicy.containerPolicies[0].minAllowed.memory
+          value: 128Mi
+      - equal:
+          path: spec.resourcePolicy.containerPolicies[0].maxAllowed.cpu
+          value: 2000m
+      - equal:
+          path: spec.resourcePolicy.containerPolicies[0].maxAllowed.memory
+          value: 2Gi
+
+  - it: should target correct container
+    set:
+      vpa.enabled: true
+    asserts:
+      - equal:
+          path: spec.resourcePolicy.containerPolicies[0].containerName
+          value: stampbot
+
+  - it: should have standard labels
+    set:
+      vpa.enabled: true
+    asserts:
+      - equal:
+          path: metadata.labels["app.kubernetes.io/name"]
+          value: stampbot
+      - equal:
+          path: metadata.labels["app.kubernetes.io/managed-by"]
+          value: Helm
