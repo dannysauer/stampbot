@@ -108,10 +108,14 @@ jobs:
     permissions:
       contents: write
       packages: write
+      id-token: write  # For keyless signing with cosign/Sigstore
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@3454372f43399081ed03b604cb2d021dabca52bb # v3.8.2
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
@@ -144,16 +148,41 @@ jobs:
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
           platforms: linux/amd64,linux/arm64
 
-      - name: Generate SBOM
+      - name: Generate SBOM and push to OCI registry
         uses: anchore/sbom-action@e11c554f704a0b820cbf8c51673f6945e0731532 # v0.20.0
         with:
           image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.determine-version.outputs.version }}
           artifact-name: sbom-${{ needs.determine-version.outputs.version }}.spdx.json
           output-file: sbom.spdx.json
           format: spdx-json
+          upload-artifact: true
+          upload-release-assets: false  # We handle this in the release step
+          dependency-snapshot: true  # Upload to GitHub Dependency Graph
 
-      - name: Copy VEX document
-        run: cp .openvex.json stampbot-${{ needs.determine-version.outputs.version }}.vex.json
+      - name: Attest SBOM to image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          VERSION: ${{ needs.determine-version.outputs.version }}
+        run: |
+          cosign attest --predicate sbom.spdx.json \
+            --type spdxjson \
+            --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}
+
+      - name: Attest VEX to image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          VERSION: ${{ needs.determine-version.outputs.version }}
+        run: |
+          cosign attest --predicate .openvex.json \
+            --type openvex \
+            --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}
+
+      - name: Copy VEX document for release
+        env:
+          VERSION: ${{ needs.determine-version.outputs.version }}
+        run: cp .openvex.json "stampbot-${VERSION}.vex.json"
 
       - name: Generate changelog
         id: changelog
