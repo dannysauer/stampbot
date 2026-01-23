@@ -31,18 +31,19 @@ jobs:
 
       - name: Determine version
         id: version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
           # If tag provided via workflow_dispatch, use it
-          if [ -n "${{ inputs.tag }}" ]; then
-            TAG="${{ inputs.tag }}"
+          if [ -n "$INPUT_TAG" ]; then
             # Verify tag exists
-            if ! git rev-parse "$TAG" >/dev/null 2>&1; then
-              echo "::error::Tag $TAG does not exist"
+            if ! git rev-parse "$INPUT_TAG" >/dev/null 2>&1; then
+              echo "::error::Tag $INPUT_TAG does not exist"
               exit 1
             fi
-            echo "version=${TAG#v}" >> $GITHUB_OUTPUT
+            echo "version=${INPUT_TAG#v}" >> $GITHUB_OUTPUT
             echo "should_release=true" >> $GITHUB_OUTPUT
-            echo "Using provided tag: $TAG"
+            echo "Using provided tag: $INPUT_TAG"
             exit 0
           fi
 
@@ -91,8 +92,9 @@ jobs:
 
       - name: Create and push tag
         if: steps.version.outputs.should_release == 'true' && inputs.tag == ''
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "v$VERSION" -m "Release v$VERSION"
@@ -106,8 +108,6 @@ jobs:
     permissions:
       contents: write
       packages: write
-    outputs:
-      version: ${{ needs.determine-version.outputs.version }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -130,7 +130,6 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=${{ needs.determine-version.outputs.version }}
-            type=raw,value=${{ needs.determine-version.outputs.version }},enable=${{ contains(needs.determine-version.outputs.version, '.') }}
             type=raw,value=latest
 
       - name: Build and push Docker image
