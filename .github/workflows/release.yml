@@ -2,22 +2,112 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*.*.*'
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g., v1.0.0). Leave empty to auto-calculate.'
+        required: false
+        type: string
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  determine-version:
+    name: Determine Version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      should_release: ${{ steps.version.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          # If tag provided via workflow_dispatch, use it
+          if [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+            # Verify tag exists
+            if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+              echo "::error::Tag $TAG does not exist"
+              exit 1
+            fi
+            echo "version=${TAG#v}" >> $GITHUB_OUTPUT
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "Using provided tag: $TAG"
+            exit 0
+          fi
+
+          # Auto-calculate version from commits
+          LATEST_TAG=$(git tag -l 'v*.*.*' --sort=-v:refname | head -n1)
+          if [ -z "$LATEST_TAG" ]; then
+            LATEST_TAG="v0.0.0"
+            COMMIT_RANGE="HEAD"
+          else
+            COMMIT_RANGE="$LATEST_TAG..HEAD"
+          fi
+
+          echo "Latest tag: $LATEST_TAG"
+          echo "Analyzing commits: $COMMIT_RANGE"
+
+          # Check for releasable commits (feat or fix)
+          if ! git log "$COMMIT_RANGE" --pretty=format:"%s" 2>/dev/null | grep -qE "^(feat|fix)(\(.+\))?(!)?:"; then
+            echo "No feat or fix commits since $LATEST_TAG - skipping release"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Determine bump type
+          BUMP_TYPE="patch"
+          if git log "$COMMIT_RANGE" --pretty=format:"%s%n%b" | grep -qE "(^[a-z]+(\(.+\))?!:|BREAKING CHANGE:)"; then
+            BUMP_TYPE="major"
+          elif git log "$COMMIT_RANGE" --pretty=format:"%s" | grep -qE "^feat(\(.+\))?:"; then
+            BUMP_TYPE="minor"
+          fi
+
+          echo "Bump type: $BUMP_TYPE"
+
+          # Calculate new version
+          VERSION="${LATEST_TAG#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+
+          case "$BUMP_TYPE" in
+            major) NEW_VERSION="$((MAJOR + 1)).0.0" ;;
+            minor) NEW_VERSION="$MAJOR.$((MINOR + 1)).0" ;;
+            patch) NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))" ;;
+          esac
+
+          echo "New version: v$NEW_VERSION"
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "should_release=true" >> $GITHUB_OUTPUT
+
+      - name: Create and push tag
+        if: steps.version.outputs.should_release == 'true' && inputs.tag == ''
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git push origin "v$VERSION"
+
   build-and-publish-image:
     name: Build and Publish Docker Image
+    needs: determine-version
+    if: needs.determine-version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
       packages: write
     outputs:
-      version: ${{ steps.version.outputs.VERSION }}
+      version: ${{ needs.determine-version.outputs.version }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -33,19 +123,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract version
-        id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=raw,value=${{ needs.determine-version.outputs.version }}
+            type=raw,value=${{ needs.determine-version.outputs.version }},enable=${{ contains(needs.determine-version.outputs.version, '.') }}
             type=raw,value=latest
 
       - name: Build and push Docker image
@@ -64,22 +149,25 @@ jobs:
         uses: mikepenz/release-changelog-builder-action@439f79b5b5428107c7688c1d2b0e8bacc9b8792c # v6.0.1
         with:
           configuration: ".github/changelog-config.json"
+          toTag: v${{ needs.determine-version.outputs.version }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
         with:
+          tag_name: v${{ needs.determine-version.outputs.version }}
           body: ${{ steps.changelog.outputs.changelog }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   release-chart:
     name: Release Helm Chart
-    needs: build-and-publish-image
+    needs: [determine-version, build-and-publish-image]
+    if: needs.determine-version.outputs.should_release == 'true'
     uses: ./.github/workflows/chart-release.yml
     with:
-      app_version: ${{ needs.build-and-publish-image.outputs.version }}
+      app_version: ${{ needs.determine-version.outputs.version }}
     permissions:
       contents: write
       packages: write
