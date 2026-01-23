@@ -1,0 +1,64 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
+  "author": "Danny Sauer <github@dannysauer.com>",
+  "timestamp": "2026-01-23T00:00:00Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-0994",
+        "name": "CVE-2026-0994",
+        "description": "protobuf JSON recursion depth bypass"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/stampbot",
+          "subcomponents": [
+            {
+              "@id": "pkg:pypi/protobuf"
+            }
+          ]
+        }
+      ],
+      "status": "under_investigation",
+      "justification": "No fix available upstream. Monitoring for patched protobuf release. This is a transitive dependency from OpenTelemetry.",
+      "action_statement": "Update protobuf when a patched version becomes available."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-0861",
+        "name": "CVE-2026-0861",
+        "description": "glibc integer overflow in memalign"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/stampbot"
+        }
+      ],
+      "status": "under_investigation",
+      "justification": "No fix available in Debian base image yet. Monitoring for patched glibc release.",
+      "action_statement": "Update base image when Debian releases a patched glibc."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://github.com/advisories/GHSA-58pv-8j8x-9vj2",
+        "name": "GHSA-58pv-8j8x-9vj2",
+        "description": "jaraco.context path traversal"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/stampbot",
+          "subcomponents": [
+            {
+              "@id": "pkg:pypi/jaraco.context"
+            }
+          ]
+        }
+      ],
+      "status": "under_investigation",
+      "justification": "Transitive dependency with no direct control. Monitoring for upstream fix.",
+      "action_statement": "Update when a patched version becomes available."
+    }
+  ]
+}
