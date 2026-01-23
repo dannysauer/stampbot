@@ -21,9 +21,9 @@
           ]
         }
       ],
-      "status": "under_investigation",
-      "justification": "No fix available upstream. Monitoring for patched protobuf release. This is a transitive dependency from OpenTelemetry.",
-      "action_statement": "Update protobuf when a patched version becomes available."
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "Protobuf is only used for outbound OTLP trace export to a trusted collector. No untrusted input is ever parsed by protobuf."
     },
     {
       "vulnerability": {
