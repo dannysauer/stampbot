@@ -13,7 +13,7 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot",
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer",
           "subcomponents": [
             {
               "@id": "pkg:pypi/protobuf"
@@ -33,7 +33,7 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot"
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer"
         }
       ],
       "status": "under_investigation",
@@ -48,7 +48,7 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot",
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer",
           "subcomponents": [
             {
               "@id": "pkg:pypi/jaraco.context"
