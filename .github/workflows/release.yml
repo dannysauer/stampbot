@@ -2,26 +2,120 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*.*.*'
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g., v1.0.0). Leave empty to auto-calculate.'
+        required: false
+        type: string
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-and-publish-image:
-    name: Build and Publish Docker Image
+  determine-version:
+    name: Determine Version
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      packages: write
     outputs:
-      version: ${{ steps.version.outputs.VERSION }}
+      version: ${{ steps.version.outputs.version }}
+      should_release: ${{ steps.version.outputs.should_release }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          # If tag provided via workflow_dispatch, use it
+          if [ -n "$INPUT_TAG" ]; then
+            # Verify tag exists
+            if ! git rev-parse "$INPUT_TAG" >/dev/null 2>&1; then
+              echo "::error::Tag $INPUT_TAG does not exist"
+              exit 1
+            fi
+            echo "version=${INPUT_TAG#v}" >> $GITHUB_OUTPUT
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "Using provided tag: $INPUT_TAG"
+            exit 0
+          fi
+
+          # Auto-calculate version from commits
+          LATEST_TAG=$(git tag -l 'v*.*.*' --sort=-v:refname | head -n1)
+          if [ -z "$LATEST_TAG" ]; then
+            LATEST_TAG="v0.0.0"
+            COMMIT_RANGE="HEAD"
+          else
+            COMMIT_RANGE="$LATEST_TAG..HEAD"
+          fi
+
+          echo "Latest tag: $LATEST_TAG"
+          echo "Analyzing commits: $COMMIT_RANGE"
+
+          # Check for releasable commits (feat or fix)
+          if ! git log "$COMMIT_RANGE" --pretty=format:"%s" 2>/dev/null | grep -qE "^(feat|fix)(\(.+\))?(!)?:"; then
+            echo "No feat or fix commits since $LATEST_TAG - skipping release"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Determine bump type
+          BUMP_TYPE="patch"
+          if git log "$COMMIT_RANGE" --pretty=format:"%s%n%b" | grep -qE "(^[a-z]+(\(.+\))?!:|BREAKING CHANGE:)"; then
+            BUMP_TYPE="major"
+          elif git log "$COMMIT_RANGE" --pretty=format:"%s" | grep -qE "^feat(\(.+\))?:"; then
+            BUMP_TYPE="minor"
+          fi
+
+          echo "Bump type: $BUMP_TYPE"
+
+          # Calculate new version
+          VERSION="${LATEST_TAG#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+
+          case "$BUMP_TYPE" in
+            major) NEW_VERSION="$((MAJOR + 1)).0.0" ;;
+            minor) NEW_VERSION="$MAJOR.$((MINOR + 1)).0" ;;
+            patch) NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))" ;;
+          esac
+
+          echo "New version: v$NEW_VERSION"
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "should_release=true" >> $GITHUB_OUTPUT
+
+      - name: Create and push tag
+        if: steps.version.outputs.should_release == 'true' && inputs.tag == ''
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git push origin "v$VERSION"
+
+  build-and-publish-image:
+    name: Build and Publish Docker Image
+    needs: determine-version
+    if: needs.determine-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write  # For keyless signing with cosign/Sigstore
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@3454372f43399081ed03b604cb2d021dabca52bb # v3.8.2
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
@@ -33,22 +127,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract version
-        id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=raw,value=${{ needs.determine-version.outputs.version }}
             type=raw,value=latest
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: .
@@ -59,27 +148,69 @@ jobs:
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
           platforms: linux/amd64,linux/arm64
 
+      - name: Generate SBOM and push to OCI registry
+        uses: anchore/sbom-action@e11c554f704a0b820cbf8c51673f6945e0731532 # v0.20.0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.determine-version.outputs.version }}
+          artifact-name: sbom-${{ needs.determine-version.outputs.version }}.spdx.json
+          output-file: sbom.spdx.json
+          format: spdx-json
+          upload-artifact: true
+          upload-release-assets: false  # We handle this in the release step
+          dependency-snapshot: true  # Upload to GitHub Dependency Graph
+
+      - name: Attest SBOM to image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          VERSION: ${{ needs.determine-version.outputs.version }}
+        run: |
+          cosign attest --predicate sbom.spdx.json \
+            --type spdxjson \
+            --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}
+
+      - name: Attest VEX to image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          VERSION: ${{ needs.determine-version.outputs.version }}
+        run: |
+          cosign attest --predicate .openvex.json \
+            --type openvex \
+            --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}
+
+      - name: Copy VEX document for release
+        env:
+          VERSION: ${{ needs.determine-version.outputs.version }}
+        run: cp .openvex.json "stampbot-${VERSION}.vex.json"
+
       - name: Generate changelog
         id: changelog
         uses: mikepenz/release-changelog-builder-action@439f79b5b5428107c7688c1d2b0e8bacc9b8792c # v6.0.1
         with:
           configuration: ".github/changelog-config.json"
+          toTag: v${{ needs.determine-version.outputs.version }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
         with:
+          tag_name: v${{ needs.determine-version.outputs.version }}
           body: ${{ steps.changelog.outputs.changelog }}
+          files: |
+            sbom.spdx.json
+            stampbot-${{ needs.determine-version.outputs.version }}.vex.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   release-chart:
     name: Release Helm Chart
-    needs: build-and-publish-image
+    needs: [determine-version, build-and-publish-image]
+    if: needs.determine-version.outputs.should_release == 'true'
     uses: ./.github/workflows/chart-release.yml
     with:
-      app_version: ${{ needs.build-and-publish-image.outputs.version }}
+      app_version: ${{ needs.determine-version.outputs.version }}
     permissions:
       contents: write
       packages: write
