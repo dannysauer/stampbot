@@ -1,8 +1,8 @@
 # Stampbot
 
-[![CI](https://github.com/yourusername/stampbot/workflows/CI/badge.svg)](https://github.com/yourusername/stampbot/actions/workflows/ci.yml)
-[![Release](https://github.com/yourusername/stampbot/workflows/Release/badge.svg)](https://github.com/yourusername/stampbot/actions/workflows/release.yml)
-[![codecov](https://codecov.io/gh/yourusername/stampbot/branch/main/graph/badge.svg)](https://codecov.io/gh/yourusername/stampbot)
+[![CI](https://github.com/dannysauer/stampbot/workflows/CI/badge.svg)](https://github.com/dannysauer/stampbot/actions/workflows/ci.yml)
+[![Release](https://github.com/dannysauer/stampbot/workflows/Release/badge.svg)](https://github.com/dannysauer/stampbot/actions/workflows/release.yml)
+[![codecov](https://codecov.io/gh/dannysauer/stampbot/branch/main/graph/badge.svg)](https://codecov.io/gh/dannysauer/stampbot)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Helm](https://img.shields.io/badge/helm-v3-blue.svg)](https://helm.sh)
@@ -71,7 +71,7 @@ For manual setup or production deployment, see [INSTALLATION.md](INSTALLATION.md
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/stampbot.git
+git clone https://github.com/dannysauer/stampbot.git
 cd stampbot
 ```
 
@@ -277,8 +277,7 @@ MIT License - see [LICENSE](LICENSE) file for details
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/yourusername/stampbot/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/stampbot/discussions)
+- **Issues**: [GitHub Issues](https://github.com/dannysauer/stampbot/issues)
 - **Documentation**: [docs/](docs/)
 
 ## Acknowledgments

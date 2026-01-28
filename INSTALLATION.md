@@ -374,7 +374,7 @@ helm install stampbot charts/stampbot \
   --set externalSecrets.enabled=true \
   --set externalSecrets.secretStore.name=your-secret-store \
   --set externalSecrets.secretStore.kind=SecretStore \
-  --set image.repository=ghcr.io/yourusername/stampbot \
+  --set image.repository=ghcr.io/dannysauer/stampbot \
   --set image.tag=latest
 ```
 
