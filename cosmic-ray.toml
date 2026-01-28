@@ -1,0 +1,145 @@
+# Cosmic Ray mutation testing configuration
+# Docs: https://cosmic-ray.readthedocs.io/
+
+[cosmic-ray]
+module-path = "stampbot"
+timeout = 30.0
+excluded-modules = []
+test-command = "python -m pytest tests/ -x -q --no-cov"
+
+[cosmic-ray.distributor]
+name = "local"
+
+[cosmic-ray.cloning]
+method = "copy"
+
+# Operators to use for mutation testing
+# Using all default operators for thorough coverage
+[[cosmic-ray.operators]]
+name = "core/NumberReplacer"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceTrueWithFalse"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceFalseWithTrue"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceAndWithOr"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceOrWithAnd"
+
+[[cosmic-ray.operators]]
+name = "core/AddNot"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceBinaryOperator_Add_Sub"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceBinaryOperator_Sub_Add"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceBinaryOperator_Mult_Div"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceBinaryOperator_Div_Mult"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceBinaryOperator_FloorDiv_Div"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceBinaryOperator_Mod_Mult"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceBinaryOperator_Pow_Mult"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceBinaryOperator_LShift_RShift"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceBinaryOperator_RShift_LShift"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceBinaryOperator_BitOr_BitAnd"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceBinaryOperator_BitAnd_BitOr"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceBinaryOperator_BitXor_BitAnd"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceComparisonOperator_Lt_Gt"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceComparisonOperator_Lt_LtE"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceComparisonOperator_Lt_Eq"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceComparisonOperator_LtE_Lt"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceComparisonOperator_LtE_Gt"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceComparisonOperator_LtE_Eq"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceComparisonOperator_Gt_Lt"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceComparisonOperator_Gt_GtE"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceComparisonOperator_Gt_Eq"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceComparisonOperator_GtE_Lt"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceComparisonOperator_GtE_Gt"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceComparisonOperator_GtE_Eq"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceComparisonOperator_Eq_NotEq"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceComparisonOperator_NotEq_Eq"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceComparisonOperator_Is_IsNot"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceComparisonOperator_IsNot_Is"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceComparisonOperator_In_NotIn"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceComparisonOperator_NotIn_In"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceUnaryOperator_UAdd_USub"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceUnaryOperator_USub_UAdd"
+
+[[cosmic-ray.operators]]
+name = "core/ReplaceUnaryOperator_Not_UAdd"
+
+[[cosmic-ray.operators]]
+name = "core/BreakContinueReplacement"
+
+[[cosmic-ray.operators]]
+name = "exception/ExceptionReplacer"
+
+[[cosmic-ray.operators]]
+name = "zero-iteration-for-loop/ZeroIterationForLoop"
+
+# Note: Cosmic Ray will skip mutations in lines marked with:
+# pragma: no mutate
