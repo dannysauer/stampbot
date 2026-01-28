@@ -41,7 +41,7 @@ repos:
 
   # Ruff - fast Python linter and formatter
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.11
+    rev: v0.14.14
     hooks:
       # Run formatter first
       - id: ruff-format
@@ -66,13 +66,13 @@ repos:
 
   # Renovate config validation
   - repo: https://github.com/renovatebot/pre-commit-hooks
-    rev: 42.81.4
+    rev: 42.84.0
     hooks:
       - id: renovate-config-validator
 
   # Helm chart linting (if helm is installed)
   - repo: https://github.com/gruntwork-io/pre-commit
-    rev: v0.1.23
+    rev: v0.1.30
     hooks:
       - id: helmlint
         files: ^charts/
