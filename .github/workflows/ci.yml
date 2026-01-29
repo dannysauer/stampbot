@@ -115,7 +115,12 @@ jobs:
 
       - name: Generate mutation report
         run: |
-          cosmic-ray dump .mutation.sqlite > mutation-report.json
+          # cosmic-ray dump outputs newline-delimited JSON, convert to array
+          cosmic-ray dump .mutation.sqlite | python3 -c "
+          import json, sys
+          data = [json.loads(line) for line in sys.stdin if line.strip()]
+          json.dump(data, sys.stdout, indent=2)
+          " > mutation-report.json
           cr-html .mutation.sqlite > mutation-report.html
 
       - name: Calculate mutation score and generate badge
