@@ -44,7 +44,8 @@ mutate: venv ## Run mutation testing (full suite)
 	$(COSMIC_RAY) --verbosity INFO exec cosmic-ray.toml $(MUTATION_DB)
 	$(COSMIC_RAY) dump $(MUTATION_DB) | $(PYTHON) -c "\
 import json, sys; \
-data = [json.loads(line) for line in sys.stdin if line.strip()]; \
+data = []; \
+[data.append({**json.loads(line)[0], **(json.loads(line)[1] or {})}) for line in sys.stdin if line.strip()]; \
 print(json.dumps(data, indent=2))" > mutation-report.json
 	@echo ""
 	@echo "Mutation testing complete. Run 'make mutate-report' for summary."
@@ -53,7 +54,7 @@ mutate-report: venv ## Show mutation testing summary
 	@if [ ! -f $(MUTATION_DB) ]; then echo "No mutation database found. Run 'make mutate' first."; exit 1; fi
 	$(COSMIC_RAY) dump $(MUTATION_DB) | $(PYTHON) -c "\
 import json, sys; \
-data = [json.loads(line) for line in sys.stdin if line.strip()]; \
+data = [{**json.loads(line)[0], **(json.loads(line)[1] or {})} for line in sys.stdin if line.strip()]; \
 total = len(data); \
 killed = sum(1 for m in data if m.get('worker_outcome') == 'KILLED'); \
 survived = sum(1 for m in data if m.get('worker_outcome') == 'SURVIVED'); \
@@ -76,7 +77,7 @@ mutate-survival: venv ## List surviving mutants (tests may need improvement)
 	@if [ ! -f $(MUTATION_DB) ]; then echo "No mutation database found. Run 'make mutate' first."; exit 1; fi
 	$(COSMIC_RAY) dump $(MUTATION_DB) | $(PYTHON) -c "\
 import json, sys; \
-data = [json.loads(line) for line in sys.stdin if line.strip()]; \
+data = [{**json.loads(line)[0], **(json.loads(line)[1] or {})} for line in sys.stdin if line.strip()]; \
 survived = [m for m in data if m.get('worker_outcome') == 'SURVIVED']; \
 print(f'Surviving mutants ({len(survived)}):'); \
 print('-' * 60); \

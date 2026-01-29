@@ -115,10 +115,19 @@ jobs:
 
       - name: Generate mutation report
         run: |
-          # cosmic-ray dump outputs newline-delimited JSON, convert to array
+          # cosmic-ray dump outputs NDJSON where each line is [WorkItem, WorkResult]
+          # Flatten to a simpler structure for processing
           cosmic-ray dump .mutation.sqlite | python3 -c "
           import json, sys
-          data = [json.loads(line) for line in sys.stdin if line.strip()]
+          data = []
+          for line in sys.stdin:
+              if line.strip():
+                  work_item, work_result = json.loads(line)
+                  # Merge work_item and work_result into a single dict
+                  merged = {**work_item}
+                  if work_result:
+                      merged.update(work_result)
+                  data.append(merged)
           json.dump(data, sys.stdout, indent=2)
           " > mutation-report.json
           cr-html .mutation.sqlite > mutation-report.html
