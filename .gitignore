@@ -51,11 +51,6 @@ coverage.xml
 .pytest_cache/
 cover/
 
-# Mutation testing (Cosmic Ray)
-.mutation.sqlite
-mutation-report.json
-mutation-report.html
-
 # Translations
 *.mo
 *.pot
