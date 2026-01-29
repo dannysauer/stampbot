@@ -56,10 +56,10 @@ mutate-report: venv ## Show mutation testing summary
 import json, sys; \
 data = [{**json.loads(line)[0], **(json.loads(line)[1] or {})} for line in sys.stdin if line.strip()]; \
 total = len(data); \
-killed = sum(1 for m in data if m.get('worker_outcome') == 'KILLED'); \
-survived = sum(1 for m in data if m.get('worker_outcome') == 'SURVIVED'); \
-timeout = sum(1 for m in data if m.get('worker_outcome') == 'TIMEOUT'); \
-incompetent = sum(1 for m in data if m.get('worker_outcome') == 'INCOMPETENT'); \
+killed = sum(1 for m in data if m.get('test_outcome') == 'killed'); \
+survived = sum(1 for m in data if m.get('test_outcome') == 'survived'); \
+timeout = sum(1 for m in data if m.get('test_outcome') == 'timeout'); \
+incompetent = sum(1 for m in data if m.get('test_outcome') == 'incompetent'); \
 score = (killed / (killed + survived) * 100) if (killed + survived) > 0 else 0; \
 print(f'Total mutants: {total}'); \
 print(f'Killed: {killed}'); \
@@ -78,11 +78,12 @@ mutate-survival: venv ## List surviving mutants (tests may need improvement)
 	$(COSMIC_RAY) dump $(MUTATION_DB) | $(PYTHON) -c "\
 import json, sys; \
 data = [{**json.loads(line)[0], **(json.loads(line)[1] or {})} for line in sys.stdin if line.strip()]; \
-survived = [m for m in data if m.get('worker_outcome') == 'SURVIVED']; \
+survived = [m for m in data if m.get('test_outcome') == 'survived']; \
 print(f'Surviving mutants ({len(survived)}):'); \
 print('-' * 60); \
 for m in survived: \
-    print(f\"{m.get('module_path')}:{m.get('start_pos', [0])[0]} - {m.get('operator_name')}\")"
+    mut = m.get('mutations', [{}])[0]; \
+    print(f\"{mut.get('module_path', '?')}:{mut.get('start_pos', [0])[0]} - {mut.get('operator_name', 'unknown')}\")"
 
 mutate-clean: ## Remove mutation testing artifacts
 	rm -f $(MUTATION_DB) mutation-report.json mutation-report.html

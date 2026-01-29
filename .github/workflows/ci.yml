@@ -146,10 +146,10 @@ jobs:
               data = json.load(f)
 
           total = len(data)
-          killed = sum(1 for m in data if m.get('worker_outcome') == 'KILLED')
-          survived = sum(1 for m in data if m.get('worker_outcome') == 'SURVIVED')
-          timeout = sum(1 for m in data if m.get('worker_outcome') == 'TIMEOUT')
-          incompetent = sum(1 for m in data if m.get('worker_outcome') == 'INCOMPETENT')
+          killed = sum(1 for m in data if m.get('test_outcome') == 'killed')
+          survived = sum(1 for m in data if m.get('test_outcome') == 'survived')
+          timeout = sum(1 for m in data if m.get('test_outcome') == 'timeout')
+          incompetent = sum(1 for m in data if m.get('test_outcome') == 'incompetent')
           score = (killed / (killed + survived) * 100) if (killed + survived) > 0 else 0
 
           print(f'Total mutants: {total}')
@@ -234,19 +234,20 @@ jobs:
             const data = JSON.parse(fs.readFileSync('mutation-report.json', 'utf8'));
 
             const total = data.length;
-            const killed = data.filter(m => m.worker_outcome === 'KILLED').length;
-            const survived = data.filter(m => m.worker_outcome === 'SURVIVED').length;
-            const timeout = data.filter(m => m.worker_outcome === 'TIMEOUT').length;
-            const incompetent = data.filter(m => m.worker_outcome === 'INCOMPETENT').length;
+            const killed = data.filter(m => m.test_outcome === 'killed').length;
+            const survived = data.filter(m => m.test_outcome === 'survived').length;
+            const timeout = data.filter(m => m.test_outcome === 'timeout').length;
+            const incompetent = data.filter(m => m.test_outcome === 'incompetent').length;
             const score = (killed + survived) > 0 ? (killed / (killed + survived) * 100).toFixed(1) : 0;
 
             // Get surviving mutants for details
-            const survivors = data.filter(m => m.worker_outcome === 'SURVIVED').slice(0, 20);
+            const survivors = data.filter(m => m.test_outcome === 'survived').slice(0, 20);
             let survivorDetails = '';
             if (survivors.length > 0) {
-              survivorDetails = survivors.map(m =>
-                `- \`${m.module_path}:${m.start_pos?.[0] || '?'}\` - ${m.operator_name}`
-              ).join('\n');
+              survivorDetails = survivors.map(m => {
+                const mutation = m.mutations?.[0] || {};
+                return `- \`${mutation.module_path || '?'}:${mutation.start_pos?.[0] || '?'}\` - ${mutation.operator_name || 'unknown'}`;
+              }).join('\n');
               if (survived > 20) {
                 survivorDetails += `\n- ... and ${survived - 20} more`;
               }
