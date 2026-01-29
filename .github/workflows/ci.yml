@@ -69,6 +69,7 @@ jobs:
             --cov=stampbot \
             --cov-branch \
             --cov-report=xml \
+            --cov-report=html \
             --cov-report=term-missing
 
       - name: Upload coverage to Codecov
@@ -80,6 +81,291 @@ jobs:
           flags: unittests
           name: python-${{ matrix.python-version }}
           fail_ci_if_error: true
+
+      - name: Upload coverage HTML report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: matrix.python-version == '3.14'
+        with:
+          name: coverage-report
+          path: htmlcov/
+          retention-days: 30
+
+  mutation-test:
+    name: Mutation Testing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version-file: '.python-version'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio cosmic-ray
+
+      - name: Initialize mutation testing
+        run: cosmic-ray init cosmic-ray.toml .mutation.sqlite
+
+      - name: Run mutation testing
+        run: cosmic-ray --verbosity INFO exec cosmic-ray.toml .mutation.sqlite
+
+      - name: Generate mutation report
+        run: |
+          cosmic-ray dump .mutation.sqlite > mutation-report.json
+          cr-html .mutation.sqlite > mutation-report.html
+
+      - name: Calculate mutation score and generate badge
+        id: score
+        run: |
+          python3 << 'EOF'
+          import json
+          import os
+
+          with open('mutation-report.json') as f:
+              data = json.load(f)
+
+          total = len(data)
+          killed = sum(1 for m in data if m.get('worker_outcome') == 'KILLED')
+          survived = sum(1 for m in data if m.get('worker_outcome') == 'SURVIVED')
+          timeout = sum(1 for m in data if m.get('worker_outcome') == 'TIMEOUT')
+          incompetent = sum(1 for m in data if m.get('worker_outcome') == 'INCOMPETENT')
+          score = (killed / (killed + survived) * 100) if (killed + survived) > 0 else 0
+
+          print(f'Total mutants: {total}')
+          print(f'Killed: {killed}')
+          print(f'Survived: {survived}')
+          print(f'Timeout: {timeout}')
+          print(f'Incompetent (invalid mutations): {incompetent}')
+          print(f'Mutation score: {score:.1f}%')
+
+          # Write to step summary
+          summary_file = os.environ.get('GITHUB_STEP_SUMMARY', '/dev/null')
+          with open(summary_file, 'a') as summary:
+              summary.write('## Mutation Testing Results\n\n')
+              summary.write('| Metric | Value |\n')
+              summary.write('|--------|-------|\n')
+              summary.write(f'| Total mutants | {total} |\n')
+              summary.write(f'| Killed | {killed} |\n')
+              summary.write(f'| Survived | {survived} |\n')
+              summary.write(f'| Timeout | {timeout} |\n')
+              summary.write(f'| Incompetent | {incompetent} |\n')
+              summary.write(f'| **Mutation score** | **{score:.1f}%** |\n')
+
+          # Generate badge SVG (shields.io style)
+          if score >= 80:
+              color = '#4c1'  # bright green
+          elif score >= 60:
+              color = '#a3c51c'  # yellow-green
+          elif score >= 40:
+              color = '#dfb317'  # yellow
+          else:
+              color = '#e05d44'  # red
+
+          score_text = f'{score:.0f}%'
+          # Calculate widths (approximate)
+          label_width = 62
+          value_width = 40
+          total_width = label_width + value_width
+
+          badge_svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{total_width}" height="20">
+            <linearGradient id="b" x2="0" y2="100%">
+              <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
+              <stop offset="1" stop-opacity=".1"/>
+            </linearGradient>
+            <clipPath id="a">
+              <rect width="{total_width}" height="20" rx="3" fill="#fff"/>
+            </clipPath>
+            <g clip-path="url(#a)">
+              <path fill="#555" d="M0 0h{label_width}v20H0z"/>
+              <path fill="{color}" d="M{label_width} 0h{value_width}v20H{label_width}z"/>
+              <path fill="url(#b)" d="M0 0h{total_width}v20H0z"/>
+            </g>
+            <g fill="#fff" text-anchor="middle" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">
+              <text x="{label_width/2}" y="15" fill="#010101" fill-opacity=".3">mutation</text>
+              <text x="{label_width/2}" y="14">mutation</text>
+              <text x="{label_width + value_width/2}" y="15" fill="#010101" fill-opacity=".3">{score_text}</text>
+              <text x="{label_width + value_width/2}" y="14">{score_text}</text>
+            </g>
+          </svg>'''
+
+          with open('mutation-badge.svg', 'w') as f:
+              f.write(badge_svg)
+
+          print('Badge generated: mutation-badge.svg')
+          EOF
+
+      - name: Upload mutation report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mutation-report
+          path: |
+            mutation-report.json
+            mutation-report.html
+            mutation-badge.svg
+          retention-days: 30
+
+      - name: Comment on PR with mutation results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const fs = require('fs');
+            const data = JSON.parse(fs.readFileSync('mutation-report.json', 'utf8'));
+
+            const total = data.length;
+            const killed = data.filter(m => m.worker_outcome === 'KILLED').length;
+            const survived = data.filter(m => m.worker_outcome === 'SURVIVED').length;
+            const timeout = data.filter(m => m.worker_outcome === 'TIMEOUT').length;
+            const incompetent = data.filter(m => m.worker_outcome === 'INCOMPETENT').length;
+            const score = (killed + survived) > 0 ? (killed / (killed + survived) * 100).toFixed(1) : 0;
+
+            // Get surviving mutants for details
+            const survivors = data.filter(m => m.worker_outcome === 'SURVIVED').slice(0, 20);
+            let survivorDetails = '';
+            if (survivors.length > 0) {
+              survivorDetails = survivors.map(m =>
+                `- \`${m.module_path}:${m.start_pos?.[0] || '?'}\` - ${m.operator_name}`
+              ).join('\n');
+              if (survived > 20) {
+                survivorDetails += `\n- ... and ${survived - 20} more`;
+              }
+            }
+
+            const body = `## 🧬 Mutation Testing Results
+
+            | Metric | Value |
+            |--------|-------|
+            | Total mutants | ${total} |
+            | Killed | ${killed} |
+            | Survived | ${survived} |
+            | Timeout | ${timeout} |
+            | Incompetent | ${incompetent} |
+            | **Mutation score** | **${score}%** |
+
+            <details>
+            <summary>What is mutation testing?</summary>
+
+            Mutation testing introduces small changes (mutants) to the code and runs tests against each.
+            A "killed" mutant means tests caught the change. A "survived" mutant suggests a gap in test coverage.
+            </details>
+
+            ${survived > 0 ? `<details>
+            <summary>Surviving mutants (${survived})</summary>
+
+            ${survivorDetails}
+            </details>` : '✅ All mutants were killed!'}
+            `;
+
+            // Find and update existing comment or create new one
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('🧬 Mutation Testing Results')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+  deploy-reports:
+    name: Deploy Reports to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: [test, mutation-test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Download coverage report
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          name: coverage-report
+          path: _site/coverage
+
+      - name: Download mutation report
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          name: mutation-report
+          path: _site/mutation
+
+      - name: Create index page
+        run: |
+          cat > _site/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Stampbot Reports</title>
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+              h1 { color: #333; }
+              .reports { display: flex; gap: 20px; flex-wrap: wrap; }
+              .report-card { border: 1px solid #ddd; border-radius: 8px; padding: 20px; width: 300px; }
+              .report-card h2 { margin-top: 0; }
+              .report-card a { display: inline-block; margin-top: 10px; padding: 8px 16px; background: #0366d6; color: white; text-decoration: none; border-radius: 4px; }
+              .report-card a:hover { background: #0256b9; }
+              .badges { margin: 20px 0; }
+              .badges img { margin-right: 8px; }
+            </style>
+          </head>
+          <body>
+            <h1>Stampbot Reports</h1>
+            <div class="badges">
+              <img src="mutation/mutation-badge.svg" alt="Mutation Score">
+            </div>
+            <div class="reports">
+              <div class="report-card">
+                <h2>Coverage Report</h2>
+                <p>Code coverage analysis showing which lines are tested.</p>
+                <a href="coverage/">View Report</a>
+              </div>
+              <div class="report-card">
+                <h2>Mutation Report</h2>
+                <p>Mutation testing results showing test effectiveness.</p>
+                <a href="mutation/mutation-report.html">View Report</a>
+              </div>
+            </div>
+          </body>
+          </html>
+          EOF
+
+      - name: Setup Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
 
   build-image:
     name: Build Docker Image

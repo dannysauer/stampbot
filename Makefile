@@ -1,4 +1,4 @@
-.PHONY: help venv install install-dev test lint format clean build docker-build docker-push helm-lint helm-template helm-validate helm-unittest helm-test helm-package run dev pre-commit pre-commit-install secrets-baseline act-lint act-test act-helm act-ci
+.PHONY: help venv install install-dev test lint format clean build docker-build docker-push helm-lint helm-template helm-validate helm-unittest helm-test helm-package run dev pre-commit pre-commit-install secrets-baseline act-lint act-test act-helm act-ci mutate mutate-report mutate-html mutate-survival mutate-clean
 
 # Variables
 IMAGE_NAME ?= stampbot
@@ -35,6 +35,54 @@ install-dev: venv ## Install development dependencies
 test: venv ## Run tests
 	$(PYTHON) -m pytest tests/ -v
 
+# Mutation testing with Cosmic Ray
+COSMIC_RAY := $(VENV)/bin/cosmic-ray
+MUTATION_DB := .mutation.sqlite
+
+mutate: venv ## Run mutation testing (full suite)
+	$(COSMIC_RAY) init cosmic-ray.toml $(MUTATION_DB)
+	$(COSMIC_RAY) --verbosity INFO exec cosmic-ray.toml $(MUTATION_DB)
+	$(COSMIC_RAY) dump $(MUTATION_DB) | $(PYTHON) -m json.tool > mutation-report.json
+	@echo ""
+	@echo "Mutation testing complete. Run 'make mutate-report' for summary."
+
+mutate-report: venv ## Show mutation testing summary
+	@if [ ! -f $(MUTATION_DB) ]; then echo "No mutation database found. Run 'make mutate' first."; exit 1; fi
+	$(COSMIC_RAY) dump $(MUTATION_DB) | $(PYTHON) -c "\
+import json, sys; \
+data = json.load(sys.stdin); \
+total = len(data); \
+killed = sum(1 for m in data if m.get('worker_outcome') == 'KILLED'); \
+survived = sum(1 for m in data if m.get('worker_outcome') == 'SURVIVED'); \
+timeout = sum(1 for m in data if m.get('worker_outcome') == 'TIMEOUT'); \
+incompetent = sum(1 for m in data if m.get('worker_outcome') == 'INCOMPETENT'); \
+score = (killed / (killed + survived) * 100) if (killed + survived) > 0 else 0; \
+print(f'Total mutants: {total}'); \
+print(f'Killed: {killed}'); \
+print(f'Survived: {survived}'); \
+print(f'Timeout: {timeout}'); \
+print(f'Incompetent: {incompetent}'); \
+print(f'Mutation score: {score:.1f}%')"
+
+mutate-html: venv ## Generate HTML mutation report
+	@if [ ! -f $(MUTATION_DB) ]; then echo "No mutation database found. Run 'make mutate' first."; exit 1; fi
+	$(VENV)/bin/cr-html $(MUTATION_DB) > mutation-report.html
+	@echo "HTML report generated: mutation-report.html"
+
+mutate-survival: venv ## List surviving mutants (tests may need improvement)
+	@if [ ! -f $(MUTATION_DB) ]; then echo "No mutation database found. Run 'make mutate' first."; exit 1; fi
+	$(COSMIC_RAY) dump $(MUTATION_DB) | $(PYTHON) -c "\
+import json, sys; \
+data = json.load(sys.stdin); \
+survived = [m for m in data if m.get('worker_outcome') == 'SURVIVED']; \
+print(f'Surviving mutants ({len(survived)}):'); \
+print('-' * 60); \
+for m in survived: \
+    print(f\"{m.get('module_path')}:{m.get('start_pos', [0])[0]} - {m.get('operator_name')}\")"
+
+mutate-clean: ## Remove mutation testing artifacts
+	rm -f $(MUTATION_DB) mutation-report.json mutation-report.html
+
 lint: venv ## Run linters
 	$(VENV)/bin/ruff check stampbot/ tests/
 	$(VENV)/bin/mypy stampbot/
@@ -52,6 +100,7 @@ clean: ## Clean build artifacts
 	rm -rf .ruff_cache
 	rm -rf htmlcov/
 	rm -rf $(VENV)
+	rm -f .mutation.sqlite mutation-report.json mutation-report.html
 	find . -type d -name __pycache__ -exec rm -rf {} +
 	find . -type f -name '*.pyc' -delete
 
