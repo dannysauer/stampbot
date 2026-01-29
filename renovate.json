@@ -32,6 +32,13 @@
       "groupName": "helm dependencies"
     },
     {
+      "description": "Ignore stampbot image in values.yaml - tag intentionally empty to use appVersion",
+      "matchManagers": ["helm-values"],
+      "matchFileNames": ["charts/stampbot/values.yaml"],
+      "matchPackageNames": ["ghcr.io/dannysauer/stampbot"],
+      "enabled": false
+    },
+    {
       "description": "Group Docker updates",
       "matchManagers": ["dockerfile"],
       "groupName": "docker dependencies"
