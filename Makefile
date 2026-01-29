@@ -66,7 +66,7 @@ print(f'Mutation score: {score:.1f}%')"
 
 mutate-html: venv ## Generate HTML mutation report
 	@if [ ! -f $(MUTATION_DB) ]; then echo "No mutation database found. Run 'make mutate' first."; exit 1; fi
-	$(COSMIC_RAY) html $(MUTATION_DB) > mutation-report.html
+	$(VENV)/bin/cr-html $(MUTATION_DB) > mutation-report.html
 	@echo "HTML report generated: mutation-report.html"
 
 mutate-survival: venv ## List surviving mutants (tests may need improvement)
