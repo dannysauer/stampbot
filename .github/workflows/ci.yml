@@ -93,6 +93,8 @@ jobs:
   mutation-test:
     name: Mutation Testing
     runs-on: ubuntu-latest
+    # Run on push to main, or on PRs with the 'do_mutants' label
+    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'do_mutants')
     permissions:
       contents: read
       pull-requests: write
