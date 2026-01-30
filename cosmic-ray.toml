@@ -1,0 +1,24 @@
+# Cosmic Ray mutation testing configuration
+# Docs: https://cosmic-ray.readthedocs.io/
+
+[cosmic-ray]
+module-path = "stampbot"
+timeout = 30.0
+excluded-modules = []
+test-command = "python -m pytest tests/ -x -q --no-cov"
+
+[cosmic-ray.distributor]
+name = "local"
+
+[cosmic-ray.cloning]
+method = "copy"
+
+# Use all default operators for thorough mutation testing.
+# To exclude specific operators, uncomment and modify:
+# [cosmic-ray.filters.operators-filter]
+# exclude-operators = [
+#     "core/RemoveDecorator",
+# ]
+
+# Note: Lines can be excluded from mutation with:
+# pragma: no mutate
