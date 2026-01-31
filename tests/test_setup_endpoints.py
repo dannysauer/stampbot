@@ -45,7 +45,6 @@ class TestSetupEndpointsUnconfigured:
             mock_settings.host = "0.0.0.0"
             mock_settings.port = 8000
             mock_settings.log_level = "INFO"
-            mock_settings.base_url = None
 
             from fastapi.testclient import TestClient
 
@@ -64,21 +63,19 @@ class TestSetupEndpointsUnconfigured:
             patch("stampbot.main.settings") as mock_settings,
         ):
             mock_settings.setup_enabled = True
-            # Use HTTPS base_url for URL validation
-            mock_settings.base_url = "https://stampbot.example.com"
 
             from fastapi.testclient import TestClient
 
             from stampbot.main import app
 
             client = TestClient(app, raise_server_exceptions=False)
-            response = client.get("/setup")
+            response = client.get("/setup", headers={"Host": "localhost:8000"})
 
             assert response.status_code == 200
             assert "Stampbot Setup" in response.text
             assert "Create GitHub App" in response.text
             assert "Pull requests: Read" in response.text
-            assert "/webhook" in response.text
+            assert "/webhook" in response.text  # Shown in instructions
 
     def test_webhook_returns_503_when_unconfigured(self):
         """Test webhook returns 503 when not configured."""

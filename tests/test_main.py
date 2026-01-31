@@ -31,7 +31,6 @@ def test_lifespan_startup_unconfigured():
         mock_settings.host = "0.0.0.0"
         mock_settings.port = 8000
         mock_settings.log_level = "INFO"
-        mock_settings.base_url = None
 
         with TestClient(app) as client:
             response = client.get("/health")

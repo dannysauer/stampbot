@@ -22,7 +22,6 @@ metrics_port = 8000
 
 # Setup mode settings
 setup_enabled = true
-# base_url = ""  # Auto-detected from request, override if behind proxy
 
 # GitHub App credentials (required for operation, set via env vars or .secrets.toml)
 # app_id = 12345

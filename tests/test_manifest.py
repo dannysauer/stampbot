@@ -17,42 +17,40 @@ from stampbot.manifest import (
 class TestUrlValidation:
     """Tests for URL validation in manifest creation."""
 
-    def test_rejects_http_non_localhost(self):
-        """Test that HTTP URLs for non-localhost are rejected."""
+    def test_rejects_http_non_localhost_redirect(self):
+        """Test that HTTP redirect URLs for non-localhost are rejected."""
         import pytest
 
         with pytest.raises(ValueError, match="must use HTTPS"):
             create_manifest(
-                webhook_url="http://example.com/webhook",
-                redirect_url="https://example.com/setup/callback",
+                redirect_url="http://example.com/setup/callback",
             )
 
     def test_allows_http_localhost(self):
         """Test that HTTP URLs for localhost are allowed."""
         manifest = create_manifest(
-            webhook_url="http://localhost:8000/webhook",
             redirect_url="http://localhost:8000/setup/callback",
+            webhook_url="http://localhost:8000/webhook",
         )
         assert manifest["hook_attributes"]["url"] == "http://localhost:8000/webhook"
 
-    def test_rejects_invalid_url(self):
-        """Test that invalid URLs are rejected."""
+    def test_rejects_invalid_redirect_url(self):
+        """Test that invalid redirect URLs are rejected."""
         import pytest
 
         with pytest.raises(ValueError, match="must be a complete URL"):
             create_manifest(
-                webhook_url="not-a-url",
-                redirect_url="https://example.com/setup/callback",
+                redirect_url="not-a-url",
             )
 
     def test_rejects_non_https_scheme(self):
-        """Test that non-HTTPS schemes are rejected."""
+        """Test that non-HTTPS schemes are rejected for webhook URLs."""
         import pytest
 
         with pytest.raises(ValueError, match="must use HTTPS"):
             create_manifest(
-                webhook_url="ftp://example.com/webhook",
                 redirect_url="https://example.com/setup/callback",
+                webhook_url="ftp://example.com/webhook",
             )
 
 
@@ -62,7 +60,6 @@ class TestCreateManifest:
     def test_manifest_contains_required_permissions(self):
         """Test manifest contains required permissions."""
         manifest = create_manifest(
-            webhook_url="https://example.com/webhook",
             redirect_url="https://example.com/setup/callback",
         )
 
@@ -74,7 +71,6 @@ class TestCreateManifest:
     def test_manifest_contains_required_events(self):
         """Test manifest contains required events."""
         manifest = create_manifest(
-            webhook_url="https://example.com/webhook",
             redirect_url="https://example.com/setup/callback",
         )
 
@@ -83,29 +79,35 @@ class TestCreateManifest:
         assert "pull_request_review_comment" in manifest["default_events"]
         assert "issue_comment" in manifest["default_events"]
 
-    def test_manifest_webhook_url(self):
-        """Test manifest contains correct webhook URL."""
+    def test_manifest_webhook_url_when_provided(self):
+        """Test manifest contains webhook URL when provided."""
         manifest = create_manifest(
-            webhook_url="https://stampbot.example.com/webhook",
             redirect_url="https://stampbot.example.com/setup/callback",
+            webhook_url="https://stampbot.example.com/webhook",
         )
 
         assert manifest["hook_attributes"]["url"] == "https://stampbot.example.com/webhook"
         assert manifest["hook_attributes"]["active"] is True
 
+    def test_manifest_no_webhook_url_when_omitted(self):
+        """Test manifest omits hook_attributes when webhook_url not provided."""
+        manifest = create_manifest(
+            redirect_url="https://example.com/setup/callback",
+        )
+
+        assert "hook_attributes" not in manifest
+
     def test_manifest_redirect_url(self):
         """Test manifest contains correct redirect URL."""
         manifest = create_manifest(
-            webhook_url="https://example.com/webhook",
             redirect_url="https://example.com/setup/callback",
         )
 
         assert manifest["redirect_url"] == "https://example.com/setup/callback"
 
     def test_manifest_base_url(self):
-        """Test manifest contains correct base URL."""
+        """Test manifest contains correct base URL derived from redirect URL."""
         manifest = create_manifest(
-            webhook_url="https://stampbot.example.com/webhook",
             redirect_url="https://stampbot.example.com/setup/callback",
         )
 
@@ -114,7 +116,6 @@ class TestCreateManifest:
     def test_manifest_is_private(self):
         """Test manifest creates private app."""
         manifest = create_manifest(
-            webhook_url="https://example.com/webhook",
             redirect_url="https://example.com/setup/callback",
         )
 
@@ -123,7 +124,6 @@ class TestCreateManifest:
     def test_manifest_custom_name(self):
         """Test manifest with custom app name."""
         manifest = create_manifest(
-            webhook_url="https://example.com/webhook",
             redirect_url="https://example.com/setup/callback",
             app_name="My Custom Stampbot",
             app_description="Custom description",
@@ -139,8 +139,7 @@ class TestGetManifestUrl:
     def test_url_starts_with_github(self):
         """Test URL starts with GitHub manifest creation URL."""
         manifest = create_manifest(
-            webhook_url="https://example.com/webhook",
-            redirect_url="https://example.com/callback",
+            redirect_url="https://example.com/setup/callback",
         )
         url = get_manifest_url(manifest)
 
@@ -149,8 +148,7 @@ class TestGetManifestUrl:
     def test_url_contains_encoded_manifest(self):
         """Test URL contains URL-encoded manifest."""
         manifest = create_manifest(
-            webhook_url="https://example.com/webhook",
-            redirect_url="https://example.com/callback",
+            redirect_url="https://example.com/setup/callback",
         )
         url = get_manifest_url(manifest)
 
@@ -162,8 +160,7 @@ class TestGetManifestUrl:
         import urllib.parse
 
         manifest = create_manifest(
-            webhook_url="https://example.com/webhook",
-            redirect_url="https://example.com/callback",
+            redirect_url="https://example.com/setup/callback",
         )
         url = get_manifest_url(manifest)
 
@@ -172,7 +169,7 @@ class TestGetManifestUrl:
         decoded_manifest = urllib.parse.unquote(encoded_manifest)
         parsed_manifest = json.loads(decoded_manifest)
 
-        assert parsed_manifest["hook_attributes"]["url"] == "https://example.com/webhook"
+        assert parsed_manifest["redirect_url"] == "https://example.com/setup/callback"
 
 
 class TestExchangeCode:

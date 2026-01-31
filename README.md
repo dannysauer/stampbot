@@ -44,7 +44,9 @@ Stampbot includes a built-in setup wizard that creates your GitHub App automatic
    Visit http://localhost:8000 - you'll be automatically redirected to the setup wizard
 
 3. **Create your GitHub App**
-   Click "Create GitHub App" and follow the prompts on GitHub
+   Click "Create GitHub App" and follow the prompts on GitHub.
+   GitHub will ask for your webhook URL - enter your public URL with `/webhook` path
+   (e.g., `https://your-domain.com/webhook` or your ngrok URL for local development)
 
 4. **Save your credentials**
    Copy the displayed credentials to your `.env` file
@@ -151,7 +153,6 @@ Configure the app via environment variables:
 | `STAMPBOT_PRIVATE_KEY` | GitHub App private key or path | - (use /setup) |
 | `STAMPBOT_WEBHOOK_SECRET` | Webhook secret | - (use /setup) |
 | `STAMPBOT_SETUP_ENABLED` | Enable /setup endpoint | `true` |
-| `STAMPBOT_BASE_URL` | Override base URL for webhooks | auto-detected |
 | `STAMPBOT_LOG_LEVEL` | Logging level | `INFO` |
 | `STAMPBOT_OTEL_ENABLED` | Enable OpenTelemetry | `false` |
 | `STAMPBOT_OTEL_ENDPOINT` | OTLP endpoint | - |
