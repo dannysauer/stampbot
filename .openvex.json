@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
   "author": "Danny Sauer <github@dannysauer.com>",
-  "timestamp": "2026-01-28T00:00:00Z",
-  "version": 2,
+  "timestamp": "2026-01-30T00:00:00Z",
+  "version": 3,
   "statements": [
     {
       "vulnerability": {
@@ -13,7 +13,12 @@
       },
       "products": [
         {
-          "@id": "pkg:pypi/protobuf"
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
+          "subcomponents": [
+            {
+              "@id": "pkg:pypi/protobuf"
+            }
+          ]
         }
       ],
       "status": "not_affected",
@@ -28,7 +33,12 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer"
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
+          "subcomponents": [
+            {
+              "@id": "pkg:deb/debian/glibc"
+            }
+          ]
         }
       ],
       "status": "under_investigation",
@@ -43,7 +53,12 @@
       },
       "products": [
         {
-          "@id": "pkg:pypi/jaraco.context"
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
+          "subcomponents": [
+            {
+              "@id": "pkg:pypi/jaraco.context"
+            }
+          ]
         }
       ],
       "status": "under_investigation",
@@ -58,13 +73,18 @@
       },
       "products": [
         {
-          "@id": "pkg:deb/debian/openssl"
-        },
-        {
-          "@id": "pkg:deb/debian/libssl3t64"
-        },
-        {
-          "@id": "pkg:deb/debian/openssl-provider-legacy"
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
+          "subcomponents": [
+            {
+              "@id": "pkg:deb/debian/openssl"
+            },
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            },
+            {
+              "@id": "pkg:deb/debian/openssl-provider-legacy"
+            }
+          ]
         }
       ],
       "status": "not_affected",
@@ -79,13 +99,18 @@
       },
       "products": [
         {
-          "@id": "pkg:deb/debian/openssl"
-        },
-        {
-          "@id": "pkg:deb/debian/libssl3t64"
-        },
-        {
-          "@id": "pkg:deb/debian/openssl-provider-legacy"
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
+          "subcomponents": [
+            {
+              "@id": "pkg:deb/debian/openssl"
+            },
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            },
+            {
+              "@id": "pkg:deb/debian/openssl-provider-legacy"
+            }
+          ]
         }
       ],
       "status": "not_affected",
