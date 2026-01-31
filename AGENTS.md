@@ -21,18 +21,22 @@ Stampbot is a GitHub App that automatically approves pull requests based on labe
 
 ## Common Commands
 
-All local development uses a virtual environment in `.venv/`. The Makefile automatically creates and uses it.
+**IMPORTANT: All local development MUST use the virtual environment in `.venv/`.** The Makefile handles this automatically for all targets. Never run Python tools (pytest, ruff, mypy, etc.) directly from system Python or via global installations like `uv` - they won't have the project dependencies. Always use `make` targets or explicitly activate the venv first.
 
 ```bash
-# Development (venv auto-created)
+# Development (venv auto-created by Makefile)
 make install-dev    # Install dependencies (dev mode)
 make dev            # Run with hot-reload (uvicorn --reload)
 make lint           # Run ruff + mypy
 make format         # Format with ruff format + ruff --fix
 make test           # Run pytest with coverage
 
-# Run single test
+# Run single test (note: uses venv explicitly)
 .venv/bin/pytest tests/test_webhook_handler.py::test_function_name -v
+
+# Or activate the venv first
+source .venv/bin/activate
+pytest tests/test_webhook_handler.py -v
 
 # Pre-commit hooks
 make pre-commit-install  # Install git hooks (run once)
@@ -91,7 +95,18 @@ GitHub Webhook -> POST /webhook -> WebhookHandler.handle_event()
 
 ### Virtual Environment Requirement
 
-All local development must use the virtual environment. The Makefile handles this automatically - all `make` targets that run locally (install, test, lint, format, run, dev) will create and use `.venv/`. Do not install packages globally or run tools outside the venv.
+**All local development MUST use the virtual environment.** The Makefile handles this automatically - all `make` targets that run locally (install, test, lint, format, run, dev) will create and use `.venv/`.
+
+**Do NOT:**
+- Install packages globally
+- Run tools like `pytest`, `ruff`, `mypy` directly from system Python
+- Use `uv run`, `python -m pytest`, or similar without the venv active
+- Assume any Python tooling is available outside the venv
+
+**Always either:**
+- Use `make` targets (preferred): `make test`, `make lint`, etc.
+- Explicitly use venv binaries: `.venv/bin/pytest`, `.venv/bin/ruff`
+- Activate the venv first: `source .venv/bin/activate && pytest`
 
 ### Code Style
 

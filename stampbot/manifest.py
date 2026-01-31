@@ -59,16 +59,17 @@ MANIFEST_EVENTS = [
 
 
 def create_manifest(
-    webhook_url: str,
     redirect_url: str,
+    webhook_url: str | None = None,
     app_name: str = "Stampbot",
     app_description: str = "GitHub PR Auto-Approval Bot",
 ) -> dict[str, Any]:
     """Generate GitHub App manifest with required permissions.
 
     Args:
-        webhook_url: Full URL for webhook endpoint (e.g., https://example.com/webhook)
         redirect_url: URL to redirect after app creation
+        webhook_url: Full URL for webhook endpoint (e.g., https://example.com/webhook).
+            If not provided, GitHub will prompt the user during app installation.
         app_name: Display name for the GitHub App
         app_description: Description for the GitHub App
 
@@ -76,28 +77,32 @@ def create_manifest(
         GitHub App manifest dictionary
 
     Raises:
-        ValueError: If URLs are invalid or don't use HTTPS
+        ValueError: If redirect_url is invalid or doesn't use HTTPS (localhost excepted)
     """
-    # Validate URLs to prevent SSRF and other attacks
-    _validate_url(webhook_url, "webhook_url")
     _validate_url(redirect_url, "redirect_url")
 
-    # Extract base URL from webhook URL
-    base_url = webhook_url.rsplit("/webhook", 1)[0]
+    # Extract base URL from redirect URL
+    base_url = redirect_url.rsplit("/setup/callback", 1)[0]
 
-    return {
+    manifest: dict[str, Any] = {
         "name": app_name,
         "description": app_description,
         "url": base_url,
-        "hook_attributes": {
-            "url": webhook_url,
-            "active": True,
-        },
         "redirect_url": redirect_url,
         "public": False,
         "default_permissions": MANIFEST_PERMISSIONS,
         "default_events": MANIFEST_EVENTS,
     }
+
+    # Only include webhook URL if provided; GitHub will prompt for it otherwise
+    if webhook_url:
+        _validate_url(webhook_url, "webhook_url")
+        manifest["hook_attributes"] = {
+            "url": webhook_url,
+            "active": True,
+        }
+
+    return manifest
 
 
 def get_manifest_url(manifest: dict[str, Any]) -> str:

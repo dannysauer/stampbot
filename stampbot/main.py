@@ -64,12 +64,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Log setup mode status
     if not is_configured():
-        base_url = settings.base_url or f"http://{settings.host}:{settings.port}"
-        logger.warning(
-            "GitHub App credentials not configured. Running in setup mode.",
-            extra={"setup_url": f"{base_url}/setup"},
-        )
-        logger.info("Visit %s/setup to create your GitHub App", base_url)
+        logger.warning("GitHub App credentials not configured. Running in setup mode.")
+        logger.info("Visit /setup to create your GitHub App")
     else:
         logger.info("GitHub App credentials configured successfully")
 
@@ -316,12 +312,12 @@ async def setup_page(request: Request) -> Response:
             status_code=200,
         )
 
-    # Determine base URL from request or settings
-    base_url = settings.base_url or str(request.base_url).rstrip("/")
-    webhook_url = f"{base_url}/webhook"
+    # Determine base URL from request Host header
+    base_url = str(request.base_url).rstrip("/")
     redirect_url = f"{base_url}/setup/callback"
 
-    manifest = create_manifest(webhook_url, redirect_url)
+    # Don't include webhook_url - GitHub will prompt the user for it during installation
+    manifest = create_manifest(redirect_url)
     manifest_url = get_manifest_url(manifest)
 
     html_content = f"""
@@ -363,8 +359,8 @@ async def setup_page(request: Request) -> Response:
         <a href="{manifest_url}" class="button">Create GitHub App</a>
 
         <div class="info">
-            <p><strong>Webhook URL:</strong> <code>{webhook_url}</code></p>
-            <p>This URL will be automatically configured in your GitHub App.</p>
+            <p><strong>Note:</strong> GitHub will prompt you for the webhook URL.</p>
+            <p>Use your public URL with <code>/webhook</code> path.</p>
         </div>
     </body>
     </html>

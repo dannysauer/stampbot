@@ -34,19 +34,22 @@ Stampbot includes a built-in setup wizard that creates your GitHub App automatic
    - GitHub will show the app creation page with pre-configured permissions
    - Complete the creation process
 
-4. **Save credentials**
+4. **Enter your webhook URL**
+   - GitHub will prompt you to enter the webhook URL during app creation
+   - Use your public URL with `/webhook` path (e.g., `https://your-domain.com/webhook`)
+   - For local development with ngrok, use your ngrok URL
+
+5. **Save credentials**
    - After creation, you'll be redirected back to stampbot
    - Copy the displayed credentials to your `.env` file or Kubernetes secrets
 
-5. **Restart stampbot**
+6. **Restart stampbot**
    ```bash
    make dev
    ```
 
-6. **Install the app**
+7. **Install the app**
    - Follow the link on the completion page to install the app on your repositories
-
-**Note:** For production deployments behind a proxy, set `STAMPBOT_BASE_URL` to your external URL before starting setup.
 
 ### Option 2: Manual Setup
 
@@ -122,9 +125,9 @@ If you prefer to create the GitHub App manually:
    ngrok http 8000
    ```
 
-   Then either:
-   - Run setup again with `STAMPBOT_BASE_URL=https://your-ngrok-url.ngrok.io make dev`
-   - Or manually update your GitHub App's webhook URL in the settings
+   During GitHub App setup, enter your ngrok URL with `/webhook` path
+   (e.g., `https://abc123.ngrok.io/webhook`). You can update this later
+   in your GitHub App's settings if the URL changes.
 
 5. **Test the application**
    ```bash
