@@ -359,8 +359,8 @@ async def setup_page(request: Request) -> Response:
         <a href="{manifest_url}" class="button">Create GitHub App</a>
 
         <div class="info">
-            <p><strong>Note:</strong> GitHub will prompt you to enter the webhook URL during setup.</p>
-            <p>Use your public URL with <code>/webhook</code> path (e.g., <code>https://your-domain.com/webhook</code>)</p>
+            <p><strong>Note:</strong> GitHub will prompt you for the webhook URL.</p>
+            <p>Use your public URL with <code>/webhook</code> path.</p>
         </div>
     </body>
     </html>
