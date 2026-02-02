@@ -172,6 +172,26 @@ tests:
           path: spec.template.metadata.annotations["prometheus.io/port"]
           value: "8000"
 
+  - it: should apply deployment annotations when specified
+    template: deployment.yaml
+    set:
+      deploymentAnnotations:
+        argocd.argoproj.io/sync-wave: "5"
+        reloader.stakater.com/auto: "true"
+    asserts:
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/sync-wave"]
+          value: "5"
+      - equal:
+          path: metadata.annotations["reloader.stakater.com/auto"]
+          value: "true"
+
+  - it: should not include deployment annotations when empty
+    template: deployment.yaml
+    asserts:
+      - notExists:
+          path: metadata.annotations
+
   - it: should mount tmp volume for read-only filesystem
     template: deployment.yaml
     asserts:
