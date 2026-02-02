@@ -312,8 +312,21 @@ async def setup_page(request: Request) -> Response:
             status_code=200,
         )
 
-    # Determine base URL from request Host header
-    base_url = str(request.base_url).rstrip("/")
+    # Determine base URL with priority:
+    # 1. Explicit configuration (STAMPBOT_BASE_URL)
+    # 2. Proxy headers (X-Forwarded-Proto + X-Forwarded-Host)
+    # 3. Request base URL (fallback)
+    configured_base_url = settings.get("base_url", "")
+    if configured_base_url:
+        base_url = configured_base_url.rstrip("/")
+    else:
+        # Check for proxy headers from ingress/load balancer
+        forwarded_proto = request.headers.get("X-Forwarded-Proto", "")
+        forwarded_host = request.headers.get("X-Forwarded-Host", "")
+        if forwarded_proto and forwarded_host:
+            base_url = f"{forwarded_proto}://{forwarded_host}"
+        else:
+            base_url = str(request.base_url).rstrip("/")
     redirect_url = f"{base_url}/setup/callback"
 
     # Don't include webhook_url - GitHub will prompt the user for it during installation
