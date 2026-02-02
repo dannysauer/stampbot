@@ -48,6 +48,10 @@ serviceAccount:
   annotations: {}
   name: ""
 
+# Annotations for the Deployment resource itself (e.g., ArgoCD sync waves, Reloader)
+deploymentAnnotations: {}
+
+# Annotations for pod template (applied to each pod)
 podAnnotations:
   prometheus.io/scrape: "true"
   prometheus.io/port: "8000"
