@@ -103,7 +103,42 @@ class TestSetupEndpointsUnconfigured:
 
             assert response.status_code == 200
             # The manifest URL should use the forwarded host, not the internal Host header
-            assert "stampbot.example.com" in response.text
+            # Not a security check - just verifying test response content
+            assert (
+                "stampbot.example.com" in response.text
+            )  # lgtm[py/incomplete-url-substring-sanitization]
+            assert "internal-service" not in response.text
+
+    def test_setup_uses_configured_base_url(self):
+        """Test /setup uses configured base_url over headers."""
+        with (
+            patch("stampbot.main.is_configured", return_value=False),
+            patch("stampbot.main.settings") as mock_settings,
+        ):
+            mock_settings.setup_enabled = True
+            mock_settings.get.return_value = "https://configured.example.com"
+
+            from fastapi.testclient import TestClient
+
+            from stampbot.main import app
+
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get(
+                "/setup",
+                headers={
+                    "Host": "internal-service:8000",
+                    "X-Forwarded-Proto": "https",
+                    "X-Forwarded-Host": "forwarded.example.com",
+                },
+            )
+
+            assert response.status_code == 200
+            # Configured base_url takes priority over forwarded headers
+            # Not a security check - just verifying test response content
+            assert (
+                "configured.example.com" in response.text
+            )  # lgtm[py/incomplete-url-substring-sanitization]
+            assert "forwarded.example.com" not in response.text
             assert "internal-service" not in response.text
 
     def test_webhook_returns_503_when_unconfigured(self):
