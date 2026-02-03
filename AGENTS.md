@@ -93,6 +93,17 @@ GitHub Webhook -> POST /webhook -> WebhookHandler.handle_event()
 
 ## Development Guidelines
 
+### Pre-commit Before Push
+
+**IMPORTANT:** Always run pre-commit checks before pushing:
+```bash
+make pre-commit
+# or
+.venv/bin/pre-commit run --all-files
+```
+
+This prevents CI failures and avoids branch divergence when pre-commit.ci auto-fixes formatting issues.
+
 ### Virtual Environment Requirement
 
 **All local development MUST use the virtual environment.** The Makefile handles this automatically - all `make` targets that run locally (install, test, lint, format, run, dev) will create and use `.venv/`.
@@ -170,8 +181,11 @@ make test
 3. Add tests in `tests/`
 4. Update documentation
 5. Run linting and tests: `make lint test`
-6. Commit with conventional commit format
-7. Create PR
+6. **Run pre-commit before pushing**: `make pre-commit` (or `.venv/bin/pre-commit run --all-files`)
+7. Commit with conventional commit format
+8. Push and create PR
+
+**Important:** Always run pre-commit before pushing to avoid CI failures from formatting issues. Pre-commit.ci will auto-fix some issues, but this causes branch divergence that requires rebasing.
 
 ### Adding Metrics
 
