@@ -328,9 +328,9 @@ async def setup_page(request: Request) -> Response:
         else:
             base_url = str(request.base_url).rstrip("/")
     redirect_url = f"{base_url}/setup/callback"
+    webhook_url = f"{base_url}/webhook"
 
-    # Don't include webhook_url - GitHub will prompt the user for it during installation
-    manifest = create_manifest(redirect_url)
+    manifest = create_manifest(redirect_url, webhook_url=webhook_url)
     manifest_url = get_manifest_url(manifest)
 
     html_content = f"""
