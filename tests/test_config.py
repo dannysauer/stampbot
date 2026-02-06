@@ -159,3 +159,108 @@ def test_repo_config_get_defaults_partial_override():
         assert defaults["auto_approve_on_label"] is True
         assert defaults["chatops_enabled"] is True
         assert defaults["chatops_required_permission"] == "maintain"
+
+
+def test_repo_config_with_required_labels():
+    """Test parsing repository config with required labels."""
+    toml_content = """
+required_labels = ["dependencies", "automated"]
+"""
+    config = RepoConfig.from_toml(toml_content)
+    assert config.required_labels == ["dependencies", "automated"]
+
+
+def test_repo_config_with_required_title_patterns():
+    """Test parsing repository config with required title patterns."""
+    toml_content = """
+required_title_patterns = ["^\\\\[bot\\\\]", "^chore:"]
+"""
+    config = RepoConfig.from_toml(toml_content)
+    assert len(config.required_title_patterns) == 2
+    assert "^\\[bot\\]" in config.required_title_patterns
+    assert "^chore:" in config.required_title_patterns
+
+
+def test_repo_config_invalid_regex_pattern():
+    """Test invalid regex pattern raises a ValueError."""
+    toml_content = """
+required_title_patterns = ["[invalid"]
+"""
+    with pytest.raises(ValueError, match="Invalid regex pattern"):
+        RepoConfig.from_toml(toml_content)
+
+
+def test_is_pr_eligible_no_filters():
+    """Test is_pr_eligible returns True when no filters configured."""
+    config = RepoConfig.default()
+    is_eligible, reason = config.is_pr_eligible(["some-label"], "Some PR title")
+    assert is_eligible is True
+    assert reason is None
+
+
+def test_is_pr_eligible_required_label_present():
+    """Test is_pr_eligible returns True when required label is present."""
+    config = RepoConfig.from_toml('required_labels = ["dependencies", "automated"]')
+    is_eligible, reason = config.is_pr_eligible(["dependencies"], "PR title")
+    assert is_eligible is True
+    assert reason is None
+
+
+def test_is_pr_eligible_required_label_missing():
+    """Test is_pr_eligible returns False when required label is missing."""
+    config = RepoConfig.from_toml('required_labels = ["dependencies", "automated"]')
+    is_eligible, reason = config.is_pr_eligible(["other-label"], "PR title")
+    assert is_eligible is False
+    assert "missing required label" in reason
+
+
+def test_is_pr_eligible_title_pattern_matches():
+    """Test is_pr_eligible returns True when title matches pattern."""
+    config = RepoConfig.from_toml('required_title_patterns = ["^chore:", "^\\\\[bot\\\\]"]')
+    is_eligible, reason = config.is_pr_eligible([], "chore: update dependencies")
+    assert is_eligible is True
+    assert reason is None
+
+
+def test_is_pr_eligible_title_pattern_no_match():
+    """Test is_pr_eligible returns False when title doesn't match any pattern."""
+    config = RepoConfig.from_toml('required_title_patterns = ["^chore:", "^\\\\[bot\\\\]"]')
+    is_eligible, reason = config.is_pr_eligible([], "feat: add new feature")
+    assert is_eligible is False
+    assert "does not match any required pattern" in reason
+
+
+def test_is_pr_eligible_both_filters_pass():
+    """Test is_pr_eligible returns True when both filters pass."""
+    toml_content = """
+required_labels = ["automated"]
+required_title_patterns = ["^chore:"]
+"""
+    config = RepoConfig.from_toml(toml_content)
+    is_eligible, reason = config.is_pr_eligible(["automated"], "chore: update deps")
+    assert is_eligible is True
+    assert reason is None
+
+
+def test_is_pr_eligible_label_fails_title_passes():
+    """Test is_pr_eligible returns False when label filter fails."""
+    toml_content = """
+required_labels = ["automated"]
+required_title_patterns = ["^chore:"]
+"""
+    config = RepoConfig.from_toml(toml_content)
+    is_eligible, reason = config.is_pr_eligible(["other"], "chore: update deps")
+    assert is_eligible is False
+    assert "missing required label" in reason
+
+
+def test_is_pr_eligible_label_passes_title_fails():
+    """Test is_pr_eligible returns False when title filter fails."""
+    toml_content = """
+required_labels = ["automated"]
+required_title_patterns = ["^chore:"]
+"""
+    config = RepoConfig.from_toml(toml_content)
+    is_eligible, reason = config.is_pr_eligible(["automated"], "feat: new feature")
+    assert is_eligible is False
+    assert "does not match any required pattern" in reason

@@ -230,9 +230,36 @@ class WebhookHandler:
                 "synchronize",
             ]:
                 labels = [label["name"] for label in pr.get("labels", [])]
+                pr_title = pr.get("title", "")
 
                 for label in labels:
                     if label in repo_config.approval_labels:
+                        # Check if PR passes eligibility filters
+                        is_eligible, reason = repo_config.is_pr_eligible(labels, pr_title)
+                        if not is_eligible:
+                            logger.info(
+                                "PR #%d not eligible for auto-approval: %s",
+                                pr_number,
+                                reason,
+                                extra={
+                                    "repo": repo_full_name,
+                                    "pr_number": pr_number,
+                                    "reason": reason,
+                                },
+                            )
+                            add_span_attributes(
+                                span,
+                                {
+                                    "webhook.result": "not_eligible",
+                                    "webhook.ineligible_reason": reason,
+                                },
+                            )
+                            set_span_ok(span)
+                            return {
+                                "status": "ignored",
+                                "message": f"PR not eligible: {reason}",
+                            }
+
                         logger.info(
                             "PR #%d has approval label: %s",
                             pr_number,

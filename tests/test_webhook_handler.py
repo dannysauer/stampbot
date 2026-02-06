@@ -187,6 +187,46 @@ async def test_pr_missing_installation_id(webhook_handler, mock_github_client):
     assert "missing" in result["message"].lower()
 
 
+@pytest.mark.asyncio
+async def test_pr_not_eligible_missing_required_label(webhook_handler, mock_github_client):
+    """Test PR with approval label but missing required label is not approved."""
+    payload = load_fixture("pr_opened_with_autoapprove_label")
+    mock_github_client.get_repo_file.return_value = 'required_labels = ["dependencies"]'
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "ignored"
+    assert "not eligible" in result["message"].lower()
+    assert "missing required label" in result["message"].lower()
+    mock_github_client.approve_pr.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pr_not_eligible_title_pattern_no_match(webhook_handler, mock_github_client):
+    """Test PR with approval label but title doesn't match pattern is not approved."""
+    payload = load_fixture("pr_opened_with_autoapprove_label")
+    mock_github_client.get_repo_file.return_value = 'required_title_patterns = ["^chore:"]'
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "ignored"
+    assert "not eligible" in result["message"].lower()
+    mock_github_client.approve_pr.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pr_eligible_with_required_label(webhook_handler, mock_github_client):
+    """Test PR with approval label and matching required label is approved."""
+    payload = load_fixture("pr_opened_with_autoapprove_label")
+    # The fixture has "autoapprove" label, so require it
+    mock_github_client.get_repo_file.return_value = 'required_labels = ["autoapprove"]'
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "success"
+    mock_github_client.approve_pr.assert_called_once()
+
+
 # =============================================================================
 # Issue Comment (Chatops) Tests
 # =============================================================================
