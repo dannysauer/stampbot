@@ -21,6 +21,7 @@ def mock_github_client():
         mock.find_bot_reviews.return_value = []
         mock.repo_has_label.return_value = True
         mock.user_has_permission.return_value = True
+        mock.get_user_team_slugs.return_value = []  # No team memberships by default
         yield mock
 
 
@@ -755,3 +756,62 @@ async def test_pr_unlabeled_non_approval_label(webhook_handler, mock_github_clie
     assert "no action" in result["message"].lower()
     mock_github_client.find_bot_reviews.assert_not_called()
     mock_github_client.dismiss_approval.assert_not_called()
+
+
+# =============================================================================
+# Team Membership Filter Tests
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_pr_with_allowed_teams_triggers_team_check(webhook_handler, mock_github_client):
+    """Test PR with allowed_teams configured triggers team membership check."""
+    payload = load_fixture("pr_opened_with_autoapprove_label")
+    # Config with allowed_teams - user not in allowed_users so needs team check
+    mock_github_client.get_repo_file.return_value = """
+allowed_teams = ["acme/release-team"]
+"""
+    # User is in the allowed team
+    mock_github_client.get_user_team_slugs.return_value = ["release-team"]
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "success"
+    mock_github_client.get_user_team_slugs.assert_called_once()
+    mock_github_client.approve_pr.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_pr_with_allowed_teams_user_not_member(webhook_handler, mock_github_client):
+    """Test PR rejected when user is not in any allowed team."""
+    payload = load_fixture("pr_opened_with_autoapprove_label")
+    mock_github_client.get_repo_file.return_value = """
+allowed_teams = ["acme/release-team"]
+"""
+    # User is NOT in the allowed team
+    mock_github_client.get_user_team_slugs.return_value = []
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "ignored"
+    assert "not eligible" in result["message"].lower()
+    mock_github_client.get_user_team_slugs.assert_called_once()
+    mock_github_client.approve_pr.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pr_with_allowed_users_skips_team_check(webhook_handler, mock_github_client):
+    """Test PR with user in allowed_users skips team membership check."""
+    payload = load_fixture("pr_opened_with_autoapprove_label")
+    # The fixture has user "contributor"
+    mock_github_client.get_repo_file.return_value = """
+allowed_users = ["contributor"]
+allowed_teams = ["acme/release-team"]
+"""
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "success"
+    # Should NOT call get_user_team_slugs since user is in allowed_users
+    mock_github_client.get_user_team_slugs.assert_not_called()
+    mock_github_client.approve_pr.assert_called_once()

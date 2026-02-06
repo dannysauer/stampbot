@@ -193,7 +193,7 @@ required_title_patterns = ["[invalid"]
 def test_is_pr_eligible_no_filters():
     """Test is_pr_eligible returns True when no filters configured."""
     config = RepoConfig.default()
-    is_eligible, reason = config.is_pr_eligible(["some-label"], "Some PR title")
+    is_eligible, reason = config.is_pr_eligible(["some-label"], "Some PR title", "someuser")
     assert is_eligible is True
     assert reason is None
 
@@ -201,7 +201,7 @@ def test_is_pr_eligible_no_filters():
 def test_is_pr_eligible_required_label_present():
     """Test is_pr_eligible returns True when required label is present."""
     config = RepoConfig.from_toml('required_labels = ["dependencies", "automated"]')
-    is_eligible, reason = config.is_pr_eligible(["dependencies"], "PR title")
+    is_eligible, reason = config.is_pr_eligible(["dependencies"], "PR title", "someuser")
     assert is_eligible is True
     assert reason is None
 
@@ -209,15 +209,24 @@ def test_is_pr_eligible_required_label_present():
 def test_is_pr_eligible_required_label_missing():
     """Test is_pr_eligible returns False when required label is missing."""
     config = RepoConfig.from_toml('required_labels = ["dependencies", "automated"]')
-    is_eligible, reason = config.is_pr_eligible(["other-label"], "PR title")
+    is_eligible, reason = config.is_pr_eligible(["other-label"], "PR title", "someuser")
     assert is_eligible is False
     assert "missing required label" in reason
+
+
+def test_is_pr_eligible_required_label_second_matches():
+    """Test is_pr_eligible returns True when second of multiple required labels matches."""
+    config = RepoConfig.from_toml('required_labels = ["dependencies", "automated", "bot"]')
+    # PR has "automated" which is the second label in the list
+    is_eligible, reason = config.is_pr_eligible(["automated"], "PR title", "someuser")
+    assert is_eligible is True
+    assert reason is None
 
 
 def test_is_pr_eligible_title_pattern_matches():
     """Test is_pr_eligible returns True when title matches pattern."""
     config = RepoConfig.from_toml('required_title_patterns = ["^chore:", "^\\\\[bot\\\\]"]')
-    is_eligible, reason = config.is_pr_eligible([], "chore: update dependencies")
+    is_eligible, reason = config.is_pr_eligible([], "chore: update dependencies", "someuser")
     assert is_eligible is True
     assert reason is None
 
@@ -225,9 +234,20 @@ def test_is_pr_eligible_title_pattern_matches():
 def test_is_pr_eligible_title_pattern_no_match():
     """Test is_pr_eligible returns False when title doesn't match any pattern."""
     config = RepoConfig.from_toml('required_title_patterns = ["^chore:", "^\\\\[bot\\\\]"]')
-    is_eligible, reason = config.is_pr_eligible([], "feat: add new feature")
+    is_eligible, reason = config.is_pr_eligible([], "feat: add new feature", "someuser")
     assert is_eligible is False
     assert "does not match any required pattern" in reason
+
+
+def test_is_pr_eligible_title_pattern_second_matches():
+    """Test is_pr_eligible returns True when second of multiple patterns matches."""
+    config = RepoConfig.from_toml(
+        'required_title_patterns = ["^chore:", "^\\\\[bot\\\\]", "^fix:"]'
+    )
+    # Title matches the second pattern
+    is_eligible, reason = config.is_pr_eligible([], "[bot] Update deps", "someuser")
+    assert is_eligible is True
+    assert reason is None
 
 
 def test_is_pr_eligible_both_filters_pass():
@@ -237,7 +257,7 @@ required_labels = ["automated"]
 required_title_patterns = ["^chore:"]
 """
     config = RepoConfig.from_toml(toml_content)
-    is_eligible, reason = config.is_pr_eligible(["automated"], "chore: update deps")
+    is_eligible, reason = config.is_pr_eligible(["automated"], "chore: update deps", "someuser")
     assert is_eligible is True
     assert reason is None
 
@@ -249,7 +269,7 @@ required_labels = ["automated"]
 required_title_patterns = ["^chore:"]
 """
     config = RepoConfig.from_toml(toml_content)
-    is_eligible, reason = config.is_pr_eligible(["other"], "chore: update deps")
+    is_eligible, reason = config.is_pr_eligible(["other"], "chore: update deps", "someuser")
     assert is_eligible is False
     assert "missing required label" in reason
 
@@ -261,6 +281,123 @@ required_labels = ["automated"]
 required_title_patterns = ["^chore:"]
 """
     config = RepoConfig.from_toml(toml_content)
-    is_eligible, reason = config.is_pr_eligible(["automated"], "feat: new feature")
+    is_eligible, reason = config.is_pr_eligible(["automated"], "feat: new feature", "someuser")
     assert is_eligible is False
     assert "does not match any required pattern" in reason
+
+
+def test_is_pr_eligible_allowed_user():
+    """Test is_pr_eligible returns True when author is in allowed_users."""
+    config = RepoConfig.from_toml('allowed_users = ["dependabot[bot]", "renovate[bot]"]')
+    is_eligible, reason = config.is_pr_eligible([], "Update deps", "dependabot[bot]")
+    assert is_eligible is True
+    assert reason is None
+
+
+def test_is_pr_eligible_user_not_allowed():
+    """Test is_pr_eligible returns False when author is not in allowed_users."""
+    config = RepoConfig.from_toml('allowed_users = ["dependabot[bot]", "renovate[bot]"]')
+    is_eligible, reason = config.is_pr_eligible([], "Update deps", "random-user")
+    assert is_eligible is False
+    assert "not in allowed users" in reason
+
+
+def test_is_pr_eligible_allowed_team():
+    """Test is_pr_eligible returns True when author is in an allowed team."""
+    config = RepoConfig.from_toml('allowed_teams = ["my-org/release-team"]')
+    is_eligible, reason = config.is_pr_eligible(
+        [], "Update deps", "team-member", author_team_slugs=["release-team"]
+    )
+    assert is_eligible is True
+    assert reason is None
+
+
+def test_is_pr_eligible_team_not_matched():
+    """Test is_pr_eligible returns False when author is not in any allowed team."""
+    config = RepoConfig.from_toml('allowed_teams = ["my-org/release-team"]')
+    is_eligible, reason = config.is_pr_eligible(
+        [], "Update deps", "non-member", author_team_slugs=["other-team"]
+    )
+    assert is_eligible is False
+    assert "not a member of any allowed team" in reason
+
+
+def test_is_pr_eligible_user_or_team():
+    """Test is_pr_eligible returns True when user matches even if not in team."""
+    toml_content = """
+allowed_users = ["special-user"]
+allowed_teams = ["my-org/release-team"]
+"""
+    config = RepoConfig.from_toml(toml_content)
+    # User is in allowed_users, so no team check needed
+    is_eligible, reason = config.is_pr_eligible([], "Update deps", "special-user")
+    assert is_eligible is True
+    assert reason is None
+
+
+def test_is_pr_eligible_neither_user_nor_team():
+    """Test is_pr_eligible returns False when neither user nor team matches."""
+    toml_content = """
+allowed_users = ["special-user"]
+allowed_teams = ["my-org/release-team"]
+"""
+    config = RepoConfig.from_toml(toml_content)
+    is_eligible, reason = config.is_pr_eligible(
+        [], "Update deps", "random-user", author_team_slugs=["other-team"]
+    )
+    assert is_eligible is False
+    assert "not in allowed users or teams" in reason
+
+
+def test_is_pr_eligible_not_in_users_but_in_team():
+    """Test is_pr_eligible returns True when user not in allowed_users but is in allowed_team."""
+    toml_content = """
+allowed_users = ["special-user"]
+allowed_teams = ["my-org/release-team"]
+"""
+    config = RepoConfig.from_toml(toml_content)
+    # User is NOT in allowed_users but IS in allowed_teams
+    is_eligible, reason = config.is_pr_eligible(
+        [], "Update deps", "team-member", author_team_slugs=["release-team"]
+    )
+    assert is_eligible is True
+    assert reason is None
+
+
+def test_is_pr_eligible_multiple_teams_second_matches():
+    """Test is_pr_eligible returns True when user is in second of multiple allowed teams."""
+    config = RepoConfig.from_toml(
+        'allowed_teams = ["my-org/admin-team", "my-org/release-team", "my-org/deploy-team"]'
+    )
+    # User is only in release-team (the second one)
+    is_eligible, reason = config.is_pr_eligible(
+        [], "Update deps", "team-member", author_team_slugs=["release-team"]
+    )
+    assert is_eligible is True
+    assert reason is None
+
+
+def test_needs_team_check_no_teams_configured():
+    """Test needs_team_check returns False when no teams configured."""
+    config = RepoConfig.from_toml('allowed_users = ["some-user"]')
+    assert config.needs_team_check("any-user") is False
+
+
+def test_needs_team_check_user_in_allowed_users():
+    """Test needs_team_check returns False when user is in allowed_users."""
+    toml_content = """
+allowed_users = ["special-user"]
+allowed_teams = ["my-org/release-team"]
+"""
+    config = RepoConfig.from_toml(toml_content)
+    assert config.needs_team_check("special-user") is False
+
+
+def test_needs_team_check_user_not_in_allowed_users():
+    """Test needs_team_check returns True when user not in allowed_users but teams configured."""
+    toml_content = """
+allowed_users = ["special-user"]
+allowed_teams = ["my-org/release-team"]
+"""
+    config = RepoConfig.from_toml(toml_content)
+    assert config.needs_team_check("other-user") is True

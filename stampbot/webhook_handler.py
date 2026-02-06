@@ -231,11 +231,25 @@ class WebhookHandler:
             ]:
                 labels = [label["name"] for label in pr.get("labels", [])]
                 pr_title = pr.get("title", "")
+                pr_author = pr.get("user", {}).get("login", "")
 
                 for label in labels:
                     if label in repo_config.approval_labels:
+                        # Check if team membership verification is needed
+                        author_team_slugs: list[str] | None = None
+                        if repo_config.needs_team_check(pr_author) and owner_login:
+                            author_team_slugs = await run_in_threadpool(
+                                github_client.get_user_team_slugs,
+                                installation_id,
+                                owner_login,
+                                pr_author,
+                                repo_config.allowed_teams,
+                            )
+
                         # Check if PR passes eligibility filters
-                        is_eligible, reason = repo_config.is_pr_eligible(labels, pr_title)
+                        is_eligible, reason = repo_config.is_pr_eligible(
+                            labels, pr_title, pr_author, author_team_slugs
+                        )
                         if not is_eligible:
                             logger.info(
                                 "PR #%d not eligible for auto-approval: %s",
@@ -244,6 +258,7 @@ class WebhookHandler:
                                 extra={
                                     "repo": repo_full_name,
                                     "pr_number": pr_number,
+                                    "pr_author": pr_author,
                                     "reason": reason,
                                 },
                             )
