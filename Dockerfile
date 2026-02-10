@@ -1,19 +1,20 @@
 # syntax=docker/dockerfile:1@sha256:b6afd42430b15f2d2a4c5a02b919e98a525b785b1aaff16747d2f623364e39b6
 
-FROM python:3.14@sha256:17bc9f1d032a760546802cc4e406401eb5fe99dbcb4602c91628e73672fa749c AS builder
+FROM python:3.14@sha256:4b827abf32c14b7df9a0dc5199c2f0bc46e2c9862cd5d77eddae8a2cd8460f60 AS builder
 
 # Set working directory
 WORKDIR /app
 
-# Copy requirements first for better layer caching
-COPY requirements.txt .
+# Copy dependency files for layer caching
+COPY constraints.txt requirements.txt ./
 
-# Install Python dependencies
+# Install pinned pip first (CVE-2026-1703 fix), then dependencies
 RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir -r constraints.txt && \
     pip install --no-cache-dir -r requirements.txt
 
 # Production stage
-FROM python:3.14-slim@sha256:9b81fe9acff79e61affb44aaf3b6ff234392e8ca477cb86c9f7fd11732ce9b6a
+FROM python:3.14-slim@sha256:486b8092bfb12997e10d4920897213a06563449c951c5506c2a2cfaf591c599f
 
 # Create non-root user
 RUN useradd -m -u 1000 stampbot && \
