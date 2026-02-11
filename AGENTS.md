@@ -313,6 +313,41 @@ make secrets-baseline  # Update .secrets.baseline
 git add .secrets.baseline
 ```
 
+### CI/CD Tool Management
+
+**Tool Installation:** CI workflows use `jdx/mise-action` to install tools from `.tool-versions`. This ensures CI uses the same tool versions as local development.
+
+```yaml
+- name: Set up tools
+  uses: jdx/mise-action@<SHA> # v3.x.x
+  with:
+    cache: true
+```
+
+**Do NOT** use separate setup actions (e.g., `azure/setup-helm`) for tools defined in `.tool-versions`. Adding a tool to `.tool-versions` automatically makes it available in CI.
+
+**Python Package Caching:** For jobs that install Python packages, add `setup-python` after mise-action to enable poetry package caching:
+
+```yaml
+- name: Set up tools
+  uses: jdx/mise-action@<SHA> # v3.x.x
+  with:
+    cache: true
+
+- name: Set up Python package cache
+  uses: actions/setup-python@<SHA> # v6.x.x
+  with:
+    python-version-file: '.python-version'
+    cache: 'poetry'
+
+- name: Install dependencies
+  run: poetry install --only main,dev
+```
+
+The mise-action caches tool binaries (python, poetry, helm), while setup-python caches installed Python packages.
+
+**Docker Builds:** The Dockerfile uses pip with `requirements.txt` (not Poetry) to enable layer caching. The `requirements.txt` is auto-generated from `pyproject.toml` by the poetry-export pre-commit hook. This separation allows dependency layers to be cached independently of source code changes.
+
 ## Important Files to Review
 
 When making changes, consider the impact on:

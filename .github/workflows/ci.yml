@@ -21,25 +21,28 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Set up Python
+      - name: Set up tools
+        uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
+        with:
+          cache: true
+
+      - name: Set up Python package cache
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version-file: '.python-version'
-          cache: 'pip'
+          cache: 'poetry'
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install ruff mypy types-toml
+        run: poetry install --only main,dev
 
       - name: Run ruff format
-        run: ruff format --check stampbot/ tests/
+        run: poetry run ruff format --check stampbot/ tests/
 
       - name: Run ruff check
-        run: ruff check stampbot/ tests/
+        run: poetry run ruff check stampbot/ tests/
 
       - name: Run mypy
-        run: mypy stampbot/
+        run: poetry run mypy stampbot/
 
   test:
     name: Test (Python ${{ matrix.python-version }})
@@ -51,21 +54,25 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up tools
+        uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
+        with:
+          cache: true
+        env:
+          MISE_PYTHON_VERSION: ${{ matrix.python-version }}
+
+      - name: Set up Python package cache
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: ${{ matrix.python-version }}
-          allow-prereleases: true
-          cache: 'pip'
+          cache: 'poetry'
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install pytest pytest-cov pytest-asyncio
+        run: poetry install --only main,dev
 
       - name: Run tests
         run: |
-          pytest tests/ -v \
+          poetry run pytest tests/ -v \
             --cov=stampbot \
             --cov-branch \
             --cov-report=xml \
@@ -101,28 +108,31 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Set up Python
+      - name: Set up tools
+        uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
+        with:
+          cache: true
+
+      - name: Set up Python package cache
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version-file: '.python-version'
-          cache: 'pip'
+          cache: 'poetry'
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install pytest pytest-asyncio cosmic-ray
+        run: poetry install --only main,dev
 
       - name: Initialize mutation testing
-        run: cosmic-ray init cosmic-ray.toml .mutation.sqlite
+        run: poetry run cosmic-ray init cosmic-ray.toml .mutation.sqlite
 
       - name: Run mutation testing
-        run: cosmic-ray --verbosity INFO exec cosmic-ray.toml .mutation.sqlite
+        run: poetry run cosmic-ray --verbosity INFO exec cosmic-ray.toml .mutation.sqlite
 
       - name: Generate mutation report
         run: |
           # cosmic-ray dump outputs NDJSON where each line is [WorkItem, WorkResult]
           # Flatten to a simpler structure for processing
-          cosmic-ray dump .mutation.sqlite | python3 -c "
+          poetry run cosmic-ray dump .mutation.sqlite | python3 -c "
           import json, sys
           data = []
           for line in sys.stdin:
@@ -135,12 +145,12 @@ jobs:
                   data.append(merged)
           json.dump(data, sys.stdout, indent=2)
           " > mutation-report.json
-          cr-html .mutation.sqlite > mutation-report.html
+          poetry run cr-html .mutation.sqlite > mutation-report.html
 
       - name: Calculate mutation score and generate badge
         id: score
         run: |
-          python3 << 'EOF'
+          poetry run python << 'EOF'
           import json
           import os
 
@@ -544,10 +554,10 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Set up Helm
-        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+      - name: Set up tools
+        uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
         with:
-          version: 'latest'
+          cache: true
 
       - name: Lint Helm chart
         run: helm lint charts/stampbot
@@ -565,10 +575,10 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Set up Helm
-        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+      - name: Set up tools
+        uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
         with:
-          version: 'latest'
+          cache: true
 
       - name: Install kubeconform
         run: |
@@ -606,10 +616,10 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Set up Helm
-        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+      - name: Set up tools
+        uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
         with:
-          version: 'latest'
+          cache: true
 
       - name: Install helm-unittest plugin
         run: helm plugin install https://github.com/helm-unittest/helm-unittest.git --verify=false
@@ -651,10 +661,10 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Set up Helm
-        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+      - name: Set up tools
+        uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
         with:
-          version: 'latest'
+          cache: true
 
       - name: Create kind cluster
         uses: helm/kind-action@92086f6be054225fa813e0a4b13787fc9088faab # v1.13.0

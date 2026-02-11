@@ -37,10 +37,10 @@ jobs:
         with:
           fetch-depth: 0  # Full history for version calculation
 
-      - name: Set up Helm
-        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+      - name: Set up tools
+        uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
         with:
-          version: 'latest'
+          cache: true
 
       - name: Calculate next chart version
         id: version
