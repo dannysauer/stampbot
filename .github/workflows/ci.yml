@@ -45,12 +45,8 @@ jobs:
         run: poetry run mypy stampbot/
 
   test:
-    name: Test (Python ${{ matrix.python-version }})
+    name: Test
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ['3.11', '3.12', '3.13', '3.14']
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -58,13 +54,11 @@ jobs:
         uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
         with:
           cache: true
-        env:
-          MISE_PYTHON_VERSION: ${{ matrix.python-version }}
 
       - name: Set up Python package cache
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version-file: '.python-version'
           cache: 'poetry'
 
       - name: Install dependencies
@@ -81,17 +75,15 @@ jobs:
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
-        if: matrix.python-version == '3.14'
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           flags: unittests
-          name: python-${{ matrix.python-version }}
+          name: python
           fail_ci_if_error: true
 
       - name: Upload coverage HTML report
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        if: matrix.python-version == '3.14'
         with:
           name: coverage-report
           path: htmlcov/
