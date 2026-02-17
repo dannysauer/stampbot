@@ -1,0 +1,3 @@
+# Build tool version constraints
+# These are installed before requirements.txt to ensure secure/compatible tooling
+pip==26.0.1

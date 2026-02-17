@@ -24,6 +24,16 @@ repos:
       - id: no-commit-to-branch
         args: ['--branch', 'main', '--branch', 'develop']
 
+  # Export Poetry dependencies to requirements.txt for Docker build caching
+  # This keeps requirements.txt in sync with pyproject.toml automatically.
+  # requirements.txt is used in Dockerfile to enable layer caching - changes to
+  # pyproject.toml tool config won't invalidate the dependency layer.
+  - repo: https://github.com/python-poetry/poetry-plugin-export
+    rev: 1.10.0
+    hooks:
+      - id: poetry-export
+        args: ["-f", "requirements.txt", "-o", "requirements.txt", "--only", "main"]
+
   # Conventional commit message validation
   - repo: https://github.com/alessandrojcm/commitlint-pre-commit-hook
     rev: v9.24.0
@@ -89,4 +99,4 @@ repos:
 
 # Skip hooks on specific files
 ci:
-  skip: [helmlint, helm-kubeconform, commitlint, renovate-config-validator, mypy]  # Skip in CI (handled by workflows or too large)
+  skip: [helmlint, helm-kubeconform, commitlint, renovate-config-validator, mypy, poetry-export]  # Skip in CI (handled by workflows, too large, or requires local tools)

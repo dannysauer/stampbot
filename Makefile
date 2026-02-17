@@ -7,7 +7,10 @@ REGISTRY ?= docker.io
 CHART_VERSION ?= 0.1.0
 VENV := .venv
 PYTHON := $(VENV)/bin/python
-PIP := $(VENV)/bin/pip
+POETRY := poetry
+
+# Poetry configuration - create venv in project directory
+export POETRY_VIRTUALENVS_IN_PROJECT := true
 
 # Docker buildx settings for caching
 DOCKER_BUILDKIT := 1
@@ -19,18 +22,17 @@ help: ## Show this help message
 	@echo 'Available targets:'
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-$(VENV)/bin/activate:
-	python3 -m venv $(VENV)
-	$(PIP) install --upgrade pip
+$(VENV)/bin/activate: pyproject.toml poetry.lock
+	$(POETRY) install
+	@touch $(VENV)/bin/activate
 
-venv: $(VENV)/bin/activate ## Create virtual environment
+venv: $(VENV)/bin/activate ## Create virtual environment with dependencies
 
-install: venv ## Install production dependencies
-	$(PIP) install -r requirements.txt
+install: ## Install production dependencies only
+	$(POETRY) install --only main
 
-install-dev: venv ## Install development dependencies
-	$(PIP) install -r requirements.txt
-	$(PIP) install -e ".[dev]"
+install-dev: $(VENV)/bin/activate ## Install development dependencies
+	@# venv target already runs poetry install
 
 test: venv ## Run tests
 	$(PYTHON) -m pytest tests/ -v
@@ -201,12 +203,11 @@ pre-commit: venv ## Run pre-commit checks on all files
 	$(VENV)/bin/pre-commit run --all-files
 
 pre-commit-install: venv ## Install pre-commit hooks
-	$(PIP) install pre-commit
 	$(VENV)/bin/pre-commit install
 
 # Secret detection
-secrets-baseline: venv ## Update .secrets.baseline file for false positive management
-	$(PIP) install -q detect-secrets==1.5.0
+secrets-baseline: ## Update .secrets.baseline file for false positive management
+	$(POETRY) install --with secrets
 	@if [ -f .secrets.baseline ]; then \
 		$(VENV)/bin/detect-secrets scan --baseline .secrets.baseline; \
 	else \
