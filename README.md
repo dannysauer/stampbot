@@ -1,5 +1,9 @@
 # Stampbot
 
+<p align="center">
+  <img src="stampbot.png" alt="Stampbot logo" width="200">
+</p>
+
 [![CI](https://github.com/dannysauer/stampbot/workflows/CI/badge.svg)](https://github.com/dannysauer/stampbot/actions/workflows/ci.yml)
 [![Release](https://github.com/dannysauer/stampbot/workflows/Release/badge.svg)](https://github.com/dannysauer/stampbot/actions/workflows/release.yml)
 [![codecov](https://codecov.io/gh/dannysauer/stampbot/branch/main/graph/badge.svg)](https://codecov.io/gh/dannysauer/stampbot)
