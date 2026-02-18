@@ -102,9 +102,9 @@ class TestSetupEndpointsUnconfigured:
             )
 
             assert response.status_code == 200
-            # The manifest URL should use the forwarded host, not the internal Host header
-            # Check for URL-encoded format which appears in the manifest URL
-            assert "https%3A//stampbot.example.com" in response.text
+            # The manifest should use the forwarded host, not the internal Host header
+            # URLs appear in HTML-escaped JSON within the form's hidden input
+            assert "https://stampbot.example.com" in response.text
             assert "internal-service" not in response.text
 
     def test_setup_uses_configured_base_url(self):
@@ -132,8 +132,8 @@ class TestSetupEndpointsUnconfigured:
 
             assert response.status_code == 200
             # Configured base_url takes priority over forwarded headers
-            # Check for URL-encoded format which appears in the manifest URL
-            assert "https%3A//configured.example.com" in response.text
+            # URLs appear in HTML-escaped JSON within the form's hidden input
+            assert "https://configured.example.com" in response.text
             assert "forwarded.example.com" not in response.text
             assert "internal-service" not in response.text
 
