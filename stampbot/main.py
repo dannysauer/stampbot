@@ -3,6 +3,8 @@
 
 """Main FastAPI application."""
 
+import html
+import json
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -13,7 +15,11 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
 from stampbot.config import is_configured, settings
 from stampbot.logger import configure_logging, get_logger
-from stampbot.manifest import create_manifest, exchange_code_for_credentials, get_manifest_url
+from stampbot.manifest import (
+    GITHUB_MANIFEST_URL,
+    create_manifest,
+    exchange_code_for_credentials,
+)
 from stampbot.metrics import (
     errors_total,
     get_metrics,
@@ -331,7 +337,8 @@ async def setup_page(request: Request) -> Response:
     webhook_url = f"{base_url}/webhook"
 
     manifest = create_manifest(redirect_url, webhook_url=webhook_url)
-    manifest_url = get_manifest_url(manifest)
+    # HTML-escape the JSON for safe embedding in the form
+    manifest_json = html.escape(json.dumps(manifest))
 
     html_content = f"""
     <!DOCTYPE html>
@@ -343,7 +350,8 @@ async def setup_page(request: Request) -> Response:
                    max-width: 600px; margin: 50px auto; padding: 20px; }}
             h1 {{ color: #24292e; }}
             .button {{ display: inline-block; padding: 12px 24px; background: #2ea44f;
-                      color: white; text-decoration: none; border-radius: 6px; font-weight: 600; }}
+                      color: white; text-decoration: none; border-radius: 6px; font-weight: 600;
+                      border: none; cursor: pointer; font-size: 16px; }}
             .button:hover {{ background: #22863a; }}
             .info {{ background: #f6f8fa; padding: 16px; border-radius: 6px; margin: 20px 0; }}
             code {{ background: #f6f8fa; padding: 2px 6px; border-radius: 3px; }}
@@ -369,11 +377,14 @@ async def setup_page(request: Request) -> Response:
             </ul>
         </div>
 
-        <a href="{manifest_url}" class="button">Create GitHub App</a>
+        <form method="post" action="{GITHUB_MANIFEST_URL}">
+            <input type="hidden" name="manifest" value="{manifest_json}">
+            <button type="submit" class="button">Create GitHub App</button>
+        </form>
 
         <div class="info">
-            <p><strong>Note:</strong> GitHub will prompt you for the webhook URL.</p>
-            <p>Use your public URL with <code>/webhook</code> path.</p>
+            <p><strong>Note:</strong> The webhook URL will be automatically configured to:</p>
+            <p><code>{webhook_url}</code></p>
         </div>
     </body>
     </html>
