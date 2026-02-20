@@ -735,6 +735,117 @@ class GitHubAppClient:
                 )
                 return False
 
+    def get_user_team_slugs(
+        self,
+        installation_id: int,
+        org_name: str,
+        username: str,
+        allowed_teams: list[str],
+    ) -> list[str]:
+        """Get team slugs the user is a member of from the allowed teams list.
+
+        Args:
+            installation_id: GitHub App installation ID
+            org_name: Organization name
+            username: GitHub username to check
+            allowed_teams: List of team slugs to check (can be "org/team" or just "team")
+
+        Returns:
+            List of team slugs the user is a member of
+        """
+        start_time = time.time()
+
+        with create_span(
+            "github.get_user_team_slugs",
+            {
+                "github.org": org_name,
+                "github.username": username,
+                "github.installation_id": installation_id,
+                "github.teams_to_check": len(allowed_teams),
+            },
+        ) as span:
+            member_teams: list[str] = []
+
+            try:
+                client = self._get_installation_client(installation_id)
+                org = client.get_organization(org_name)
+
+                for team_ref in allowed_teams:
+                    # Extract team slug (handle both "org/team" and "team" formats)
+                    team_slug = team_ref.split("/")[-1] if "/" in team_ref else team_ref
+
+                    try:
+                        team = org.get_team_by_slug(team_slug)
+                        # Check if user is a member
+                        user = client.get_user(username)
+                        if team.has_in_members(user):  # type: ignore[arg-type]
+                            member_teams.append(team_slug)
+                            logger.debug(
+                                "User %s is a member of team %s",
+                                username,
+                                team_slug,
+                                extra={
+                                    "org": org_name,
+                                    "username": username,
+                                    "team": team_slug,
+                                },
+                            )
+                    except GithubException as e:
+                        # Team not found or no access - skip silently
+                        logger.debug(
+                            "Could not check team %s membership: %s",
+                            team_slug,
+                            e.data.get("message", str(e)) if hasattr(e, "data") else str(e),
+                            extra={
+                                "org": org_name,
+                                "team": team_slug,
+                                "username": username,
+                            },
+                        )
+                        continue
+
+                duration = time.time() - start_time
+                github_api_request_duration_seconds.labels(operation="get_user_teams").observe(
+                    duration
+                )
+                github_api_requests_total.labels(operation="get_user_teams", status="success").inc()
+
+                self._update_rate_limit_metrics(client, installation_id)
+
+                add_span_attributes(
+                    span,
+                    {
+                        "github.member_teams": len(member_teams),
+                        "github.teams_checked": len(allowed_teams),
+                    },
+                )
+                set_span_ok(span)
+
+                return member_teams
+
+            except Exception as e:
+                duration = time.time() - start_time
+                github_api_request_duration_seconds.labels(operation="get_user_teams").observe(
+                    duration
+                )
+                github_api_requests_total.labels(operation="get_user_teams", status="failure").inc()
+
+                set_span_error(span, e)
+
+                logger.warning(
+                    "Failed to check team memberships for %s in %s: %s",
+                    username,
+                    org_name,
+                    e,
+                    extra={
+                        "org": org_name,
+                        "username": username,
+                        "installation_id": installation_id,
+                        "error": str(e),
+                    },
+                )
+                return []
+
 
 # Global client instance
 github_client = GitHubAppClient()

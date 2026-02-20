@@ -18,6 +18,15 @@ REPO_CONFIG_DEFAULTS = {
     "chatops_required_permission": "maintain",
     "approve_commands": ["approve", "stamp"],
     "unapprove_commands": ["unapprove", "unstamp"],
+    # Optional filters - if empty, no filtering is applied
+    # PR must have at least one of these labels to be eligible for auto-approval
+    "required_labels": [],
+    # PR title must match at least one of these regex patterns to be eligible
+    "required_title_patterns": [],
+    # PR author must be one of these users (login names)
+    "allowed_users": [],
+    # PR author must be a member of one of these teams (org/team-slug or team-slug)
+    "allowed_teams": [],
 }
 REPO_PERMISSION_LEVELS = ["none", "read", "triage", "write", "maintain", "admin"]
 
@@ -77,6 +86,10 @@ class RepoConfig:
         chatops_required_permission: str,
         approve_commands: list[str],
         unapprove_commands: list[str],
+        required_labels: list[str] | None = None,
+        required_title_patterns: list[str] | None = None,
+        allowed_users: list[str] | None = None,
+        allowed_teams: list[str] | None = None,
         config_error: str | None = None,
     ):
         """Initialize repo configuration.
@@ -88,6 +101,10 @@ class RepoConfig:
             chatops_required_permission: Minimum repo permission for chatops commands
             approve_commands: Commands that trigger approval
             unapprove_commands: Commands that dismiss approval
+            required_labels: Labels required for auto-approval eligibility (any match)
+            required_title_patterns: Regex patterns for PR title (any match)
+            allowed_users: User logins allowed for auto-approval (any match)
+            allowed_teams: Team slugs allowed for auto-approval (any match)
             config_error: Config error message if config was invalid
         """
         self.approval_labels = approval_labels
@@ -96,6 +113,10 @@ class RepoConfig:
         self.chatops_required_permission = chatops_required_permission
         self.approve_commands = approve_commands
         self.unapprove_commands = unapprove_commands
+        self.required_labels = required_labels or []
+        self.required_title_patterns = required_title_patterns or []
+        self.allowed_users = allowed_users or []
+        self.allowed_teams = allowed_teams or []
         self.config_error = config_error
 
     def with_config_error(self, message: str) -> RepoConfig:
@@ -109,6 +130,81 @@ class RepoConfig:
         """
         self.config_error = message
         return self
+
+    def is_pr_eligible(
+        self,
+        pr_labels: list[str],
+        pr_title: str,
+        pr_author: str,
+        author_team_slugs: list[str] | None = None,
+    ) -> tuple[bool, str | None]:
+        """Check if a PR is eligible for auto-approval based on filters.
+
+        All configured filters must pass (AND logic between filter types).
+        Within each filter, any match is sufficient (OR logic).
+
+        Args:
+            pr_labels: List of label names on the PR
+            pr_title: PR title
+            pr_author: PR author's login
+            author_team_slugs: List of team slugs the author belongs to (for team filter)
+
+        Returns:
+            Tuple of (is_eligible, reason_if_not_eligible)
+        """
+        import re
+
+        # Check required labels filter
+        if self.required_labels:
+            if not any(label in self.required_labels for label in pr_labels):
+                return (
+                    False,
+                    f"PR missing required label (one of: {', '.join(self.required_labels)})",
+                )
+
+        # Check required title patterns filter
+        if self.required_title_patterns:
+            if not any(re.search(pattern, pr_title) for pattern in self.required_title_patterns):
+                return False, "PR title does not match any required pattern"
+
+        # Check allowed users/teams filter (if either is configured)
+        if self.allowed_users or self.allowed_teams:
+            # User is allowed if they're in allowed_users
+            if pr_author in self.allowed_users:
+                return True, None
+
+            # Or if they're a member of an allowed team
+            if self.allowed_teams and author_team_slugs:
+                for team in self.allowed_teams:
+                    # Support both "org/team" and "team" formats
+                    team_slug = team.split("/")[-1] if "/" in team else team
+                    if team_slug in author_team_slugs:
+                        return True, None
+
+            # Neither user nor team matched
+            if self.allowed_users and self.allowed_teams:
+                return False, "PR author not in allowed users or teams"
+            elif self.allowed_users:
+                return False, f"PR author not in allowed users: {', '.join(self.allowed_users)}"
+            else:
+                return False, "PR author not a member of any allowed team"
+
+        return True, None
+
+    def needs_team_check(self, pr_author: str) -> bool:
+        """Check if team membership verification is needed for this author.
+
+        Args:
+            pr_author: PR author's login
+
+        Returns:
+            True if team check is needed (author not in allowed_users but teams configured)
+        """
+        if not self.allowed_teams:
+            return False
+        if self.allowed_users and pr_author in self.allowed_users:
+            return False
+        return True
 
     @classmethod
     def _get_defaults(cls) -> dict[str, Any]:
@@ -157,6 +253,8 @@ class RepoConfig:
         # Merge: repo settings override defaults
         merged = {**defaults, **repo_settings}
 
+        import re
+
         required_permission = merged.get("chatops_required_permission", "maintain")
         if required_permission not in REPO_PERMISSION_LEVELS:
             raise ValueError(
@@ -165,6 +263,14 @@ class RepoConfig:
                 f"Valid values: {', '.join(REPO_PERMISSION_LEVELS)}"
             )
 
+        # Validate regex patterns
+        title_patterns = merged.get("required_title_patterns", [])
+        for pattern in title_patterns:
+            try:
+                re.compile(pattern)
+            except re.error as e:
+                raise ValueError(f"Invalid regex pattern '{pattern}': {e}") from e
+
         return cls(
             approval_labels=merged.get("approval_labels", []),
             auto_approve_on_label=merged.get("auto_approve_on_label", True),
@@ -172,6 +278,10 @@ class RepoConfig:
             chatops_required_permission=required_permission,
             approve_commands=merged.get("approve_commands", ["approve", "stamp"]),
             unapprove_commands=merged.get("unapprove_commands", ["unapprove", "unstamp"]),
+            required_labels=merged.get("required_labels", []),
+            required_title_patterns=title_patterns,
+            allowed_users=merged.get("allowed_users", []),
+            allowed_teams=merged.get("allowed_teams", []),
         )
 
     @classmethod
@@ -189,4 +299,8 @@ class RepoConfig:
             chatops_required_permission=defaults["chatops_required_permission"],
             approve_commands=defaults["approve_commands"],
             unapprove_commands=defaults["unapprove_commands"],
+            required_labels=defaults["required_labels"],
+            required_title_patterns=defaults["required_title_patterns"],
+            allowed_users=defaults["allowed_users"],
+            allowed_teams=defaults["allowed_teams"],
         )

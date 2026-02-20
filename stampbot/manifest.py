@@ -49,6 +49,7 @@ MANIFEST_PERMISSIONS = {
     "contents": "read",
     "metadata": "read",
     "issues": "read",
+    "members": "read",  # Required for team membership checks
 }
 
 # Events stampbot subscribes to
