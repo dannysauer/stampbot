@@ -3,6 +3,7 @@
 
 """GitHub API client for app authentication and operations."""
 
+import re
 import time
 
 from github import Auth, Github, GithubIntegration
@@ -25,6 +26,22 @@ GITHUB_API_RETRY_TOTAL = 3
 GITHUB_API_RETRY_BACKOFF = 0.5  # exponential backoff factor
 
 logger = get_logger(__name__)
+
+# Pattern to match GitHub tokens (installation tokens, PATs, etc.)
+_TOKEN_PATTERN = re.compile(r"(ghs_[A-Za-z0-9]{36}|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]+)")
+
+
+def _sanitize_error(error: Exception) -> str:
+    """Sanitize error message to remove sensitive data like tokens.
+
+    Args:
+        error: Exception to sanitize
+
+    Returns:
+        Sanitized error message string
+    """
+    error_str = str(error)
+    return _TOKEN_PATTERN.sub("[REDACTED]", error_str)
 
 
 class GitHubAppClient:
@@ -255,7 +272,7 @@ class GitHubAppClient:
                         "repo": repo_full_name,
                         "pr_number": pr_number,
                         "installation_id": installation_id,
-                        "error": str(e),
+                        "error": _sanitize_error(e),
                     },
                 )
                 return False
@@ -333,7 +350,7 @@ class GitHubAppClient:
                         "repo": repo_full_name,
                         "pr_number": pr_number,
                         "installation_id": installation_id,
-                        "error": str(e),
+                        "error": _sanitize_error(e),
                     },
                 )
                 return False
@@ -481,7 +498,7 @@ class GitHubAppClient:
                         "repo": repo_full_name,
                         "pr_number": pr_number,
                         "installation_id": installation_id,
-                        "error": str(e),
+                        "error": _sanitize_error(e),
                     },
                 )
                 return []
@@ -558,7 +575,7 @@ class GitHubAppClient:
                         "repo": repo_full_name,
                         "pr_number": pr_number,
                         "installation_id": installation_id,
-                        "error": str(e),
+                        "error": _sanitize_error(e),
                     },
                 )
                 return False
@@ -624,7 +641,7 @@ class GitHubAppClient:
                         "repo": repo_full_name,
                         "label": label_name,
                         "installation_id": installation_id,
-                        "error": str(e),
+                        "error": _sanitize_error(e),
                     },
                 )
                 return None
@@ -644,7 +661,7 @@ class GitHubAppClient:
                         "repo": repo_full_name,
                         "label": label_name,
                         "installation_id": installation_id,
-                        "error": str(e),
+                        "error": _sanitize_error(e),
                     },
                 )
                 return None
@@ -730,7 +747,7 @@ class GitHubAppClient:
                         "repo": repo_full_name,
                         "username": username,
                         "installation_id": installation_id,
-                        "error": str(e),
+                        "error": _sanitize_error(e),
                     },
                 )
                 return False
@@ -841,7 +858,7 @@ class GitHubAppClient:
                         "org": org_name,
                         "username": username,
                         "installation_id": installation_id,
-                        "error": str(e),
+                        "error": _sanitize_error(e),
                     },
                 )
                 return []

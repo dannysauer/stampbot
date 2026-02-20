@@ -1256,3 +1256,59 @@ class TestCreatePrReviewComment:
             )
 
             assert result is False
+
+
+class TestSanitizeError:
+    """Tests for _sanitize_error function."""
+
+    def test_sanitize_installation_token(self):
+        """Test that installation tokens (ghs_) are redacted."""
+        from stampbot.github_client import _sanitize_error
+
+        # Use obviously fake token (36 chars after prefix)
+        fake_token = "ghs_" + "x" * 36  # pragma: allowlist secret
+        error = Exception(f"Failed with token {fake_token}")
+        result = _sanitize_error(error)
+        assert "ghs_" not in result
+        assert "[REDACTED]" in result
+        assert "Failed with token" in result
+
+    def test_sanitize_personal_access_token(self):
+        """Test that personal access tokens (ghp_) are redacted."""
+        from stampbot.github_client import _sanitize_error
+
+        # Use obviously fake token (36 chars after prefix)
+        fake_token = "ghp_" + "y" * 36  # pragma: allowlist secret
+        error = Exception(f"Auth failed: {fake_token}")
+        result = _sanitize_error(error)
+        assert "ghp_" not in result
+        assert "[REDACTED]" in result
+
+    def test_sanitize_fine_grained_pat(self):
+        """Test that fine-grained PATs (github_pat_) are redacted."""
+        from stampbot.github_client import _sanitize_error
+
+        error = Exception("Token: github_pat_11ABC123_abcdefghijklmnop")
+        result = _sanitize_error(error)
+        assert "github_pat_" not in result
+        assert "[REDACTED]" in result
+
+    def test_sanitize_preserves_non_token_content(self):
+        """Test that non-token error messages are preserved."""
+        from stampbot.github_client import _sanitize_error
+
+        error = Exception("Connection timeout after 30 seconds")
+        result = _sanitize_error(error)
+        assert result == "Connection timeout after 30 seconds"
+
+    def test_sanitize_multiple_tokens(self):
+        """Test that multiple tokens in one message are all redacted."""
+        from stampbot.github_client import _sanitize_error
+
+        token1 = "ghs_token1token1token1token1token1token1"  # pragma: allowlist secret
+        token2 = "ghp_token2token2token2token2token2token2"  # pragma: allowlist secret
+        error = Exception(f"{token1} and {token2}")
+        result = _sanitize_error(error)
+        assert "ghs_" not in result
+        assert "ghp_" not in result
+        assert result.count("[REDACTED]") == 2

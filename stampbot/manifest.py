@@ -50,6 +50,7 @@ MANIFEST_PERMISSIONS = {
     "metadata": "read",
     "issues": "read",
     "members": "read",  # Required for team membership checks
+    "administration": "read",  # Required for checking collaborator permissions
 }
 
 # Events stampbot subscribes to
