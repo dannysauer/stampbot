@@ -10,6 +10,7 @@
   ],
   "labels": ["dependencies"],
   "rangeStrategy": "pin",
+  "gitIgnoredAuthors": ["41898282+github-actions[bot]@users.noreply.github.com"],
   "packageRules": [
     {
       "description": "Automerge non-major updates",
@@ -17,8 +18,14 @@
       "automerge": true
     },
     {
+      "description": "Ignore requirements.txt - auto-generated from pyproject.toml by poetry-export",
+      "matchManagers": ["pip_requirements"],
+      "matchFileNames": ["requirements.txt"],
+      "enabled": false
+    },
+    {
       "description": "Group Python packages",
-      "matchManagers": ["pip_requirements", "pip_setup", "pyproject"],
+      "matchManagers": ["pip_setup", "poetry"],
       "groupName": "python dependencies"
     },
     {
