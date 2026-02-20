@@ -3,6 +3,7 @@
 import json
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
 from stampbot.manifest import (
@@ -67,6 +68,7 @@ class TestCreateManifest:
         assert manifest["default_permissions"]["pull_requests"] == "write"
         assert manifest["default_permissions"]["contents"] == "read"
         assert manifest["default_permissions"]["metadata"] == "read"
+        assert manifest["default_permissions"]["issues"] == "read"
 
     def test_manifest_contains_required_events(self):
         """Test manifest contains required events."""
@@ -264,3 +266,103 @@ class TestExchangeCode:
             # Valid alphanumeric codes should work
             await exchange_code_for_credentials("abc123XYZ")
             mock_post.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Live tests — require real network access to api.github.com.
+# Excluded from the default run; execute with: pytest -m live
+# ---------------------------------------------------------------------------
+
+_GITHUB_OPENAPI_URL = (
+    "https://raw.githubusercontent.com/github/rest-api-description"
+    "/main/descriptions/api.github.com/api.github.com.json"
+)
+
+
+def _fetch_live_schema() -> dict:
+    """Download GitHub's OpenAPI spec and return the parsed JSON."""
+    with httpx.Client(timeout=60.0, follow_redirects=True) as client:
+        response = client.get(_GITHUB_OPENAPI_URL)
+        response.raise_for_status()
+        return response.json()
+
+
+def _extract_live_permissions(spec: dict) -> dict[str, set[str]]:
+    """Return {permission_key: {allowed_values}} from the live OpenAPI spec."""
+    props = (
+        spec.get("components", {})
+        .get("schemas", {})
+        .get("app-permissions", {})
+        .get("properties", {})
+    )
+    return {key: set(val.get("enum", [])) for key, val in props.items()}
+
+
+def _extract_live_events(spec: dict) -> set[str]:
+    """Return the union of all webhook event name enums from the live OpenAPI spec."""
+    live_events: set[str] = set()
+
+    def _walk(obj: object) -> None:
+        if isinstance(obj, dict):
+            items = obj.get("items", {})
+            if isinstance(items, dict):
+                enum = items.get("enum", [])
+                if "pull_request" in enum:  # only event-name enums contain this
+                    live_events.update(enum)
+            for v in obj.values():
+                _walk(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                _walk(item)
+
+    _walk(spec)
+    return live_events
+
+
+@pytest.mark.live
+class TestLiveSchemaValidation:
+    """Validate our manifest constants against GitHub's live OpenAPI spec.
+
+    These tests make real HTTPS requests to raw.githubusercontent.com and are
+    excluded from the default pytest run.  Run them explicitly in CI with::
+
+        pytest -m live
+    """
+
+    @pytest.fixture(scope="class")
+    def live_spec(self):
+        """Fetch and cache the GitHub OpenAPI spec for the whole class."""
+        return _fetch_live_schema()
+
+    @pytest.fixture(scope="class")
+    def live_permissions(self, live_spec):
+        return _extract_live_permissions(live_spec)
+
+    @pytest.fixture(scope="class")
+    def live_events(self, live_spec):
+        return _extract_live_events(live_spec)
+
+    def test_manifest_permission_keys_still_valid(self, live_permissions):
+        """Every key in MANIFEST_PERMISSIONS exists in the live GitHub schema."""
+        for key in MANIFEST_PERMISSIONS:
+            assert key in live_permissions, (
+                f"Permission key '{key}' in MANIFEST_PERMISSIONS is no longer "
+                f"recognised by GitHub's API. Remove or update it."
+            )
+
+    def test_manifest_permission_values_still_valid(self, live_permissions):
+        """Every value in MANIFEST_PERMISSIONS is still an allowed level."""
+        for key, value in MANIFEST_PERMISSIONS.items():
+            if key in live_permissions:
+                assert value in live_permissions[key], (
+                    f"Permission level '{value}' for '{key}' is no longer valid. "
+                    f"Allowed: {sorted(live_permissions[key])}"
+                )
+
+    def test_manifest_events_still_valid(self, live_events):
+        """Every event in MANIFEST_EVENTS is still recognised by GitHub."""
+        for event in MANIFEST_EVENTS:
+            assert event in live_events, (
+                f"Event '{event}' in MANIFEST_EVENTS is no longer recognised "
+                f"by GitHub's API. Remove or update it."
+            )

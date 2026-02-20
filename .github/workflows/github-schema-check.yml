@@ -1,0 +1,30 @@
+name: GitHub API Schema Check
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # daily at 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  schema-check:
+    name: Validate manifest against live GitHub OpenAPI spec
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up tools
+        uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
+        with:
+          cache: true
+
+      - name: Set up Python package cache
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version-file: '.python-version'
+          cache: 'poetry'
+
+      - name: Install dependencies
+        run: poetry install --only main,dev
+
+      - name: Run live schema validation
+        run: poetry run pytest -m live --no-cov -v
