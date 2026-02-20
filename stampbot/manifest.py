@@ -48,6 +48,7 @@ MANIFEST_PERMISSIONS = {
     "pull_requests": "write",
     "contents": "read",
     "metadata": "read",
+    "issues": "read",
 }
 
 # Events stampbot subscribes to
