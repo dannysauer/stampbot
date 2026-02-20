@@ -14,6 +14,7 @@ from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
 from stampbot.config import is_configured, settings
+from stampbot.github_client import _sanitize_error
 from stampbot.logger import configure_logging, get_logger
 from stampbot.manifest import (
     GITHUB_MANIFEST_URL,
@@ -267,7 +268,7 @@ async def webhook(
         return result
     except Exception as e:
         errors_total.labels(error_type="webhook_handler_error").inc()
-        logger.error("Error handling webhook event: %s", e, extra={"error": str(e)})
+        logger.error("Error handling webhook event: %s", _sanitize_error(e), extra={"error": _sanitize_error(e)})
         raise HTTPException(status_code=500, detail="Internal server error") from None
 
 
@@ -413,7 +414,7 @@ async def setup_callback(request: Request, code: str) -> Response:
     try:
         credentials = await exchange_code_for_credentials(code)
     except Exception as e:
-        logger.error("Failed to exchange code for credentials: %s", e)
+        logger.error("Failed to exchange code for credentials: %s", _sanitize_error(e))
         raise HTTPException(status_code=500, detail="Failed to complete setup") from None
 
     # Security note: Credentials are displayed in the HTML response for user convenience.
