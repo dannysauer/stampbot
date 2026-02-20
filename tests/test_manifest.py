@@ -366,4 +366,3 @@ class TestLiveSchemaValidation:
                 f"Event '{event}' in MANIFEST_EVENTS is no longer recognised "
                 f"by GitHub's API. Remove or update it."
             )
-
