@@ -9,12 +9,9 @@ import pytest
 from stampbot.manifest import (
     MANIFEST_EVENTS,
     MANIFEST_PERMISSIONS,
-    VALID_EVENTS,
-    VALID_PERMISSIONS,
     create_manifest,
     exchange_code_for_credentials,
     get_manifest_url,
-    validate_manifest,
 )
 
 
@@ -56,47 +53,6 @@ class TestUrlValidation:
                 redirect_url="https://example.com/setup/callback",
                 webhook_url="ftp://example.com/webhook",
             )
-
-
-class TestValidateManifest:
-    """Tests for manifest schema validation."""
-
-    def test_manifest_permissions_are_valid(self):
-        """All MANIFEST_PERMISSIONS keys and values are in the official schema."""
-        for key, value in MANIFEST_PERMISSIONS.items():
-            assert key in VALID_PERMISSIONS, f"Unknown permission key: '{key}'"
-            assert value in VALID_PERMISSIONS[key], (
-                f"Invalid value '{value}' for permission '{key}'"
-            )
-
-    def test_manifest_events_are_valid(self):
-        """All MANIFEST_EVENTS names are in the official schema."""
-        for event in MANIFEST_EVENTS:
-            assert event in VALID_EVENTS, f"Unknown event: '{event}'"
-
-    def test_validate_manifest_rejects_unknown_permission_key(self):
-        """validate_manifest raises ValueError for an unrecognised permission key."""
-        with pytest.raises(ValueError, match="Unknown permission key"):
-            validate_manifest({"default_permissions": {"nonexistent_perm": "read"}})
-
-    def test_validate_manifest_rejects_invalid_permission_value(self):
-        """validate_manifest raises ValueError for an invalid permission level."""
-        with pytest.raises(ValueError, match="Invalid value"):
-            validate_manifest({"default_permissions": {"contents": "admin"}})
-
-    def test_validate_manifest_rejects_unknown_event(self):
-        """validate_manifest raises ValueError for an unrecognised event name."""
-        with pytest.raises(ValueError, match="Unknown event"):
-            validate_manifest({"default_events": ["not_a_real_event"]})
-
-    def test_validate_manifest_accepts_valid_manifest(self):
-        """validate_manifest passes for a well-formed manifest."""
-        validate_manifest(
-            {
-                "default_permissions": MANIFEST_PERMISSIONS,
-                "default_events": MANIFEST_EVENTS,
-            }
-        )
 
 
 class TestCreateManifest:
@@ -411,18 +367,3 @@ class TestLiveSchemaValidation:
                 f"by GitHub's API. Remove or update it."
             )
 
-    def test_valid_permissions_constant_has_no_stale_keys(self, live_permissions):
-        """VALID_PERMISSIONS contains no keys that GitHub has removed."""
-        stale = set(VALID_PERMISSIONS) - set(live_permissions)
-        assert not stale, (
-            f"These keys in VALID_PERMISSIONS no longer exist in GitHub's schema "
-            f"and should be removed: {sorted(stale)}"
-        )
-
-    def test_valid_events_constant_has_no_stale_entries(self, live_events):
-        """VALID_EVENTS contains no event names that GitHub has removed."""
-        stale = VALID_EVENTS - live_events
-        assert not stale, (
-            f"These events in VALID_EVENTS no longer exist in GitHub's schema "
-            f"and should be removed: {sorted(stale)}"
-        )
