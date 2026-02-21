@@ -140,7 +140,25 @@ This project follows the [Google Python Style Guide](docs/external/google-python
 
 ### Conventions
 
-**Commits:** Conventional commits (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`, `ci:`)
+**Commits and PR titles:** Both must use conventional commit format. This is enforced by commitlint on individual commits, but with squash-merge the **PR title becomes the merge commit message on `main`**. The release workflow reads commit subjects on `main` to decide whether to release and what version bump to apply — so a non-conventional PR title means no release, even if the branch commits were properly formatted.
+
+Format: `<type>[optional scope]: <description>`
+
+| Type | Triggers release? | Use for |
+|------|-------------------|---------|
+| `feat` | Yes — minor bump | New features |
+| `fix` | Yes — patch bump | Bug fixes |
+| `docs` | No | Documentation only |
+| `test` | No | Tests only |
+| `refactor` | No | Code restructuring |
+| `chore` | No | Maintenance, deps |
+| `ci` | No | CI/CD changes |
+| `style` | No | Formatting |
+| `perf` | No | Performance |
+| `build` | No | Build system |
+| `revert` | No | Revert a commit |
+
+Breaking changes: append `!` after the type (e.g., `feat!:`) or include `BREAKING CHANGE:` in the commit body — triggers a major version bump.
 
 **Branches:** `feat/*`, `fix/*`, `docs/*`, `refactor/*`, `chore/*`
 
