@@ -462,8 +462,10 @@ class GitHubAppClient:
                 repo = client.get_repo(repo_full_name)
                 pr = repo.get_pull(pr_number)
 
-                # Get bot user
-                bot_user = client.get_user().login
+                # Get bot user via JWT-authenticated integration (installation tokens
+                # cannot call GET /user, which is restricted by GitHub Apps integration)
+                app_info = self.integration.get_app()
+                bot_user = f"{app_info.slug}[bot]"
 
                 # Find all reviews by bot that are approvals
                 bot_review_ids = []
