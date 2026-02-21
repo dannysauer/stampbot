@@ -345,7 +345,10 @@ class GitHubAppClient:
                 set_span_error(span, e)
 
                 logger.error(
-                    f"Failed to dismiss approval for PR #{pr_number} in {repo_full_name}: {_sanitize_error(e)}",
+                    "Failed to dismiss approval for PR #%s in %s: %s",
+                    pr_number,
+                    repo_full_name,
+                    _sanitize_error(e),
                     extra={
                         "repo": repo_full_name,
                         "pr_number": pr_number,
@@ -493,7 +496,10 @@ class GitHubAppClient:
                 set_span_error(span, e)
 
                 logger.error(
-                    f"Failed to find bot reviews for PR #{pr_number} in {repo_full_name}: {_sanitize_error(e)}",
+                    "Failed to find bot reviews for PR #%s in %s: %s",
+                    pr_number,
+                    repo_full_name,
+                    _sanitize_error(e),
                     extra={
                         "repo": repo_full_name,
                         "pr_number": pr_number,
