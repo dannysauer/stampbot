@@ -19,6 +19,7 @@ A GitHub App that automatically approves pull requests based on labels and chato
 
 - **Label-based Auto-Approval**: Automatically approve PRs when specific labels are added
 - **ChatOps Support**: Approve or unapprove PRs via `@stampbot approve` or `@stampbot unapprove` comments (permission required)
+- **PR Eligibility Filters**: Restrict auto-approval to PRs matching required labels, title patterns, allowed users, or allowed teams
 - **Configurable**: Per-repository configuration via `stampbot.toml`
 - **Fully Instrumented**: OpenTelemetry support for distributed tracing
 - **Prometheus Metrics**: Comprehensive metrics for monitoring
@@ -141,6 +142,24 @@ approve_commands = ["approve", "stamp"]
 
 # Commands that dismiss approvals
 unapprove_commands = ["unapprove", "unstamp"]
+
+# --- PR Eligibility Filters ---
+# All configured filters must pass (AND logic between filter types).
+# Within each filter, any single match is sufficient (OR logic).
+# Omit or leave empty to disable that filter.
+
+# PR must have at least one of these labels to be eligible for auto-approval
+required_labels = ["autoapprove"]
+
+# PR title must match at least one of these regex patterns to be eligible
+required_title_patterns = ["^feat:", "^fix:"]
+
+# PR author (GitHub login) must be in this list to be eligible
+allowed_users = ["bot-user", "trusted-contributor"]
+
+# PR author must be a member of at least one of these teams to be eligible
+# Format: "org/team-slug" or just "team-slug"
+allowed_teams = ["my-org/release-team"]
 ```
 
 Stampbot loads `stampbot.toml` from the repository's default branch. If the file
