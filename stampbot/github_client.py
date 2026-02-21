@@ -163,7 +163,7 @@ class GitHubAppClient:
                 )
 
                 client = Github(
-                    auth=auth.token,  # type: ignore[arg-type]
+                    auth=Auth.Token(auth.token),
                     timeout=GITHUB_API_TIMEOUT,
                     retry=retry,
                 )
@@ -267,7 +267,7 @@ class GitHubAppClient:
                 set_span_error(span, e)
 
                 logger.error(
-                    f"Failed to approve PR #{pr_number} in {repo_full_name}: {e}",
+                    f"Failed to approve PR #{pr_number} in {repo_full_name}: {_sanitize_error(e)}",
                     extra={
                         "repo": repo_full_name,
                         "pr_number": pr_number,
@@ -345,7 +345,10 @@ class GitHubAppClient:
                 set_span_error(span, e)
 
                 logger.error(
-                    f"Failed to dismiss approval for PR #{pr_number} in {repo_full_name}: {e}",
+                    "Failed to dismiss approval for PR #%s in %s: %s",
+                    pr_number,
+                    repo_full_name,
+                    _sanitize_error(e),
                     extra={
                         "repo": repo_full_name,
                         "pr_number": pr_number,
@@ -419,7 +422,7 @@ class GitHubAppClient:
                 set_span_ok(span)  # Not finding a file is not an error
 
                 logger.debug(
-                    f"Could not fetch {file_path} from {repo_full_name}: {e}",
+                    f"Could not fetch {file_path} from {repo_full_name}: {_sanitize_error(e)}",
                     extra={
                         "repo": repo_full_name,
                         "file_path": file_path,
@@ -493,7 +496,10 @@ class GitHubAppClient:
                 set_span_error(span, e)
 
                 logger.error(
-                    f"Failed to find bot reviews for PR #{pr_number} in {repo_full_name}: {e}",
+                    "Failed to find bot reviews for PR #%s in %s: %s",
+                    pr_number,
+                    repo_full_name,
+                    _sanitize_error(e),
                     extra={
                         "repo": repo_full_name,
                         "pr_number": pr_number,
@@ -570,7 +576,7 @@ class GitHubAppClient:
                     "Failed to post config error review for PR #%d in %s: %s",
                     pr_number,
                     repo_full_name,
-                    e,
+                    _sanitize_error(e),
                     extra={
                         "repo": repo_full_name,
                         "pr_number": pr_number,
@@ -636,7 +642,7 @@ class GitHubAppClient:
                     "Could not verify label %s in %s: %s",
                     label_name,
                     repo_full_name,
-                    e,
+                    _sanitize_error(e),
                     extra={
                         "repo": repo_full_name,
                         "label": label_name,
@@ -656,7 +662,7 @@ class GitHubAppClient:
                     "Could not verify label %s in %s: %s",
                     label_name,
                     repo_full_name,
-                    e,
+                    _sanitize_error(e),
                     extra={
                         "repo": repo_full_name,
                         "label": label_name,
@@ -742,7 +748,7 @@ class GitHubAppClient:
                     "Failed to check collaborator permission for %s in %s: %s",
                     username,
                     repo_full_name,
-                    e,
+                    _sanitize_error(e),
                     extra={
                         "repo": repo_full_name,
                         "username": username,
@@ -853,7 +859,7 @@ class GitHubAppClient:
                     "Failed to check team memberships for %s in %s: %s",
                     username,
                     org_name,
-                    e,
+                    _sanitize_error(e),
                     extra={
                         "org": org_name,
                         "username": username,
