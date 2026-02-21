@@ -163,7 +163,7 @@ class GitHubAppClient:
                 )
 
                 client = Github(
-                    auth=auth.token,  # type: ignore[arg-type]
+                    auth=Auth.Token(auth.token),
                     timeout=GITHUB_API_TIMEOUT,
                     retry=retry,
                 )
