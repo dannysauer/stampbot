@@ -268,7 +268,8 @@ async def webhook(
         return result
     except Exception as e:
         errors_total.labels(error_type="webhook_handler_error").inc()
-        logger.error("Error handling webhook event: %s", _sanitize_error(e), extra={"error": _sanitize_error(e)})
+        sanitized = _sanitize_error(e)
+        logger.error("Error handling webhook event: %s", sanitized, extra={"error": sanitized})
         raise HTTPException(status_code=500, detail="Internal server error") from None
 
 
