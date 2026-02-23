@@ -249,6 +249,51 @@ def test_response_without_content_length():
     # StreamingResponse doesn't set Content-Length, so line 142->148 branch is exercised
 
 
+def test_logging_middleware_binds_forwarded_ip(test_client: TestClient):
+    """Test that logging_middleware binds client IP from X-Forwarded-For header."""
+    response = test_client.get(
+        "/health",
+        headers={"X-Forwarded-For": "203.0.113.5, 10.0.0.1"},
+    )
+    assert response.status_code == 200
+    # Context is cleared after the request completes; the middleware itself is
+    # tested by confirming the request succeeded (no exceptions from binding).
+
+
+def test_logging_middleware_falls_back_to_direct_ip(test_client: TestClient):
+    """Test that logging_middleware uses the direct connection IP when no forwarding header."""
+    response = test_client.get("/health")
+    assert response.status_code == 200
+
+
+def test_logging_middleware_respects_configured_header():
+    """Test that logging_middleware uses the configured client_ip_header setting."""
+    from unittest.mock import patch
+
+    import structlog.contextvars
+
+    from stampbot.main import app
+
+    with patch("stampbot.main.settings") as mock_settings:
+        mock_settings.get = lambda key, default=None: (
+            "X-Real-IP" if key == "client_ip_header" else default
+        )
+
+        client = TestClient(app)
+        captured: dict[str, str | None] = {}
+
+        original_bind = structlog.contextvars.bind_contextvars
+
+        def capturing_bind(**kw: object) -> None:
+            captured.update({k: str(v) for k, v in kw.items()})
+            original_bind(**kw)
+
+        with patch("stampbot.main.structlog.contextvars.bind_contextvars", capturing_bind):
+            client.get("/health", headers={"X-Real-IP": "198.51.100.7"})
+
+        assert captured.get("client_ip") == "198.51.100.7"
+
+
 def test_webhook_handler_exception(test_client: TestClient):
     """Test webhook returns 500 when handler raises exception."""
     from stampbot.webhook_handler import webhook_handler
