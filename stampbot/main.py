@@ -155,41 +155,57 @@ async def metrics_middleware(request: Request, call_next: Any) -> Response:
         http_requests_in_progress.labels(method=method, endpoint=endpoint).dec()
 
 
-@app.middleware("http")
-async def logging_middleware(request: Request, call_next: Any) -> Response:
-    """Middleware to bind per-request context to structured log records.
+class LoggingMiddleware:
+    """Pure ASGI middleware that binds per-request context to structured log records.
 
-    Clears any inherited structlog context, then binds the real client IP
-    from the configured forwarding header (or the direct connection address
-    as a fallback) so every log record emitted during this request includes
-    the ``client_ip`` field.
-
-    Args:
-        request: Incoming HTTP request.
-        call_next: Next middleware or route handler.
-
-    Returns:
-        HTTP response from downstream handler.
+    Unlike ``BaseHTTPMiddleware``, this calls the inner app directly in the
+    same coroutine frame (``await self.app(scope, receive, send)``).  Stacking
+    two ``BaseHTTPMiddleware`` layers causes the inner route-handler frames to
+    run inside a nested anyio task group, which breaks ``sys.settrace``-based
+    coverage collection.  A pure ASGI class avoids that nesting.
     """
-    structlog.contextvars.clear_contextvars()
 
-    client_ip: str | None = None
-    client_ip_header: str = settings.get("client_ip_header", "X-Forwarded-For")
+    def __init__(self, app: Any) -> None:
+        self.app = app
 
-    if client_ip_header:
-        raw = request.headers.get(client_ip_header)
-        if raw:
-            # X-Forwarded-For may be a comma-separated list; the leftmost
-            # entry is the original client (proxies append to the right).
-            client_ip = raw.split(",")[0].strip()
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        """Process an ASGI event, binding client IP to the structlog context.
 
-    if not client_ip and request.client:
-        client_ip = request.client.host
+        For HTTP scopes the middleware clears any inherited structlog context,
+        extracts the real client IP from the configured forwarding header (or
+        the direct connection address as a fallback), and binds it so that
+        every log record emitted during the request includes ``client_ip``.
 
-    if client_ip:
-        structlog.contextvars.bind_contextvars(client_ip=client_ip)
+        Non-HTTP scopes (lifespan, WebSocket) are passed through unchanged.
 
-    return await call_next(request)  # type: ignore[no-any-return]
+        Args:
+            scope: ASGI connection scope.
+            receive: ASGI receive callable.
+            send: ASGI send callable.
+        """
+        if scope["type"] == "http":
+            structlog.contextvars.clear_contextvars()
+
+            client_ip: str | None = None
+            client_ip_header: str = settings.get("client_ip_header", "X-Forwarded-For")
+
+            if client_ip_header:
+                raw = Request(scope).headers.get(client_ip_header)
+                if raw:
+                    # X-Forwarded-For may be a comma-separated list; the leftmost
+                    # entry is the original client (proxies append to the right).
+                    client_ip = raw.split(",")[0].strip()
+
+            if not client_ip and scope.get("client"):
+                client_ip = scope["client"][0]
+
+            if client_ip:
+                structlog.contextvars.bind_contextvars(client_ip=client_ip)
+
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(LoggingMiddleware)
 
 
 @app.get("/")
