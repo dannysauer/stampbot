@@ -139,6 +139,4 @@ def test_configure_logging_installs_stdlib_handler():
 
         root = logging.getLogger()
         assert len(root.handlers) == 1
-        assert isinstance(
-            root.handlers[0].formatter, structlog.stdlib.ProcessorFormatter
-        )
+        assert isinstance(root.handlers[0].formatter, structlog.stdlib.ProcessorFormatter)
