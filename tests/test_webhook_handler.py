@@ -126,6 +126,22 @@ async def test_pr_labeled_autoapprove(webhook_handler, mock_github_client):
 
 
 @pytest.mark.asyncio
+async def test_pr_labeled_skips_duplicate_approval(webhook_handler, mock_github_client):
+    """Test that existing approval prevents duplicate approval comment."""
+    payload = load_fixture("pr_labeled_autoapprove")
+    # Simulate existing active approval
+    mock_github_client.find_bot_reviews.return_value = [12345]
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "success"
+    # find_bot_reviews should be called to check for existing approval
+    mock_github_client.find_bot_reviews.assert_called_once()
+    # approve_pr should NOT be called since there's already an approval
+    mock_github_client.approve_pr.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_pr_unlabeled_autoapprove(webhook_handler, mock_github_client):
     """Test removing autoapprove label dismisses approvals."""
     payload = load_fixture("pr_unlabeled_autoapprove")
@@ -244,6 +260,22 @@ async def test_issue_comment_approve(webhook_handler, mock_github_client):
     assert "approved" in result["message"].lower()
     mock_github_client.approve_pr.assert_called_once()
     mock_github_client.user_has_permission.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_issue_comment_approve_skips_duplicate(webhook_handler, mock_github_client):
+    """Test chatops approve skips duplicate when PR already approved."""
+    payload = load_fixture("issue_comment_approve")
+    # Simulate existing active approval
+    mock_github_client.find_bot_reviews.return_value = [12345]
+
+    result = await webhook_handler.handle_event("issue_comment", payload)
+
+    assert result["status"] == "success"
+    # Should check for existing approval
+    mock_github_client.find_bot_reviews.assert_called()
+    # Should NOT post duplicate approval
+    mock_github_client.approve_pr.assert_not_called()
 
 
 @pytest.mark.asyncio
