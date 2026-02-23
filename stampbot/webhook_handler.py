@@ -661,6 +661,8 @@ class WebhookHandler:
     ) -> bool:
         """Approve a PR and track metrics.
 
+        Checks for existing active approvals first to avoid duplicate comments.
+
         Args:
             installation_id: GitHub App installation ID
             repo_full_name: Repository full name
@@ -669,7 +671,7 @@ class WebhookHandler:
             trigger_type: What triggered the approval (label, chatops)
 
         Returns:
-            True if successful
+            True if successful (or already approved)
         """
         with create_span(
             "webhook.approve_pr",
@@ -679,6 +681,35 @@ class WebhookHandler:
                 "approval.trigger_type": trigger_type,
             },
         ) as span:
+            # Check for existing active approval to avoid duplicates
+            existing_approvals = await run_in_threadpool(
+                github_client.find_bot_reviews,
+                installation_id,
+                repo_full_name,
+                pr_number,
+            )
+
+            if existing_approvals:
+                logger.info(
+                    "PR #%d in %s already has active approval, skipping",
+                    pr_number,
+                    repo_full_name,
+                    extra={
+                        "repo": repo_full_name,
+                        "pr_number": pr_number,
+                        "existing_review_ids": existing_approvals,
+                    },
+                )
+                add_span_attributes(
+                    span,
+                    {
+                        "approval.result": "already_approved",
+                        "approval.existing_reviews": len(existing_approvals),
+                    },
+                )
+                set_span_ok(span)
+                return True
+
             start_time = time.time()
 
             success = await run_in_threadpool(
