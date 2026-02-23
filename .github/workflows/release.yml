@@ -186,19 +186,57 @@ jobs:
 
       - name: Generate changelog
         id: changelog
-        uses: mikepenz/release-changelog-builder-action@6faf020194b7c8853f9e55c4fd92e40b02122a04 # v6.1.0
-        with:
-          configuration: ".github/changelog-config.json"
-          toTag: v${{ needs.determine-version.outputs.version }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.determine-version.outputs.version }}
+        run: |
+          LATEST_TAG=$(git tag -l 'v*.*.*' --sort=-v:refname | grep -v "^v${VERSION}$" | head -n1)
+          if [ -z "$LATEST_TAG" ]; then
+            COMMIT_RANGE="HEAD"
+          else
+            COMMIT_RANGE="${LATEST_TAG}..v${VERSION}"
+          fi
+
+          echo "Generating changelog for range: $COMMIT_RANGE"
+
+          echo "## What's Changed" > app-changelog.md
+          echo "" >> app-changelog.md
+
+          FOUND_COMMITS=false
+          for type in feat fix docs chore refactor test ci; do
+            COMMITS=$(git log "$COMMIT_RANGE" --pretty=format:"- %s" --grep="^${type}:" --grep="^${type}(" -E 2>/dev/null || true)
+            if [ -n "$COMMITS" ]; then
+              FOUND_COMMITS=true
+              case $type in
+                feat) echo "### 🚀 Features" >> app-changelog.md ;;
+                fix) echo "### 🐛 Bug Fixes" >> app-changelog.md ;;
+                docs) echo "### 📚 Documentation" >> app-changelog.md ;;
+                chore) echo "### 🔧 Maintenance" >> app-changelog.md ;;
+                refactor) echo "### ♻️ Refactoring" >> app-changelog.md ;;
+                test) echo "### 🧪 Tests" >> app-changelog.md ;;
+                ci) echo "### 🏗️ CI/CD" >> app-changelog.md ;;
+              esac
+              echo "$COMMITS" >> app-changelog.md
+              echo "" >> app-changelog.md
+            fi
+          done
+
+          if [ "$FOUND_COMMITS" = false ]; then
+            echo "- Various improvements and bug fixes" >> app-changelog.md
+            echo "" >> app-changelog.md
+          fi
+
+          if [ -n "$LATEST_TAG" ]; then
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${LATEST_TAG}...v${VERSION}" >> app-changelog.md
+          fi
+
+          cat app-changelog.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
         with:
           tag_name: v${{ needs.determine-version.outputs.version }}
           name: "stampbot v${{ needs.determine-version.outputs.version }}"
-          body: ${{ steps.changelog.outputs.changelog }}
+          body_path: app-changelog.md
           files: |
             sbom.spdx.json
             stampbot-${{ needs.determine-version.outputs.version }}.vex.json

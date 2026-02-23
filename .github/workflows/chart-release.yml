@@ -173,6 +173,8 @@ jobs:
       - name: Generate changelog
         if: steps.check.outputs.skip != 'true'
         id: changelog
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           APP_VERSION="${{ steps.app_version.outputs.app_version }}"
           LATEST_CHART_TAG=$(git tag -l 'chart-v*' --sort=-v:refname | head -n2 | tail -n1)
@@ -191,7 +193,16 @@ jobs:
           echo "- [View container release](https://github.com/${{ github.repository }}/releases/tag/v${APP_VERSION})" >> changelog.md
           echo "" >> changelog.md
 
-          echo "## What's Changed" >> changelog.md
+          # Include the app changelog from its GitHub Release
+          APP_CHANGELOG=$(gh release view "v${APP_VERSION}" --json body --jq '.body' 2>/dev/null || true)
+          if [ -n "$APP_CHANGELOG" ]; then
+            echo "## App Changelog" >> changelog.md
+            echo "" >> changelog.md
+            echo "$APP_CHANGELOG" >> changelog.md
+            echo "" >> changelog.md
+          fi
+
+          echo "## Chart Changes" >> changelog.md
           echo "" >> changelog.md
 
           # Group commits by type
