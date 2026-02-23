@@ -574,6 +574,7 @@ class TestFindBotReviews:
             mock_token = Mock()
             mock_token.token = TEST_TOKEN
             mock_integration.get_access_token.return_value = mock_token
+            mock_integration.get_app.return_value = Mock(slug="stampbot")
             mock_integration_cls.return_value = mock_integration
 
             # Create mock reviews
@@ -587,16 +588,12 @@ class TestFindBotReviews:
             other_review.state = "APPROVED"
             other_review.id = 456
 
-            mock_bot_user = Mock()
-            mock_bot_user.login = "stampbot[bot]"
-
             mock_pr = Mock()
             mock_pr.get_reviews.return_value = [bot_review, other_review]
             mock_repo = Mock()
             mock_repo.get_pull.return_value = mock_pr
             mock_github = Mock()
             mock_github.get_repo.return_value = mock_repo
-            mock_github.get_user.return_value = mock_bot_user
             mock_github.get_rate_limit.return_value = Mock(core=Mock(remaining=4500, limit=5000))
             mock_github_cls.return_value = mock_github
 
