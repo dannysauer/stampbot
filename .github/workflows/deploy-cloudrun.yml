@@ -9,6 +9,12 @@ on:
         description: 'Image tag to deploy (e.g., 1.2.3). Defaults to latest release.'
         required: false
         type: string
+  workflow_call:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy'
+        required: true
+        type: string
 
 # GCP Setup Requirements:
 # 1. Create a GCP project and enable Cloud Run API

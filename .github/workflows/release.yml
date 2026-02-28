@@ -262,3 +262,14 @@ jobs:
     permissions:
       contents: write
       packages: write
+
+  deploy-cloudrun:
+    name: Deploy to Cloud Run
+    needs: [determine-version, build-and-publish-image]
+    if: needs.determine-version.outputs.should_release == 'true' && vars.GCP_SERVICE_ACCOUNT != ''
+    uses: ./.github/workflows/deploy-cloudrun.yml
+    with:
+      image_tag: ${{ needs.determine-version.outputs.version }}
+    permissions:
+      contents: read
+      id-token: write
