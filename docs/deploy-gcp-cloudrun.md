@@ -6,7 +6,16 @@ This guide covers deploying StampBot to Google Cloud Run using the automated Git
 
 - A Google Cloud account with billing enabled (free trial works)
 - The `gcloud` CLI installed and authenticated
-- Repository admin access to configure variables
+- A Docker Hub account (free tier works)
+- Repository admin access to configure secrets and variables
+
+## Docker Hub Setup
+
+Cloud Run pulls images from Docker Hub. The release workflow pushes to `stampbot/stampbot`.
+
+1. Create a Docker Hub account at https://hub.docker.com
+2. Create an Access Token: Account Settings > Security > New Access Token
+3. Add the token as a GitHub repository secret named `DOCKERHUB_TOKEN`
 
 ## GCP Setup
 
@@ -95,9 +104,9 @@ After the first deployment, configure StampBot's environment variables in Cloud 
 ```bash
 gcloud run services update stampbot \
   --region=us-central1 \
-  --set-env-vars="GITHUB_APP_ID=your-app-id" \
-  --set-env-vars="GITHUB_WEBHOOK_SECRET=your-webhook-secret" \
-  --set-env-vars="GITHUB_PRIVATE_KEY=your-private-key"
+  --set-env-vars="GITHUB_APP_ID=12345" \
+  --set-env-vars="GITHUB_WEBHOOK_SECRET=..." \
+  --set-env-vars="GITHUB_PRIVATE_KEY=..."  # pragma: allowlist secret
 ```
 
 Or use the [Cloud Console](https://console.cloud.google.com/run) to configure environment variables and secrets.
