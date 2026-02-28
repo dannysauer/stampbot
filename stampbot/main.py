@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+import structlog.contextvars
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
@@ -152,6 +153,59 @@ async def metrics_middleware(request: Request, call_next: Any) -> Response:
 
     finally:
         http_requests_in_progress.labels(method=method, endpoint=endpoint).dec()
+
+
+class LoggingMiddleware:
+    """Pure ASGI middleware that binds per-request context to structured log records.
+
+    Unlike ``BaseHTTPMiddleware``, this calls the inner app directly in the
+    same coroutine frame (``await self.app(scope, receive, send)``).  Stacking
+    two ``BaseHTTPMiddleware`` layers causes the inner route-handler frames to
+    run inside a nested anyio task group, which breaks ``sys.settrace``-based
+    coverage collection.  A pure ASGI class avoids that nesting.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        """Process an ASGI event, binding client IP to the structlog context.
+
+        For HTTP scopes the middleware clears any inherited structlog context,
+        extracts the real client IP from the configured forwarding header (or
+        the direct connection address as a fallback), and binds it so that
+        every log record emitted during the request includes ``client_ip``.
+
+        Non-HTTP scopes (lifespan, WebSocket) are passed through unchanged.
+
+        Args:
+            scope: ASGI connection scope.
+            receive: ASGI receive callable.
+            send: ASGI send callable.
+        """
+        if scope["type"] == "http":
+            structlog.contextvars.clear_contextvars()
+
+            client_ip: str | None = None
+            client_ip_header: str = settings.get("client_ip_header", "X-Forwarded-For")
+
+            if client_ip_header:
+                raw = Request(scope).headers.get(client_ip_header)
+                if raw:
+                    # X-Forwarded-For may be a comma-separated list; the leftmost
+                    # entry is the original client (proxies append to the right).
+                    client_ip = raw.split(",")[0].strip()
+
+            if not client_ip and scope.get("client"):
+                client_ip = scope["client"][0]
+
+            if client_ip:
+                structlog.contextvars.bind_contextvars(client_ip=client_ip)
+
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(LoggingMiddleware)
 
 
 @app.get("/")

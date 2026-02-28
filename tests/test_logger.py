@@ -1,5 +1,6 @@
 """Tests for logging configuration."""
 
+import logging
 import os
 from unittest.mock import patch
 
@@ -119,3 +120,23 @@ def test_configure_logging_without_otel():
 
         # Verify LoggingInstrumentor was NOT called
         mock_instrumentor.return_value.instrument.assert_not_called()
+
+
+def test_configure_logging_installs_stdlib_handler():
+    """Test that configure_logging installs a ProcessorFormatter on the root logger.
+
+    This ensures stdlib loggers (e.g. uvicorn) produce structured JSON output
+    rather than raw plaintext.
+    """
+    with patch("stampbot.logger.settings") as mock_settings:
+        mock_settings.log_format = "json"
+        mock_settings.log_level = "INFO"
+        mock_settings.otel_enabled = False
+
+        from stampbot.logger import configure_logging
+
+        configure_logging()
+
+        root = logging.getLogger()
+        assert len(root.handlers) == 1
+        assert isinstance(root.handlers[0].formatter, structlog.stdlib.ProcessorFormatter)

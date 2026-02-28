@@ -49,32 +49,55 @@ def _get_log_renderer() -> structlog.types.Processor:
 
 
 def configure_logging() -> None:
-    """Configure structured logging with structlog."""
+    """Configure structured logging with structlog.
+
+    Routes both structlog-native records and foreign stdlib records (e.g.
+    from uvicorn) through the same processor chain so all log output uses
+    a consistent format (JSON in production, coloured console locally).
+    """
+    log_level_int = logging.getLevelName(settings.log_level)
     renderer = _get_log_renderer()
+
+    # Processors shared by structlog-native and foreign (stdlib) log records.
+    # Applied to every record before the final renderer.
+    shared_processors: list[structlog.types.Processor] = [
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.add_log_level,
+        structlog.processors.StackInfoRenderer(),
+        structlog.dev.set_exc_info,
+        structlog.processors.TimeStamper(fmt="iso"),
+    ]
 
     structlog.configure(
         processors=[
-            structlog.contextvars.merge_contextvars,
-            structlog.processors.add_log_level,
-            structlog.processors.StackInfoRenderer(),
-            structlog.dev.set_exc_info,
-            structlog.processors.TimeStamper(fmt="iso"),
-            renderer,
+            *shared_processors,
+            # Wrap the event dict so stdlib's ProcessorFormatter can render it.
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
-        wrapper_class=structlog.make_filtering_bound_logger(
-            logging.getLevelName(settings.log_level)
-        ),
+        wrapper_class=structlog.make_filtering_bound_logger(log_level_int),
         context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
+        # Route structlog through stdlib so all output shares one handler.
+        logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
 
-    # Configure standard logging
-    logging.basicConfig(
-        format="%(message)s",
-        stream=sys.stdout,
-        level=logging.getLevelName(settings.log_level),
+    # ProcessorFormatter ensures uvicorn access logs and every other stdlib
+    # logger produce the same structured output as application logs.
+    formatter = structlog.stdlib.ProcessorFormatter(
+        processors=[
+            structlog.stdlib.ExtraAdder(),
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            renderer,
+        ],
+        foreign_pre_chain=shared_processors,
     )
+
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(formatter)
+
+    root_logger = logging.getLogger()
+    root_logger.handlers = [handler]
+    root_logger.setLevel(log_level_int)
 
     # Instrument logging with OpenTelemetry if enabled
     if settings.otel_enabled:
