@@ -111,6 +111,45 @@ gcloud run services update stampbot \
 
 Or use the [Cloud Console](https://console.cloud.google.com/run) to configure environment variables and secrets.
 
+**Note:** The deployment workflow configures Cloud Run to use port 8000 (StampBot's default) and allows unauthenticated access (required for GitHub webhooks).
+
+## Custom Domain (Optional)
+
+Cloud Run supports custom domain mapping with free managed SSL certificates.
+
+### 1. Verify Domain Ownership
+
+```bash
+# Add your domain to Cloud Run
+gcloud run domain-mappings create \
+  --service=stampbot \
+  --domain=stampbot.example.com \
+  --region=us-central1
+```
+
+### 2. Configure DNS
+
+Add the DNS records shown in the output. Typically:
+- For apex domains: A records pointing to Google's IPs
+- For subdomains: CNAME record pointing to `ghs.googlehosted.com`
+
+Example for a subdomain:
+```
+stampbot.example.com.  CNAME  ghs.googlehosted.com.
+```
+
+### 3. Wait for SSL Provisioning
+
+SSL certificate provisioning can take up to 24 hours (usually faster). Check status:
+
+```bash
+gcloud run domain-mappings describe \
+  --domain=stampbot.example.com \
+  --region=us-central1
+```
+
+Once provisioned, update your GitHub App's webhook URL to use your custom domain.
+
 ## Cost Management
 
 Cloud Run has a generous free tier:
