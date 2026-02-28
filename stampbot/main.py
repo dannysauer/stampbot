@@ -322,15 +322,16 @@ async def setup_page(request: Request) -> Response:
 
     # Determine base URL with priority:
     # 1. Explicit configuration (STAMPBOT_BASE_URL)
-    # 2. Proxy headers (X-Forwarded-Proto + X-Forwarded-Host)
+    # 2. Proxy headers (X-Forwarded-Proto + Host/X-Forwarded-Host)
     # 3. Request base URL (fallback)
     configured_base_url = settings.get("base_url", "")
     if configured_base_url:
         base_url = configured_base_url.rstrip("/")
     else:
         # Check for proxy headers from ingress/load balancer
+        # Cloud Run sends X-Forwarded-Proto but uses standard Host header
         forwarded_proto = request.headers.get("X-Forwarded-Proto", "")
-        forwarded_host = request.headers.get("X-Forwarded-Host", "")
+        forwarded_host = request.headers.get("X-Forwarded-Host", request.headers.get("Host", ""))
         if forwarded_proto and forwarded_host:
             base_url = f"{forwarded_proto}://{forwarded_host}"
         else:

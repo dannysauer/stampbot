@@ -12,8 +12,9 @@ on:
         type: string
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  GHCR_REGISTRY: ghcr.io
+  GHCR_IMAGE: ${{ github.repository }}
+  DOCKERHUB_IMAGE: stampbot/stampbot
 
 jobs:
   determine-version:
@@ -120,18 +121,26 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
-      - name: Log in to Container Registry
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ${{ env.GHCR_REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          username: stampbot
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: |
+            ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE }}
+            ${{ env.DOCKERHUB_IMAGE }}
           tags: |
             type=raw,value=${{ needs.determine-version.outputs.version }}
             type=raw,value=latest
@@ -144,14 +153,14 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+          cache-from: type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE }}:buildcache,mode=max
           platforms: linux/amd64,linux/arm64
 
       - name: Generate SBOM and push to OCI registry
         uses: anchore/sbom-action@28d71544de8eaf1b958d335707167c5f783590ad # v0.22.2
         with:
-          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.determine-version.outputs.version }}
+          image: ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE }}:${{ needs.determine-version.outputs.version }}
           artifact-name: sbom-${{ needs.determine-version.outputs.version }}.spdx.json
           output-file: sbom.spdx.json
           format: spdx-json
@@ -167,7 +176,7 @@ jobs:
           cosign attest --predicate sbom.spdx.json \
             --type spdxjson \
             --yes \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}
+            ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE }}@${DIGEST}
 
       - name: Attest VEX to image
         env:
@@ -177,7 +186,7 @@ jobs:
           cosign attest --predicate .openvex.json \
             --type openvex \
             --yes \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}
+            ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE }}@${DIGEST}
 
       - name: Copy VEX document for release
         env:

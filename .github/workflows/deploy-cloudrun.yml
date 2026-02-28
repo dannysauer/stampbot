@@ -26,8 +26,7 @@ on:
 #    - CLOUDRUN_SERVICE_NAME: Service name (default: stampbot)
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  DOCKERHUB_IMAGE: stampbot/stampbot
   CLOUDRUN_REGION: ${{ vars.CLOUDRUN_REGION || 'us-central1' }}
   CLOUDRUN_SERVICE: ${{ vars.CLOUDRUN_SERVICE_NAME || 'stampbot' }}
 
@@ -63,11 +62,12 @@ jobs:
 
       - name: Deploy to Cloud Run
         id: deploy
-        uses: google-github-actions/deploy-cloudrun@e62f655d5754bec48078a72efd015f3e75bb279e # v2.9.0
+        uses: google-github-actions/deploy-cloudrun@2028e2d7d30a78c6910e0632e48dd561b064884d # v3.0.1
         with:
           service: ${{ env.CLOUDRUN_SERVICE }}
           region: ${{ env.CLOUDRUN_REGION }}
-          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
+          image: docker.io/${{ env.DOCKERHUB_IMAGE }}:${{ steps.tag.outputs.tag }}
+          flags: '--port=8000 --allow-unauthenticated'
           # Cloud Run will use the service's existing configuration for env vars and secrets
           # Configure these in the GCP Console or via gcloud CLI
 
