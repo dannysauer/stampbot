@@ -63,7 +63,7 @@ jobs:
 
       - name: Deploy to Cloud Run
         id: deploy
-        uses: google-github-actions/deploy-cloudrun@e62f655d5754bec48078a72efd015f3e75bb279e # v2.9.0
+        uses: google-github-actions/deploy-cloudrun@2028e2d7d30a78c6910e0632e48dd561b064884d # v3.0.1
         with:
           service: ${{ env.CLOUDRUN_SERVICE }}
           region: ${{ env.CLOUDRUN_REGION }}
