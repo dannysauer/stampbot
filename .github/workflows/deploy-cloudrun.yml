@@ -41,6 +41,8 @@ jobs:
     steps:
       - name: Determine image tag
         id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ -n "${{ inputs.image_tag }}" ]; then
             echo "tag=${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
@@ -49,8 +51,14 @@ jobs:
             TAG="${{ github.event.release.tag_name }}"
             echo "tag=${TAG#v}" >> $GITHUB_OUTPUT
           else
-            echo "::error::No image tag specified and not triggered by release"
-            exit 1
+            # Fetch latest release tag (excluding chart releases)
+            LATEST=$(gh api repos/${{ github.repository }}/releases --jq '[.[] | select(.tag_name | startswith("v"))][0].tag_name')
+            if [ -z "$LATEST" ]; then
+              echo "::error::No releases found"
+              exit 1
+            fi
+            echo "Using latest release: $LATEST"
+            echo "tag=${LATEST#v}" >> $GITHUB_OUTPUT
           fi
 
       - name: Authenticate to Google Cloud
