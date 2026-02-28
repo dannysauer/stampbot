@@ -1,0 +1,75 @@
+name: Deploy to Cloud Run
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy (e.g., 1.2.3). Defaults to latest release.'
+        required: false
+        type: string
+
+# GCP Setup Requirements:
+# 1. Create a GCP project and enable Cloud Run API
+# 2. Create a service account with roles:
+#    - roles/run.admin (Cloud Run Admin)
+#    - roles/iam.serviceAccountUser (to act as the runtime service account)
+# 3. Set up Workload Identity Federation:
+#    - Create a Workload Identity Pool
+#    - Create a Provider for GitHub Actions
+#    - Grant the service account access to the pool
+# 4. Set repository variables:
+#    - GCP_WORKLOAD_IDENTITY_PROVIDER: projects/<id>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
+#    - GCP_SERVICE_ACCOUNT: <name>@<project>.iam.gserviceaccount.com
+#    - CLOUDRUN_REGION: Region for Cloud Run (default: us-central1)
+#    - CLOUDRUN_SERVICE_NAME: Service name (default: stampbot)
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  CLOUDRUN_REGION: ${{ vars.CLOUDRUN_REGION || 'us-central1' }}
+  CLOUDRUN_SERVICE: ${{ vars.CLOUDRUN_SERVICE_NAME || 'stampbot' }}
+
+jobs:
+  deploy:
+    name: Deploy to Cloud Run
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # Required for Workload Identity Federation
+
+    steps:
+      - name: Determine image tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            echo "tag=${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "release" ]; then
+            # Extract version from release tag (remove 'v' prefix)
+            TAG="${{ github.event.release.tag_name }}"
+            echo "tag=${TAG#v}" >> $GITHUB_OUTPUT
+          else
+            echo "::error::No image tag specified and not triggered by release"
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@ba79af03959ebeac9769e648f473a284504d9193 # v2.1.10
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@e62f655d5754bec48078a72efd015f3e75bb279e # v2.9.0
+        with:
+          service: ${{ env.CLOUDRUN_SERVICE }}
+          region: ${{ env.CLOUDRUN_REGION }}
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
+          # Cloud Run will use the service's existing configuration for env vars and secrets
+          # Configure these in the GCP Console or via gcloud CLI
+
+      - name: Show deployment URL
+        run: echo "Deployed to ${{ steps.deploy.outputs.url }}"
