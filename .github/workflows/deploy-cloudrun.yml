@@ -67,6 +67,7 @@ jobs:
           service: ${{ env.CLOUDRUN_SERVICE }}
           region: ${{ env.CLOUDRUN_REGION }}
           image: docker.io/${{ env.DOCKERHUB_IMAGE }}:${{ steps.tag.outputs.tag }}
+          flags: '--port=8000 --allow-unauthenticated'
           # Cloud Run will use the service's existing configuration for env vars and secrets
           # Configure these in the GCP Console or via gcloud CLI
 
