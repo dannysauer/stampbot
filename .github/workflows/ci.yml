@@ -1,6 +1,9 @@
 name: CI
 
 on:
+  schedule:
+    - cron: '0 10 * * *'  # 4AM Central (10:00 UTC)
+  workflow_dispatch:  # Manual trigger for testing
   pull_request:
     branches:
       - main
@@ -547,6 +550,367 @@ jobs:
           trivyignores: '.trivyignore'
         env:
           TRIVY_VEX: '.openvex.json'
+
+  scheduled-security-scan:
+    name: Scheduled Security Scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write  # For pushing VEX branches
+      packages: read
+      models: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Trivy vulnerability scanner
+        id: trivy
+        uses: aquasecurity/trivy-action@c1824fd6edce30d7ab345a9989de00bbd46ef284 # 0.34.0
+        continue-on-error: true
+        with:
+          image-ref: 'ghcr.io/${{ github.repository }}:main'
+          format: 'json'
+          output: 'trivy-results.json'
+          severity: 'CRITICAL,HIGH'
+          trivyignores: '.trivyignore'
+        env:
+          TRIVY_VEX: '.openvex.json'
+
+      - name: Parse vulnerabilities
+        id: parse
+        run: |
+          # Check if Trivy found any results
+          if [ ! -f trivy-results.json ]; then
+            echo "No Trivy results file found"
+            echo "has_vulns=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Extract vulnerabilities from Trivy JSON output
+          # Trivy outputs Results[].Vulnerabilities[] array
+          VULNS=$(jq -r '
+            [.Results[]? | .Vulnerabilities[]? | select(. != null)] |
+            map({
+              id: .VulnerabilityID,
+              pkg: .PkgName,
+              installed_version: .InstalledVersion,
+              fixed_version: .FixedVersion,
+              severity: .Severity,
+              title: .Title,
+              description: .Description,
+              primary_url: .PrimaryURL
+            }) |
+            unique_by(.id)
+          ' trivy-results.json)
+
+          # Check if any vulnerabilities found
+          VULN_COUNT=$(echo "$VULNS" | jq 'length')
+          if [ "$VULN_COUNT" -eq 0 ]; then
+            echo "No vulnerabilities found"
+            echo "has_vulns=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Load existing VEX statements to filter out already-handled CVEs
+          EXISTING_CVES=$(jq -r '[.statements[]?.vulnerability.name] | map(select(. != null))' .openvex.json)
+
+          # Filter out CVEs already in VEX
+          NEW_VULNS=$(echo "$VULNS" | jq --argjson existing "$EXISTING_CVES" '
+            map(select(.id as $id | $existing | index($id) | not))
+          ')
+
+          NEW_VULN_COUNT=$(echo "$NEW_VULNS" | jq 'length')
+          if [ "$NEW_VULN_COUNT" -eq 0 ]; then
+            echo "All vulnerabilities already handled in VEX"
+            echo "has_vulns=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Found $NEW_VULN_COUNT new vulnerabilities to analyze"
+          echo "has_vulns=true" >> "$GITHUB_OUTPUT"
+
+          # Save for next step (escape for GitHub Actions)
+          {
+            echo "vuln_data<<EOF"
+            echo "$NEW_VULNS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate GitHub App Token
+        if: steps.parse.outputs.has_vulns == 'true'
+        id: app-token
+        uses: tibdex/github-app-token@3beb63f4bd073e61482598c45c71c1019b59b73a # v2.1.0
+        with:
+          app_id: ${{ vars.STAMPBOT_APP_ID }}
+          private_key: ${{ secrets.STAMPBOT_PRIVATE_KEY }}
+
+      - name: Analyze and remediate vulnerabilities
+        if: steps.parse.outputs.has_vulns == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          VULN_DATA: ${{ steps.parse.outputs.vuln_data }}
+        run: |
+          set -euo pipefail
+
+          # Application context for AI analysis
+          APP_CONTEXT="This is stampbot, a GitHub App that automatically approves pull requests.
+
+          Security-relevant application context:
+          - Uses PEM-format private keys for JWT signing (RS256) to authenticate as a GitHub App
+          - Makes outbound HTTPS connections to GitHub API only
+          - Does NOT parse CMS, PKCS#7, S/MIME, or PKCS#12 files
+          - Does NOT accept untrusted cryptographic input
+          - Does NOT process user-uploaded files
+          - Protobuf is only used for outbound OTLP trace export to a trusted collector
+          - The application runs in a container and processes GitHub webhook events"
+
+          # Process each vulnerability
+          echo "$VULN_DATA" | jq -c '.[]' | while read -r vuln; do
+            CVE_ID=$(echo "$vuln" | jq -r '.id')
+            PKG_NAME=$(echo "$vuln" | jq -r '.pkg')
+            SEVERITY=$(echo "$vuln" | jq -r '.severity')
+            TITLE=$(echo "$vuln" | jq -r '.title')
+            DESCRIPTION=$(echo "$vuln" | jq -r '.description')
+            PRIMARY_URL=$(echo "$vuln" | jq -r '.primary_url')
+            INSTALLED_VERSION=$(echo "$vuln" | jq -r '.installed_version')
+            FIXED_VERSION=$(echo "$vuln" | jq -r '.fixed_version // "none available"')
+
+            echo "::group::Analyzing $CVE_ID"
+            echo "Package: $PKG_NAME"
+            echo "Severity: $SEVERITY"
+            echo "Title: $TITLE"
+
+            # Check for existing issue
+            EXISTING_ISSUE=$(gh issue list --search "$CVE_ID in:title" --json number --jq '.[0].number // empty' || true)
+            if [ -n "$EXISTING_ISSUE" ]; then
+              echo "Issue #$EXISTING_ISSUE already exists for $CVE_ID, skipping"
+              echo "::endgroup::"
+              continue
+            fi
+
+            # Check for existing PR branch
+            if git ls-remote --heads origin "security/vex-$CVE_ID" | grep -q .; then
+              echo "Branch security/vex-$CVE_ID already exists, skipping"
+              echo "::endgroup::"
+              continue
+            fi
+
+            # Build AI prompt
+            PROMPT="Analyze whether this vulnerability affects the application.
+
+          Vulnerability: $CVE_ID
+          Package: $PKG_NAME (version $INSTALLED_VERSION)
+          Severity: $SEVERITY
+          Title: $TITLE
+          Description: $DESCRIPTION
+          Reference: $PRIMARY_URL
+
+          Application context:
+          $APP_CONTEXT
+
+          Based on how this application uses the affected package, determine if the vulnerability is exploitable.
+
+          Respond with JSON only:
+          {
+            \"affected\": true or false,
+            \"justification\": \"one of: component_not_present, vulnerable_code_not_present, vulnerable_code_not_in_execute_path, vulnerable_code_cannot_be_controlled_by_adversary, inline_mitigations_already_exist\",
+            \"impact_statement\": \"Brief explanation of why the app is or is not affected\"
+          }"
+
+            # Call GitHub Models API with retries
+            AI_RESPONSE=""
+            for attempt in 1 2 3; do
+              echo "AI API attempt $attempt..."
+              AI_RESPONSE=$(curl -sS --fail-with-body \
+                -H "Authorization: Bearer $GITHUB_TOKEN" \
+                -H "Content-Type: application/json" \
+                "https://models.github.ai/inference/chat/completions" \
+                -d "$(jq -n \
+                  --arg prompt "$PROMPT" \
+                  '{
+                    model: "openai/gpt-4o",
+                    messages: [{role: "user", content: $prompt}],
+                    response_format: {type: "json_object"},
+                    temperature: 0.1
+                  }')" 2>&1) && break
+              echo "Attempt $attempt failed, retrying..."
+              sleep $((attempt * 5))
+            done
+
+            if [ -z "$AI_RESPONSE" ]; then
+              echo "::warning::AI API failed after 3 attempts for $CVE_ID, creating manual review issue"
+              gh issue create \
+                --title "Security: Manual review needed for $CVE_ID" \
+                --label "security" \
+                --body "## Vulnerability Details
+
+          | Field | Value |
+          |-------|-------|
+          | CVE | $CVE_ID |
+          | Package | $PKG_NAME |
+          | Installed Version | $INSTALLED_VERSION |
+          | Fixed Version | $FIXED_VERSION |
+          | Severity | $SEVERITY |
+
+          ## Description
+          $TITLE
+
+          $DESCRIPTION
+
+          ## Reference
+          $PRIMARY_URL
+
+          ## Action Required
+          AI analysis failed. Please manually review whether this vulnerability affects stampbot and either:
+          1. Add a VEX statement to \`.openvex.json\` if not affected
+          2. Investigate remediation if affected"
+              echo "::endgroup::"
+              continue
+            fi
+
+            # Parse AI response
+            AI_CONTENT=$(echo "$AI_RESPONSE" | jq -r '.choices[0].message.content // empty')
+            if [ -z "$AI_CONTENT" ]; then
+              echo "::warning::Empty AI response for $CVE_ID"
+              echo "::endgroup::"
+              continue
+            fi
+
+            AFFECTED=$(echo "$AI_CONTENT" | jq -r '.affected')
+            JUSTIFICATION=$(echo "$AI_CONTENT" | jq -r '.justification')
+            IMPACT_STATEMENT=$(echo "$AI_CONTENT" | jq -r '.impact_statement')
+
+            echo "AI Analysis: affected=$AFFECTED, justification=$JUSTIFICATION"
+
+            if [ "$AFFECTED" = "false" ]; then
+              # Create VEX exception PR
+              echo "Creating VEX exception PR for $CVE_ID"
+
+              # Create branch
+              git checkout -b "security/vex-$CVE_ID"
+
+              # Update .openvex.json
+              TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+              CURRENT_VERSION=$(jq '.version' .openvex.json)
+              NEW_VERSION=$((CURRENT_VERSION + 1))
+
+              # Determine package type and format subcomponent ID
+              if echo "$PKG_NAME" | grep -qE '^(lib|openssl|glibc|zlib)'; then
+                SUBCOMPONENT_ID="pkg:deb/debian/$PKG_NAME"
+              else
+                SUBCOMPONENT_ID="pkg:pypi/$PKG_NAME"
+              fi
+
+              # Add new statement
+              jq --arg cve_id "$CVE_ID" \
+                 --arg title "$TITLE" \
+                 --arg justification "$JUSTIFICATION" \
+                 --arg impact "$IMPACT_STATEMENT" \
+                 --arg timestamp "$TIMESTAMP" \
+                 --arg subcomponent "$SUBCOMPONENT_ID" \
+                 --argjson new_version "$NEW_VERSION" \
+                 '.version = $new_version |
+                  .timestamp = $timestamp |
+                  .statements += [{
+                    vulnerability: {
+                      "@id": "https://nvd.nist.gov/vuln/detail/\($cve_id)",
+                      name: $cve_id,
+                      description: $title
+                    },
+                    products: [{
+                      "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
+                      subcomponents: [{
+                        "@id": $subcomponent
+                      }]
+                    }],
+                    status: "not_affected",
+                    justification: $justification,
+                    impact_statement: $impact
+                  }]' .openvex.json > .openvex.json.tmp
+              mv .openvex.json.tmp .openvex.json
+
+              # Commit and push
+              git config user.name "stampbot[bot]"
+              git config user.email "stampbot[bot]@users.noreply.github.com"
+              git add .openvex.json
+              git commit -m "chore(security): add VEX statement for $CVE_ID"
+              git push origin "security/vex-$CVE_ID"
+
+              # Create PR
+              gh pr create \
+                --title "chore(security): VEX exception for $CVE_ID" \
+                --body "## Summary
+          - Add VEX (Vulnerability Exploitability eXchange) statement for $CVE_ID
+          - AI analysis determined this vulnerability does not affect stampbot
+
+          ## Vulnerability Details
+          | Field | Value |
+          |-------|-------|
+          | CVE | $CVE_ID |
+          | Package | $PKG_NAME |
+          | Severity | $SEVERITY |
+
+          ## AI Analysis
+          **Justification:** $JUSTIFICATION
+
+          **Impact Statement:** $IMPACT_STATEMENT
+
+          ## Reference
+          $PRIMARY_URL
+
+          ---
+          *This PR was automatically generated by the scheduled security scan.*"
+
+              # Return to main branch for next iteration
+              git checkout main
+            else
+              # Create security issue
+              echo "Creating security issue for $CVE_ID"
+              gh issue create \
+                --title "Security: $CVE_ID affects stampbot" \
+                --label "security" \
+                --body "## Vulnerability Details
+
+          | Field | Value |
+          |-------|-------|
+          | CVE | $CVE_ID |
+          | Package | $PKG_NAME |
+          | Installed Version | $INSTALLED_VERSION |
+          | Fixed Version | $FIXED_VERSION |
+          | Severity | $SEVERITY |
+
+          ## Description
+          $TITLE
+
+          $DESCRIPTION
+
+          ## AI Analysis
+          **Impact Statement:** $IMPACT_STATEMENT
+
+          ## Reference
+          $PRIMARY_URL
+
+          ## Recommended Actions
+          1. Update \`$PKG_NAME\` to version \`$FIXED_VERSION\` if available
+          2. If no fix available, implement mitigations or accept risk
+
+          ---
+          *This issue was automatically generated by the scheduled security scan.*"
+            fi
+
+            echo "::endgroup::"
+          done
+
+          echo "Security scan complete"
 
   helm-lint:
     name: Lint Helm Chart
