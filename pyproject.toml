@@ -12,7 +12,7 @@ fastapi = "0.128.0"
 uvicorn = {extras = ["standard"], version = "0.40.0"}
 pydantic = "2.12.5"
 pydantic-settings = "2.12.0"
-dynaconf = "3.2.12"
+dynaconf = "3.2.13"
 PyGithub = "2.8.1"
 PyJWT = {extras = ["crypto"], version = "2.11.0"}
 cryptography = "46.0.5"
