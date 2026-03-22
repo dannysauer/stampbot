@@ -644,19 +644,11 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Generate GitHub App Token
-        if: steps.parse.outputs.has_vulns == 'true'
-        id: app-token
-        uses: tibdex/github-app-token@3beb63f4bd073e61482598c45c71c1019b59b73a # v2.1.0
-        with:
-          app_id: ${{ vars.STAMPBOT_APP_ID }}
-          private_key: ${{ secrets.STAMPBOT_PRIVATE_KEY }}
-
       - name: Analyze and remediate vulnerabilities
         if: steps.parse.outputs.has_vulns == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VULN_DATA: ${{ steps.parse.outputs.vuln_data }}
         run: |
           set -euo pipefail
@@ -839,8 +831,8 @@ jobs:
               mv .openvex.json.tmp .openvex.json
 
               # Commit and push
-              git config user.name "stampbot[bot]"
-              git config user.email "stampbot[bot]@users.noreply.github.com"
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
               git add .openvex.json
               git commit -m "chore(security): add VEX statement for $CVE_ID"
               git push origin "security/vex-$CVE_ID"
