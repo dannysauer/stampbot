@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
   "author": "Danny Sauer <github@dannysauer.com>",
-  "timestamp": "2026-01-30T00:00:00Z",
-  "version": 3,
+  "timestamp": "2026-03-22T16:35:54Z",
+  "version": 4,
   "statements": [
     {
       "vulnerability": {
@@ -116,6 +116,26 @@
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
       "impact_statement": "This application does not process PKCS#12 files. Private keys are loaded in PEM format only."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-33154",
+        "name": "CVE-2026-33154",
+        "description": "dynaconf Affected by Remote Code Execution (RCE) via Insecure Template Evaluation in @jinja Resolver"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
+          "subcomponents": [
+            {
+              "@id": "pkg:pypi/dynaconf"
+            }
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not allow adversaries to influence configuration sources such as environment variables, .env files, container environment configuration, or CI/CD secrets. Since the vulnerability in the dynaconf package requires an attacker to control these configuration sources to exploit the issue, the application is not affected. Additionally, the application processes only trusted inputs (e.g., GitHub webhook events and outbound HTTPS connections) and does not expose any untrusted configuration injection points."
     }
   ]
 }
