@@ -28,6 +28,7 @@ jobs:
         uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
         with:
           cache: true
+          version: "2026.3.10"
 
       - name: Set up Python package cache
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -61,6 +62,7 @@ jobs:
         uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
         with:
           cache: true
+          version: "2026.3.10"
         env:
           MISE_PYTHON_VERSION: ${{ matrix.python-version }}
 
@@ -115,6 +117,7 @@ jobs:
         uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
         with:
           cache: true
+          version: "2026.3.10"
 
       - name: Set up Python package cache
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -914,6 +917,7 @@ jobs:
         uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
         with:
           cache: true
+          version: "2026.3.10"
 
       - name: Lint Helm chart
         run: helm lint charts/stampbot
@@ -935,6 +939,7 @@ jobs:
         uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
         with:
           cache: true
+          version: "2026.3.10"
 
       - name: Install kubeconform
         run: |
@@ -976,6 +981,7 @@ jobs:
         uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
         with:
           cache: true
+          version: "2026.3.10"
 
       - name: Install helm-unittest plugin
         run: helm plugin install https://github.com/helm-unittest/helm-unittest.git --verify=false
@@ -1021,6 +1027,7 @@ jobs:
         uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
         with:
           cache: true
+          version: "2026.3.10"
 
       - name: Create kind cluster
         uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
