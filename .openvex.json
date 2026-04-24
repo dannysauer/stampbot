@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
   "author": "Danny Sauer <github@dannysauer.com>",
-  "timestamp": "2026-03-22T16:35:48Z",
-  "version": 4,
+  "timestamp": "2026-04-24T10:59:32Z",
+  "version": 5,
   "statements": [
     {
       "vulnerability": {
@@ -136,6 +136,26 @@
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
       "impact_statement": "The application does not accept untrusted cryptographic input, and the JWTs it processes are signed using its own private keys for authentication with the GitHub API. Since the crit header vulnerability requires an adversary to supply a maliciously crafted JWT, and the application does not process JWTs from untrusted sources, the vulnerability is not exploitable in this context."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-28388",
+        "name": "CVE-2026-28388",
+        "description": "openssl: OpenSSL: Denial of Service due to NULL pointer dereference in delta CRL processing"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
+          "subcomponents": [
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            }
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process untrusted cryptographic input, does not handle CRL or delta CRL files, and does not enable the X509_V_FLAG_USE_DELTAS flag in its certificate verification context. Additionally, the application only makes outbound HTTPS connections to trusted endpoints (GitHub API) and does not process user-uploaded files or untrusted certificates. Therefore, the vulnerable code cannot be exploited in the context of this application."
     }
   ]
 }
