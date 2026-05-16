@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
   "author": "Danny Sauer <github@dannysauer.com>",
-  "timestamp": "2026-03-31T10:45:45Z",
-  "version": 5,
+  "timestamp": "2026-05-16T19:20:00Z",
+  "version": 6,
   "statements": [
     {
       "vulnerability": {
@@ -15,9 +15,7 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {
-              "@id": "pkg:pypi/protobuf"
-            }
+            {"@id": "pkg:pypi/protobuf"}
           ]
         }
       ],
@@ -35,9 +33,7 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {
-              "@id": "pkg:deb/debian/glibc"
-            }
+            {"@id": "pkg:deb/debian/glibc"}
           ]
         }
       ],
@@ -55,9 +51,7 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {
-              "@id": "pkg:pypi/jaraco.context"
-            }
+            {"@id": "pkg:pypi/jaraco.context"}
           ]
         }
       ],
@@ -75,15 +69,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {
-              "@id": "pkg:deb/debian/openssl"
-            },
-            {
-              "@id": "pkg:deb/debian/libssl3t64"
-            },
-            {
-              "@id": "pkg:deb/debian/openssl-provider-legacy"
-            }
+            {"@id": "pkg:deb/debian/openssl"},
+            {"@id": "pkg:deb/debian/libssl3t64"},
+            {"@id": "pkg:deb/debian/openssl-provider-legacy"}
           ]
         }
       ],
@@ -101,15 +89,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {
-              "@id": "pkg:deb/debian/openssl"
-            },
-            {
-              "@id": "pkg:deb/debian/libssl3t64"
-            },
-            {
-              "@id": "pkg:deb/debian/openssl-provider-legacy"
-            }
+            {"@id": "pkg:deb/debian/openssl"},
+            {"@id": "pkg:deb/debian/libssl3t64"},
+            {"@id": "pkg:deb/debian/openssl-provider-legacy"}
           ]
         }
       ],
@@ -127,15 +109,31 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {
-              "@id": "pkg:pypi/PyJWT"
-            }
+            {"@id": "pkg:pypi/PyJWT"}
           ]
         }
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
       "impact_statement": "The application does not accept untrusted cryptographic input, and the JWTs it processes are signed using its own private keys for authentication with the GitHub API. Since the crit header vulnerability requires an adversary to supply a maliciously crafted JWT, and the application does not process JWTs from untrusted sources, the vulnerability is not exploitable in this context."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-31789",
+        "name": "CVE-2026-31789",
+        "description": "openssl: OpenSSL: Heap buffer overflow on 32-bit systems from large X.509 certificate processing"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
+          "subcomponents": [
+            {"@id": "pkg:deb/debian/libssl3t64"}
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process untrusted X.509 certificates or any untrusted cryptographic input. It only uses PEM-format private keys for JWT signing and makes outbound HTTPS connections to the GitHub API. Since the vulnerability requires processing of a maliciously crafted X.509 certificate with excessively large OCTET STRING values, and the application does not handle such inputs, it is not exploitable in this context."
     },
     {
       "vulnerability": {
@@ -147,9 +145,7 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {
-              "@id": "pkg:deb/debian/libncursesw6"
-            }
+            {"@id": "pkg:deb/debian/libncursesw6"}
           ]
         }
       ],
