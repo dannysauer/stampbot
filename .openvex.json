@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
   "author": "Danny Sauer <github@dannysauer.com>",
-  "timestamp": "2026-05-16T19:15:14Z",
-  "version": 5,
+  "timestamp": "2026-05-16T19:20:49Z",
+  "version": 16,
   "statements": [
     {
       "vulnerability": {
@@ -15,9 +15,7 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {
-              "@id": "pkg:pypi/protobuf"
-            }
+            {"@id": "pkg:pypi/protobuf"}
           ]
         }
       ],
@@ -35,9 +33,7 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {
-              "@id": "pkg:deb/debian/glibc"
-            }
+            {"@id": "pkg:deb/debian/glibc"}
           ]
         }
       ],
@@ -55,9 +51,7 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {
-              "@id": "pkg:pypi/jaraco.context"
-            }
+            {"@id": "pkg:pypi/jaraco.context"}
           ]
         }
       ],
@@ -75,15 +69,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {
-              "@id": "pkg:deb/debian/openssl"
-            },
-            {
-              "@id": "pkg:deb/debian/libssl3t64"
-            },
-            {
-              "@id": "pkg:deb/debian/openssl-provider-legacy"
-            }
+            {"@id": "pkg:deb/debian/openssl"},
+            {"@id": "pkg:deb/debian/libssl3t64"},
+            {"@id": "pkg:deb/debian/openssl-provider-legacy"}
           ]
         }
       ],
@@ -101,15 +89,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {
-              "@id": "pkg:deb/debian/openssl"
-            },
-            {
-              "@id": "pkg:deb/debian/libssl3t64"
-            },
-            {
-              "@id": "pkg:deb/debian/openssl-provider-legacy"
-            }
+            {"@id": "pkg:deb/debian/openssl"},
+            {"@id": "pkg:deb/debian/libssl3t64"},
+            {"@id": "pkg:deb/debian/openssl-provider-legacy"}
           ]
         }
       ],
@@ -127,9 +109,7 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {
-              "@id": "pkg:pypi/PyJWT"
-            }
+            {"@id": "pkg:pypi/PyJWT"}
           ]
         }
       ],
@@ -147,15 +127,211 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {
-              "@id": "pkg:deb/debian/libssl3t64"
-            }
+            {"@id": "pkg:deb/debian/libssl3t64"}
           ]
         }
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
       "impact_statement": "The application does not process untrusted X.509 certificates or any untrusted cryptographic input. It only uses PEM-format private keys for JWT signing and makes outbound HTTPS connections to the GitHub API. Since the vulnerability requires processing of a maliciously crafted X.509 certificate with excessively large OCTET STRING values, and the application does not handle such inputs, it is not exploitable in this context."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2025-69720",
+        "name": "CVE-2025-69720",
+        "description": "ncurses: ncurses: Buffer overflow vulnerability may lead to arbitrary code execution."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
+          "subcomponents": [
+            {"@id": "pkg:deb/debian/libncursesw6"}
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The vulnerability affects the infocmp command-line tool in ncurses, which is not used by the application. Stampbot does not invoke infocmp or any related functionality, nor does it process terminal-related data that could exploit this vulnerability. Additionally, the application's security-relevant context does not involve scenarios where an adversary could control or influence the vulnerable code path."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-29111",
+        "name": "CVE-2026-29111",
+        "description": "systemd: systemd: Arbitrary code execution or Denial of Service via spurious IPC API call data"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
+          "subcomponents": [
+            {"@id": "pkg:deb/debian/libsystemd0"}
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not expose any interfaces or functionality that would allow an adversary to make unprivileged IPC API calls with spurious data to systemd. The application operates in a containerized environment, processes GitHub webhook events, and interacts only with trusted systems (GitHub API and OTLP trace collector). Therefore, the vulnerability is not exploitable in the context of this application."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-33154",
+        "name": "CVE-2026-33154",
+        "description": "dynaconf Affected by Remote Code Execution (RCE) via Insecure Template Evaluation in @jinja Resolver"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
+          "subcomponents": [
+            {"@id": "pkg:pypi/dynaconf"}
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not allow adversaries to influence configuration sources such as environment variables, .env files, container environment configuration, or CI/CD secrets. Since the vulnerability in the dynaconf package requires an attacker to control these configuration sources to exploit the issue, the application is not affected. Additionally, the application processes only trusted inputs (e.g., GitHub webhook events and outbound HTTPS connections) and does not expose any untrusted configuration injection points."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-4046",
+        "name": "CVE-2026-4046",
+        "description": "glibc: glibc: Denial of Service via iconv() function with specific character sets"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
+          "subcomponents": [
+            {"@id": "pkg:deb/debian/libc-bin"}
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process user-uploaded files, does not accept untrusted cryptographic input, and does not use the IBM1390 or IBM1399 character sets. The iconv() function is not invoked in a way that could be controlled by an adversary. Additionally, the application's limited scope of operations (processing GitHub webhook events and making outbound HTTPS connections) does not involve the vulnerable functionality."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-28390",
+        "name": "CVE-2026-28390",
+        "description": "openssl: OpenSSL: Denial of Service due to NULL pointer dereference in CMS EnvelopedData processing"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
+          "subcomponents": [
+            {"@id": "pkg:deb/debian/libssl3t64"}
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process CMS, PKCS#7, S/MIME, or PKCS#12 files, nor does it accept untrusted cryptographic input. The vulnerable code path in libssl3t64 related to CMS EnvelopedData processing cannot be triggered by the application's usage patterns, as it only uses PEM-format private keys for JWT signing and makes outbound HTTPS connections to trusted endpoints."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-28387",
+        "name": "CVE-2026-28387",
+        "description": "openssl: OpenSSL: Arbitrary code execution due to use-after-free in DANE TLSA authentication"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
+          "subcomponents": [
+            {"@id": "pkg:deb/debian/libssl3t64"}
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not use DANE TLSA-based server authentication, does not interact with TLSA records, and only makes outbound HTTPS connections to the GitHub API. The vulnerability requires a specific and uncommon configuration involving DANE TLSA records, which is not applicable to this application's use case. Additionally, the application does not process untrusted cryptographic input or user-uploaded files, further reducing the attack surface for this vulnerability."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-28388",
+        "name": "CVE-2026-28388",
+        "description": "openssl: OpenSSL: Denial of Service due to NULL pointer dereference in delta CRL processing"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
+          "subcomponents": [
+            {"@id": "pkg:deb/debian/libssl3t64"}
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process untrusted cryptographic input, does not handle CRL or delta CRL files, and does not enable the X509_V_FLAG_USE_DELTAS flag in its certificate verification context. Additionally, the application only makes outbound HTTPS connections to trusted endpoints (GitHub API) and does not process user-uploaded files or untrusted certificates. Therefore, the vulnerable code cannot be exploited in the context of this application."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-28389",
+        "name": "CVE-2026-28389",
+        "description": "openssl: OpenSSL: Denial of Service vulnerability in CMS processing"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
+          "subcomponents": [
+            {"@id": "pkg:deb/debian/libssl3t64"}
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process CMS, PKCS#7, S/MIME, or PKCS#12 files, nor does it accept untrusted cryptographic input. The vulnerable code path in libssl3t64 is not invoked in the application's execution flow, and there is no opportunity for an adversary to exploit this vulnerability in the context of this application."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-4878",
+        "name": "CVE-2026-4878",
+        "description": "libcap: libcap: Privilege escalation via TOCTOU race condition in cap_set_file()"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
+          "subcomponents": [
+            {"@id": "pkg:deb/debian/libcap2"}
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The application does not use the `cap_set_file()` function or manipulate file capabilities. Additionally, the application operates in a containerized environment, processes GitHub webhook events, and does not handle untrusted file inputs or perform operations that could be influenced by a TOCTOU race condition in libcap2. Therefore, the vulnerability is not exploitable in the context of this application."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-44431",
+        "name": "CVE-2026-44431",
+        "description": "urllib3: Sensitive headers forwarded across origins in proxied low-level redirects"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
+          "subcomponents": [
+            {"@id": "pkg:pypi/urllib3"}
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The application only makes outbound HTTPS connections to the GitHub API using high-level APIs and does not use the low-level `ProxyManager.connection_from_url().urlopen()` method for cross-origin redirects. Therefore, the vulnerable code path is not executed in the context of this application."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-44432",
+        "name": "CVE-2026-44432",
+        "description": "urllib3: Decompression-bomb safeguards bypassed in parts of the streaming API"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
+          "subcomponents": [
+            {"@id": "pkg:pypi/urllib3"}
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application only makes outbound HTTPS connections to the GitHub API, which is a trusted source. It does not process responses from untrusted sources, nor does it use the Brotli library or call HTTPResponse.drain_conn(). Therefore, the vulnerability cannot be exploited in this context."
     }
   ]
 }
