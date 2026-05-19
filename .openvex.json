@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
   "author": "Danny Sauer <github@dannysauer.com>",
-  "timestamp": "2026-05-16T19:20:49Z",
-  "version": 16,
+  "timestamp": "2026-05-19T17:46:23Z",
+  "version": 23,
   "statements": [
     {
       "vulnerability": {
@@ -15,7 +15,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:pypi/protobuf"}
+            {
+              "@id": "pkg:pypi/protobuf"
+            }
           ]
         }
       ],
@@ -33,7 +35,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/glibc"}
+            {
+              "@id": "pkg:deb/debian/glibc"
+            }
           ]
         }
       ],
@@ -51,7 +55,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:pypi/jaraco.context"}
+            {
+              "@id": "pkg:pypi/jaraco.context"
+            }
           ]
         }
       ],
@@ -69,9 +75,15 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/openssl"},
-            {"@id": "pkg:deb/debian/libssl3t64"},
-            {"@id": "pkg:deb/debian/openssl-provider-legacy"}
+            {
+              "@id": "pkg:deb/debian/openssl"
+            },
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            },
+            {
+              "@id": "pkg:deb/debian/openssl-provider-legacy"
+            }
           ]
         }
       ],
@@ -89,9 +101,15 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/openssl"},
-            {"@id": "pkg:deb/debian/libssl3t64"},
-            {"@id": "pkg:deb/debian/openssl-provider-legacy"}
+            {
+              "@id": "pkg:deb/debian/openssl"
+            },
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            },
+            {
+              "@id": "pkg:deb/debian/openssl-provider-legacy"
+            }
           ]
         }
       ],
@@ -109,7 +127,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:pypi/PyJWT"}
+            {
+              "@id": "pkg:pypi/PyJWT"
+            }
           ]
         }
       ],
@@ -127,13 +147,21 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libssl3t64"}
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            },
+            {
+              "@id": "pkg:deb/debian/openssl"
+            },
+            {
+              "@id": "pkg:deb/debian/openssl-provider-legacy"
+            }
           ]
         }
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
-      "impact_statement": "The application does not process untrusted X.509 certificates or any untrusted cryptographic input. It only uses PEM-format private keys for JWT signing and makes outbound HTTPS connections to the GitHub API. Since the vulnerability requires processing of a maliciously crafted X.509 certificate with excessively large OCTET STRING values, and the application does not handle such inputs, it is not exploitable in this context."
+      "impact_statement": "The application does not process untrusted X.509 certificates or log their contents. It only uses PEM-format private keys for JWT signing and makes outbound HTTPS connections to the GitHub API, which does not involve processing untrusted certificates. Additionally, the application does not run on 32-bit platforms, further mitigating the risk of exploitation."
     },
     {
       "vulnerability": {
@@ -145,13 +173,24 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libncursesw6"}
+            {
+              "@id": "pkg:deb/debian/libncursesw6"
+            },
+            {
+              "@id": "pkg:deb/debian/libtinfo6"
+            },
+            {
+              "@id": "pkg:deb/debian/ncurses-base"
+            },
+            {
+              "@id": "pkg:deb/debian/ncurses-bin"
+            }
           ]
         }
       ],
       "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The vulnerability affects the infocmp command-line tool in ncurses, which is not used by the application. Stampbot does not invoke infocmp or any related functionality, nor does it process terminal-related data that could exploit this vulnerability. Additionally, the application's security-relevant context does not involve scenarios where an adversary could control or influence the vulnerable code path."
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The vulnerability in the ncurses package affects the infocmp command-line tool, which is not used by the application. The application does not invoke infocmp or process terminal capability data, and there is no vector for an adversary to exploit this vulnerability in the context of the application's functionality. Additionally, the application operates in a controlled containerized environment and does not process untrusted input that could trigger the vulnerable code."
     },
     {
       "vulnerability": {
@@ -163,13 +202,18 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libsystemd0"}
+            {
+              "@id": "pkg:deb/debian/libsystemd0"
+            },
+            {
+              "@id": "pkg:deb/debian/libudev1"
+            }
           ]
         }
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
-      "impact_statement": "The application does not expose any interfaces or functionality that would allow an adversary to make unprivileged IPC API calls with spurious data to systemd. The application operates in a containerized environment, processes GitHub webhook events, and interacts only with trusted systems (GitHub API and OTLP trace collector). Therefore, the vulnerability is not exploitable in the context of this application."
+      "impact_statement": "The application does not expose any interfaces or functionality that would allow an adversary to make unprivileged IPC API calls to systemd. The application runs in a container, processes only GitHub webhook events, and does not handle untrusted input or files. Therefore, the vulnerability is not exploitable in this context."
     },
     {
       "vulnerability": {
@@ -181,7 +225,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:pypi/dynaconf"}
+            {
+              "@id": "pkg:pypi/dynaconf"
+            }
           ]
         }
       ],
@@ -199,7 +245,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libc-bin"}
+            {
+              "@id": "pkg:deb/debian/libc-bin"
+            }
           ]
         }
       ],
@@ -217,13 +265,21 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libssl3t64"}
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            },
+            {
+              "@id": "pkg:deb/debian/openssl"
+            },
+            {
+              "@id": "pkg:deb/debian/openssl-provider-legacy"
+            }
           ]
         }
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
-      "impact_statement": "The application does not process CMS, PKCS#7, S/MIME, or PKCS#12 files, nor does it accept untrusted cryptographic input. The vulnerable code path in libssl3t64 related to CMS EnvelopedData processing cannot be triggered by the application's usage patterns, as it only uses PEM-format private keys for JWT signing and makes outbound HTTPS connections to trusted endpoints."
+      "impact_statement": "The application does not process CMS, PKCS#7, S/MIME, or PKCS#12 files, nor does it accept untrusted cryptographic input. The vulnerability is specific to CMS EnvelopedData processing with attacker-controlled input, which is not applicable to the application's functionality or threat model."
     },
     {
       "vulnerability": {
@@ -235,13 +291,21 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libssl3t64"}
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            },
+            {
+              "@id": "pkg:deb/debian/openssl"
+            },
+            {
+              "@id": "pkg:deb/debian/openssl-provider-legacy"
+            }
           ]
         }
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
-      "impact_statement": "The application does not use DANE TLSA-based server authentication, does not interact with TLSA records, and only makes outbound HTTPS connections to the GitHub API. The vulnerability requires a specific and uncommon configuration involving DANE TLSA records, which is not applicable to this application's use case. Additionally, the application does not process untrusted cryptographic input or user-uploaded files, further reducing the attack surface for this vulnerability."
+      "impact_statement": "The application does not use DANE TLSA-based server authentication, nor does it interact with TLSA records in any capacity. It only makes outbound HTTPS connections to the GitHub API, which does not involve the uncommon DANE TLSA configurations required to exploit this vulnerability. Additionally, the application does not process untrusted cryptographic input or user-uploaded files, further reducing the attack surface for this vulnerability."
     },
     {
       "vulnerability": {
@@ -253,13 +317,21 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libssl3t64"}
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            },
+            {
+              "@id": "pkg:deb/debian/openssl"
+            },
+            {
+              "@id": "pkg:deb/debian/openssl-provider-legacy"
+            }
           ]
         }
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
-      "impact_statement": "The application does not process untrusted cryptographic input, does not handle CRL or delta CRL files, and does not enable the X509_V_FLAG_USE_DELTAS flag in its certificate verification context. Additionally, the application only makes outbound HTTPS connections to trusted endpoints (GitHub API) and does not process user-uploaded files or untrusted certificates. Therefore, the vulnerable code cannot be exploited in the context of this application."
+      "impact_statement": "The application does not process untrusted cryptographic input, does not handle CRLs or delta CRLs, and does not enable the X509_V_FLAG_USE_DELTAS flag in its certificate verification context. As a result, the vulnerable code path cannot be triggered by an adversary in the context of this application."
     },
     {
       "vulnerability": {
@@ -271,13 +343,21 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libssl3t64"}
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            },
+            {
+              "@id": "pkg:deb/debian/openssl"
+            },
+            {
+              "@id": "pkg:deb/debian/openssl-provider-legacy"
+            }
           ]
         }
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
-      "impact_statement": "The application does not process CMS, PKCS#7, S/MIME, or PKCS#12 files, nor does it accept untrusted cryptographic input. The vulnerable code path in libssl3t64 is not invoked in the application's execution flow, and there is no opportunity for an adversary to exploit this vulnerability in the context of this application."
+      "impact_statement": "The application does not process CMS, PKCS#7, S/MIME, or PKCS#12 files, nor does it accept untrusted cryptographic input. The vulnerability requires processing attacker-controlled CMS data, which is not applicable to this application's functionality. Therefore, the vulnerability is not exploitable in this context."
     },
     {
       "vulnerability": {
@@ -289,7 +369,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libcap2"}
+            {
+              "@id": "pkg:deb/debian/libcap2"
+            }
           ]
         }
       ],
@@ -307,7 +389,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:pypi/urllib3"}
+            {
+              "@id": "pkg:pypi/urllib3"
+            }
           ]
         }
       ],
@@ -325,7 +409,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:pypi/urllib3"}
+            {
+              "@id": "pkg:pypi/urllib3"
+            }
           ]
         }
       ],
