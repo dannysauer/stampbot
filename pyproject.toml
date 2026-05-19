@@ -8,33 +8,33 @@ license = "MIT"
 
 [tool.poetry.dependencies]
 python = ">=3.11"
-fastapi = "0.128.0"
-uvicorn = {extras = ["standard"], version = "0.40.0"}
-pydantic = "2.12.5"
-pydantic-settings = "2.12.0"
+fastapi = "0.136.1"
+uvicorn = {extras = ["standard"], version = "0.47.0"}
+pydantic = "2.13.4"
+pydantic-settings = "2.14.1"
 dynaconf = "3.2.13"
-PyGithub = "2.8.1"
-PyJWT = {extras = ["crypto"], version = "2.12.0"}
+PyGithub = "2.9.1"
+PyJWT = {extras = ["crypto"], version = "2.12.1"}
 cryptography = "46.0.7"
-prometheus-client = "0.24.1"
-opentelemetry-api = "1.39.1"
-opentelemetry-sdk = "1.39.1"
+prometheus-client = "0.25.0"
+opentelemetry-api = "1.42.0"
+opentelemetry-sdk = "1.42.0"
 opentelemetry-instrumentation-fastapi = "^0.60b1"
 opentelemetry-instrumentation-logging = "^0.60b1"
-opentelemetry-exporter-otlp = "1.39.1"
+opentelemetry-exporter-otlp = "1.42.0"
 structlog = "25.5.0"
 httpx = "0.28.1"
 toml = "0.10.2"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "9.0.3"
-pytest-cov = "7.0.0"
+pytest-cov = "7.1.0"
 pytest-asyncio = "1.3.0"
-ruff = "0.14.14"
-mypy = "1.19.1"
-types-toml = "0.10.8.20240310"
-pre-commit = "4.5.1"
-cosmic-ray = "8.4.3"
+ruff = "0.15.13"
+mypy = "1.20.2"
+types-toml = "0.10.8.20260518"
+pre-commit = "4.6.0"
+cosmic-ray = "8.4.6"
 
 [tool.poetry.group.secrets.dependencies]
 detect-secrets = "1.5.0"
