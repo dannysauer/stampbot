@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
   "author": "Danny Sauer <github@dannysauer.com>",
-  "timestamp": "2026-05-19T17:46:23Z",
-  "version": 23,
+  "timestamp": "2026-05-19T18:09:21Z",
+  "version": 24,
   "statements": [
     {
       "vulnerability": {
@@ -13,12 +13,7 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
-          "subcomponents": [
-            {
-              "@id": "pkg:pypi/protobuf"
-            }
-          ]
+          "@id": "pkg:pypi/protobuf"
         }
       ],
       "status": "not_affected",
@@ -33,12 +28,7 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
-          "subcomponents": [
-            {
-              "@id": "pkg:deb/debian/glibc"
-            }
-          ]
+          "@id": "pkg:deb/debian/glibc"
         }
       ],
       "status": "under_investigation",
@@ -53,12 +43,7 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
-          "subcomponents": [
-            {
-              "@id": "pkg:pypi/jaraco.context"
-            }
-          ]
+          "@id": "pkg:pypi/jaraco.context"
         }
       ],
       "status": "under_investigation",
@@ -73,18 +58,13 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
-          "subcomponents": [
-            {
-              "@id": "pkg:deb/debian/openssl"
-            },
-            {
-              "@id": "pkg:deb/debian/libssl3t64"
-            },
-            {
-              "@id": "pkg:deb/debian/openssl-provider-legacy"
-            }
-          ]
+          "@id": "pkg:deb/debian/libssl3t64"
+        },
+        {
+          "@id": "pkg:deb/debian/openssl"
+        },
+        {
+          "@id": "pkg:deb/debian/openssl-provider-legacy"
         }
       ],
       "status": "not_affected",
@@ -99,18 +79,13 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
-          "subcomponents": [
-            {
-              "@id": "pkg:deb/debian/openssl"
-            },
-            {
-              "@id": "pkg:deb/debian/libssl3t64"
-            },
-            {
-              "@id": "pkg:deb/debian/openssl-provider-legacy"
-            }
-          ]
+          "@id": "pkg:deb/debian/libssl3t64"
+        },
+        {
+          "@id": "pkg:deb/debian/openssl"
+        },
+        {
+          "@id": "pkg:deb/debian/openssl-provider-legacy"
         }
       ],
       "status": "not_affected",
@@ -125,12 +100,7 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
-          "subcomponents": [
-            {
-              "@id": "pkg:pypi/PyJWT"
-            }
-          ]
+          "@id": "pkg:pypi/PyJWT"
         }
       ],
       "status": "not_affected",
@@ -145,18 +115,13 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
-          "subcomponents": [
-            {
-              "@id": "pkg:deb/debian/libssl3t64"
-            },
-            {
-              "@id": "pkg:deb/debian/openssl"
-            },
-            {
-              "@id": "pkg:deb/debian/openssl-provider-legacy"
-            }
-          ]
+          "@id": "pkg:deb/debian/libssl3t64"
+        },
+        {
+          "@id": "pkg:deb/debian/openssl"
+        },
+        {
+          "@id": "pkg:deb/debian/openssl-provider-legacy"
         }
       ],
       "status": "not_affected",
@@ -171,21 +136,16 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
-          "subcomponents": [
-            {
-              "@id": "pkg:deb/debian/libncursesw6"
-            },
-            {
-              "@id": "pkg:deb/debian/libtinfo6"
-            },
-            {
-              "@id": "pkg:deb/debian/ncurses-base"
-            },
-            {
-              "@id": "pkg:deb/debian/ncurses-bin"
-            }
-          ]
+          "@id": "pkg:deb/debian/libncursesw6"
+        },
+        {
+          "@id": "pkg:deb/debian/libtinfo6"
+        },
+        {
+          "@id": "pkg:deb/debian/ncurses-base"
+        },
+        {
+          "@id": "pkg:deb/debian/ncurses-bin"
         }
       ],
       "status": "not_affected",
@@ -200,15 +160,10 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
-          "subcomponents": [
-            {
-              "@id": "pkg:deb/debian/libsystemd0"
-            },
-            {
-              "@id": "pkg:deb/debian/libudev1"
-            }
-          ]
+          "@id": "pkg:deb/debian/libsystemd0"
+        },
+        {
+          "@id": "pkg:deb/debian/libudev1"
         }
       ],
       "status": "not_affected",
@@ -223,12 +178,7 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
-          "subcomponents": [
-            {
-              "@id": "pkg:pypi/dynaconf"
-            }
-          ]
+          "@id": "pkg:pypi/dynaconf"
         }
       ],
       "status": "not_affected",
@@ -243,12 +193,7 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
-          "subcomponents": [
-            {
-              "@id": "pkg:deb/debian/libc-bin"
-            }
-          ]
+          "@id": "pkg:deb/debian/libc-bin"
         }
       ],
       "status": "not_affected",
@@ -263,18 +208,13 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
-          "subcomponents": [
-            {
-              "@id": "pkg:deb/debian/libssl3t64"
-            },
-            {
-              "@id": "pkg:deb/debian/openssl"
-            },
-            {
-              "@id": "pkg:deb/debian/openssl-provider-legacy"
-            }
-          ]
+          "@id": "pkg:deb/debian/libssl3t64"
+        },
+        {
+          "@id": "pkg:deb/debian/openssl"
+        },
+        {
+          "@id": "pkg:deb/debian/openssl-provider-legacy"
         }
       ],
       "status": "not_affected",
@@ -289,18 +229,13 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
-          "subcomponents": [
-            {
-              "@id": "pkg:deb/debian/libssl3t64"
-            },
-            {
-              "@id": "pkg:deb/debian/openssl"
-            },
-            {
-              "@id": "pkg:deb/debian/openssl-provider-legacy"
-            }
-          ]
+          "@id": "pkg:deb/debian/libssl3t64"
+        },
+        {
+          "@id": "pkg:deb/debian/openssl"
+        },
+        {
+          "@id": "pkg:deb/debian/openssl-provider-legacy"
         }
       ],
       "status": "not_affected",
@@ -315,18 +250,13 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
-          "subcomponents": [
-            {
-              "@id": "pkg:deb/debian/libssl3t64"
-            },
-            {
-              "@id": "pkg:deb/debian/openssl"
-            },
-            {
-              "@id": "pkg:deb/debian/openssl-provider-legacy"
-            }
-          ]
+          "@id": "pkg:deb/debian/libssl3t64"
+        },
+        {
+          "@id": "pkg:deb/debian/openssl"
+        },
+        {
+          "@id": "pkg:deb/debian/openssl-provider-legacy"
         }
       ],
       "status": "not_affected",
@@ -341,18 +271,13 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
-          "subcomponents": [
-            {
-              "@id": "pkg:deb/debian/libssl3t64"
-            },
-            {
-              "@id": "pkg:deb/debian/openssl"
-            },
-            {
-              "@id": "pkg:deb/debian/openssl-provider-legacy"
-            }
-          ]
+          "@id": "pkg:deb/debian/libssl3t64"
+        },
+        {
+          "@id": "pkg:deb/debian/openssl"
+        },
+        {
+          "@id": "pkg:deb/debian/openssl-provider-legacy"
         }
       ],
       "status": "not_affected",
@@ -367,12 +292,7 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
-          "subcomponents": [
-            {
-              "@id": "pkg:deb/debian/libcap2"
-            }
-          ]
+          "@id": "pkg:deb/debian/libcap2"
         }
       ],
       "status": "not_affected",
@@ -387,12 +307,7 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
-          "subcomponents": [
-            {
-              "@id": "pkg:pypi/urllib3"
-            }
-          ]
+          "@id": "pkg:pypi/urllib3"
         }
       ],
       "status": "not_affected",
@@ -407,12 +322,7 @@
       },
       "products": [
         {
-          "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
-          "subcomponents": [
-            {
-              "@id": "pkg:pypi/urllib3"
-            }
-          ]
+          "@id": "pkg:pypi/urllib3"
         }
       ],
       "status": "not_affected",

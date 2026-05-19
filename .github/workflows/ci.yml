@@ -3,7 +3,12 @@ name: CI
 on:
   schedule:
     - cron: '0 10 * * *'  # 4AM Central (10:00 UTC)
-  workflow_dispatch:  # Manual trigger for testing
+  workflow_dispatch:  # Manual trigger for scheduled security scan
+    inputs:
+      image_ref:
+        description: 'Container image reference to scan; defaults to ghcr.io/<repo>:main'
+        required: false
+        type: string
   pull_request:
     branches:
       - main
@@ -21,6 +26,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -51,6 +57,7 @@ jobs:
   test:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -407,6 +414,7 @@ jobs:
     name: Build Docker Image
     runs-on: ubuntu-latest
     needs: [lint, test]
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     permissions:
       contents: read
       packages: write
@@ -450,7 +458,7 @@ jobs:
     name: Security Scan
     runs-on: ubuntu-latest
     needs: [build-image]
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'push'
     permissions:
       contents: read
       security-events: write
@@ -465,8 +473,7 @@ jobs:
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
           trivyignores: '.trivyignore'
-        env:
-          TRIVY_VEX: '.openvex.json'
+          trivy-config: '.trivy-vex.yaml'
 
       - name: Upload Trivy scan results to GitHub Security
         uses: github/codeql-action/upload-sarif@0d579ffd059c29b07949a3cce3983f0780820c98 # v4.32.6
@@ -551,8 +558,7 @@ jobs:
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
           trivyignores: '.trivyignore'
-        env:
-          TRIVY_VEX: '.openvex.json'
+          trivy-config: '.trivy-vex.yaml'
 
   scheduled-security-scan:
     name: Scheduled Security Scan
@@ -566,6 +572,8 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: main
 
       - name: Log in to Container Registry
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
@@ -579,13 +587,12 @@ jobs:
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
         continue-on-error: true
         with:
-          image-ref: 'ghcr.io/${{ github.repository }}:main'
+          image-ref: ${{ github.event.inputs.image_ref || format('ghcr.io/{0}:main', github.repository) }}
           format: 'json'
           output: 'trivy-results.json'
           severity: 'CRITICAL,HIGH'
           trivyignores: '.trivyignore'
-        env:
-          TRIVY_VEX: '.openvex.json'
+          trivy-config: '.trivy-vex.yaml'
 
       - name: Parse vulnerabilities
         id: parse
@@ -597,21 +604,53 @@ jobs:
             exit 0
           fi
 
-          # Extract vulnerabilities from Trivy JSON output
-          # Trivy outputs Results[].Vulnerabilities[] array
+          # Extract vulnerabilities from Trivy JSON output. Keep every package occurrence
+          # because one CVE can apply to several packages in the image.
           VULNS=$(jq -r '
+            def normalize_purl:
+              if . == null or . == "" then
+                ""
+              else
+                split("?")[0] | sub("@[^/@]*$"; "")
+              end;
+
+            def package_purl:
+              if (.PkgIdentifier.PURL // "") != "" then
+                (.PkgIdentifier.PURL | normalize_purl)
+              elif (.Class // "") == "os-pkgs" or (.Type // "") == "debian" then
+                "pkg:deb/debian/\(.PkgName)"
+              elif (.Type // "") == "python-pkg" then
+                "pkg:pypi/\(.PkgName)"
+              elif (.PkgPath // "" | test("site-packages|dist-info")) then
+                "pkg:pypi/\(.PkgName)"
+              else
+                "pkg:deb/debian/\(.PkgName)"
+              end;
+
             [.Results[]? | .Vulnerabilities[]? | select(. != null)] |
             map({
               id: .VulnerabilityID,
-              pkg: .PkgName,
-              installed_version: .InstalledVersion,
-              fixed_version: .FixedVersion,
               severity: .Severity,
               title: .Title,
               description: .Description,
-              primary_url: .PrimaryURL
+              primary_url: .PrimaryURL,
+              packages: [{
+                name: .PkgName,
+                installed_version: .InstalledVersion,
+                fixed_version: (.FixedVersion // ""),
+                purl: package_purl
+              }]
             }) |
-            unique_by(.id)
+            group_by(.id) |
+            map({
+              id: .[0].id,
+              severity: .[0].severity,
+              title: .[0].title,
+              description: .[0].description,
+              primary_url: .[0].primary_url,
+              packages: ([.[].packages[]] | unique_by(.purl) | sort_by(.name))
+            }) |
+            sort_by(.id)
           ' trivy-results.json)
 
           # Check if any vulnerabilities found
@@ -622,12 +661,45 @@ jobs:
             exit 0
           fi
 
-          # Load existing VEX statements to filter out already-handled CVEs
-          EXISTING_CVES=$(jq -r '[.statements[]?.vulnerability.name] | map(select(. != null))' .openvex.json)
+          # Filter out packages already covered by matching VEX statements.
+          NEW_VULNS=$(echo "$VULNS" | jq --slurpfile vex .openvex.json '
+            def normalize_purl:
+              if . == null or . == "" then
+                ""
+              else
+                split("?")[0] | sub("@[^/@]*$"; "")
+              end;
 
-          # Filter out CVEs already in VEX
-          NEW_VULNS=$(echo "$VULNS" | jq --argjson existing "$EXISTING_CVES" '
-            map(select(.id as $id | $existing | index($id) | not))
+            def statement_components($statement):
+              [
+                $statement.products[]? |
+                if ((.subcomponents // []) | length) > 0 then
+                  .subcomponents[]?."@id"
+                else
+                  ."@id"
+                end |
+                normalize_purl
+              ];
+
+            def statement_is_container_wildcard($statement):
+              any($statement.products[]?;
+                (."@id" | startswith("pkg:oci/")) and (((.subcomponents // []) | length) == 0)
+              );
+
+            def is_covered($id; $purl):
+              any($vex[0].statements[]?;
+                .vulnerability.name == $id and
+                (statement_is_container_wildcard(.) or (statement_components(.) | index($purl)))
+              );
+
+            map(
+              . as $vuln |
+              .packages = [
+                $vuln.packages[] |
+                select(.purl as $purl | is_covered($vuln.id; $purl) | not)
+              ] |
+              select((.packages | length) > 0)
+            )
           ')
 
           NEW_VULN_COUNT=$(echo "$NEW_VULNS" | jq 'length')
@@ -668,19 +740,31 @@ jobs:
           - Protobuf is only used for outbound OTLP trace export to a trusted collector
           - The application runs in a container and processes GitHub webhook events"
 
+          BASE_SHA=$(git rev-parse HEAD)
+          BULK_BRANCH="security/vex-bulk-$(date -u +%Y%m%d%H%M%S)"
+          UPDATED_CVES=$(mktemp)
+
+          git checkout -B "$BULK_BRANCH" "$BASE_SHA"
+
           # Process each vulnerability
           echo "$VULN_DATA" | jq -c '.[]' | while read -r vuln; do
             CVE_ID=$(echo "$vuln" | jq -r '.id')
-            PKG_NAME=$(echo "$vuln" | jq -r '.pkg')
             SEVERITY=$(echo "$vuln" | jq -r '.severity')
             TITLE=$(echo "$vuln" | jq -r '.title')
             DESCRIPTION=$(echo "$vuln" | jq -r '.description')
             PRIMARY_URL=$(echo "$vuln" | jq -r '.primary_url')
-            INSTALLED_VERSION=$(echo "$vuln" | jq -r '.installed_version')
-            FIXED_VERSION=$(echo "$vuln" | jq -r '.fixed_version // "none available"')
+            PACKAGE_SUMMARY=$(echo "$vuln" | jq -r '
+              .packages[] |
+              "- \(.name) (installed: \(.installed_version), fixed: \(
+                if (.fixed_version // "") == "" then "none available" else .fixed_version end
+              ), purl: \(.purl))"
+            ')
+            PACKAGE_NAMES=$(echo "$vuln" | jq -r '[.packages[].name] | unique | join(", ")')
+            SUBCOMPONENTS=$(echo "$vuln" | jq -c '[.packages[].purl] | unique | sort')
 
             echo "::group::Analyzing $CVE_ID"
-            echo "Package: $PKG_NAME"
+            echo "Packages:"
+            echo "$PACKAGE_SUMMARY"
             echo "Severity: $SEVERITY"
             echo "Title: $TITLE"
 
@@ -692,18 +776,12 @@ jobs:
               continue
             fi
 
-            # Check for existing PR branch
-            if git ls-remote --heads origin "security/vex-$CVE_ID" | grep -q .; then
-              echo "Branch security/vex-$CVE_ID already exists, skipping"
-              echo "::endgroup::"
-              continue
-            fi
-
             # Build AI prompt
-            PROMPT="Analyze whether this vulnerability affects the application.
+          PROMPT="Analyze whether this vulnerability affects the application.
 
           Vulnerability: $CVE_ID
-          Package: $PKG_NAME (version $INSTALLED_VERSION)
+          Packages:
+          $PACKAGE_SUMMARY
           Severity: $SEVERITY
           Title: $TITLE
           Description: $DESCRIPTION
@@ -751,10 +829,11 @@ jobs:
           | Field | Value |
           |-------|-------|
           | CVE | $CVE_ID |
-          | Package | $PKG_NAME |
-          | Installed Version | $INSTALLED_VERSION |
-          | Fixed Version | $FIXED_VERSION |
+          | Packages | $PACKAGE_NAMES |
           | Severity | $SEVERITY |
+
+          ## Packages
+          $PACKAGE_SUMMARY
 
           ## Description
           $TITLE
@@ -787,86 +866,60 @@ jobs:
             echo "AI Analysis: affected=$AFFECTED, justification=$JUSTIFICATION"
 
             if [ "$AFFECTED" = "false" ]; then
-              # Create VEX exception PR
-              echo "Creating VEX exception PR for $CVE_ID"
-
-              # Create branch
-              git checkout -b "security/vex-$CVE_ID"
+              echo "Updating VEX statement for $CVE_ID"
 
               # Update .openvex.json
               TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
               CURRENT_VERSION=$(jq '.version' .openvex.json)
               NEW_VERSION=$((CURRENT_VERSION + 1))
 
-              # Determine package type and format subcomponent ID
-              if echo "$PKG_NAME" | grep -qE '^(lib|openssl|glibc|zlib)'; then
-                SUBCOMPONENT_ID="pkg:deb/debian/$PKG_NAME"
-              else
-                SUBCOMPONENT_ID="pkg:pypi/$PKG_NAME"
-              fi
-
-              # Add new statement
+              # Add a new VEX statement, or complete the existing not_affected
+              # statement for this CVE with any missing vulnerable packages.
               jq --arg cve_id "$CVE_ID" \
                  --arg title "$TITLE" \
                  --arg justification "$JUSTIFICATION" \
                  --arg impact "$IMPACT_STATEMENT" \
                  --arg timestamp "$TIMESTAMP" \
-                 --arg subcomponent "$SUBCOMPONENT_ID" \
+                 --argjson products "$SUBCOMPONENTS" \
                  --argjson new_version "$NEW_VERSION" \
-                 '.version = $new_version |
+                 '
+                 def product_objects:
+                   $products | map({"@id": .});
+
+                 def non_container_products:
+                   [.products[]? | select(."@id" | startswith("pkg:oci/") | not)];
+
+                  .version = $new_version |
                   .timestamp = $timestamp |
-                  .statements += [{
-                    vulnerability: {
-                      "@id": "https://nvd.nist.gov/vuln/detail/\($cve_id)",
-                      name: $cve_id,
-                      description: $title
-                    },
-                    products: [{
-                      "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
-                      subcomponents: [{
-                        "@id": $subcomponent
-                      }]
-                    }],
-                    status: "not_affected",
-                    justification: $justification,
-                    impact_statement: $impact
-                  }]' .openvex.json > .openvex.json.tmp
+                  if any(.statements[]?; .vulnerability.name == $cve_id and .status == "not_affected") then
+                    .statements = (
+                      .statements | map(
+                        if .vulnerability.name == $cve_id and .status == "not_affected" then
+                          .justification = $justification |
+                          .impact_statement = $impact |
+                          .products = ((non_container_products + product_objects) | unique_by(."@id"))
+                        else
+                          .
+                        end
+                      )
+                    )
+                  else
+                    .statements += [{
+                      vulnerability: {
+                        "@id": "https://nvd.nist.gov/vuln/detail/\($cve_id)",
+                        name: $cve_id,
+                        description: $title
+                      },
+                      products: product_objects,
+                      status: "not_affected",
+                      justification: $justification,
+                      impact_statement: $impact
+                    }]
+                  end
+                 ' .openvex.json > .openvex.json.tmp
               mv .openvex.json.tmp .openvex.json
 
-              # Commit and push
-              git config user.name "github-actions[bot]"
-              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-              git add .openvex.json
-              git commit -m "chore(security): add VEX statement for $CVE_ID"
-              git push origin "security/vex-$CVE_ID"
-
-              # Create PR
-              gh pr create \
-                --title "chore(security): VEX exception for $CVE_ID" \
-                --body "## Summary
-          - Add VEX (Vulnerability Exploitability eXchange) statement for $CVE_ID
-          - AI analysis determined this vulnerability does not affect stampbot
-
-          ## Vulnerability Details
-          | Field | Value |
-          |-------|-------|
-          | CVE | $CVE_ID |
-          | Package | $PKG_NAME |
-          | Severity | $SEVERITY |
-
-          ## AI Analysis
-          **Justification:** $JUSTIFICATION
-
-          **Impact Statement:** $IMPACT_STATEMENT
-
-          ## Reference
-          $PRIMARY_URL
-
-          ---
-          *This PR was automatically generated by the scheduled security scan.*"
-
-              # Return to main branch for next iteration
-              git checkout main
+              echo "- $CVE_ID: $PACKAGE_NAMES" >> "$UPDATED_CVES"
             else
               # Create security issue
               echo "Creating security issue for $CVE_ID"
@@ -878,10 +931,11 @@ jobs:
           | Field | Value |
           |-------|-------|
           | CVE | $CVE_ID |
-          | Package | $PKG_NAME |
-          | Installed Version | $INSTALLED_VERSION |
-          | Fixed Version | $FIXED_VERSION |
+          | Packages | $PACKAGE_NAMES |
           | Severity | $SEVERITY |
+
+          ## Packages
+          $PACKAGE_SUMMARY
 
           ## Description
           $TITLE
@@ -895,7 +949,7 @@ jobs:
           $PRIMARY_URL
 
           ## Recommended Actions
-          1. Update \`$PKG_NAME\` to version \`$FIXED_VERSION\` if available
+          1. Update affected packages if patched versions are available
           2. If no fix available, implement mitigations or accept risk
 
           ---
@@ -905,11 +959,38 @@ jobs:
             echo "::endgroup::"
           done
 
+          if git diff --quiet -- .openvex.json; then
+            echo "No VEX updates were generated"
+            echo "Security scan complete"
+            exit 0
+          fi
+
+          UPDATED_CVE_LIST=$(cat "$UPDATED_CVES")
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .openvex.json
+          git commit -m "chore(security): update VEX statements from scheduled scan"
+          git push origin "$BULK_BRANCH"
+
+          gh pr create \
+            --title "chore(security): update VEX statements from scheduled scan" \
+            --body "## Summary
+          - Update VEX statements for all not-affected vulnerabilities found by the scheduled scan
+          - Cover all currently reported vulnerable packages for each CVE
+
+          ## CVEs Updated
+          $UPDATED_CVE_LIST
+
+          ---
+          *This PR was automatically generated by the scheduled security scan.*"
+
           echo "Security scan complete"
 
   helm-lint:
     name: Lint Helm Chart
     runs-on: ubuntu-latest
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -932,6 +1013,7 @@ jobs:
   helm-validate:
     name: Validate Helm Templates
     runs-on: ubuntu-latest
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -974,6 +1056,7 @@ jobs:
   helm-unittest:
     name: Helm Unit Tests
     runs-on: ubuntu-latest
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -992,6 +1075,7 @@ jobs:
   helm-install-test-matrix:
     name: Discover Helm Test Cases
     runs-on: ubuntu-latest
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     outputs:
       test-cases: ${{ steps.discover.outputs.test-cases }}
     steps:
