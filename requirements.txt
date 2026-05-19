@@ -268,9 +268,9 @@ cryptography==46.0.5 ; python_version >= "3.11" \
     --hash=sha256:e9251e3be159d1020c4030bd2e5f84d6a43fe54b6c19c12f51cde9542a2817b2 \
     --hash=sha256:f145bba11b878005c496e93e257c1e88f154d278d2638e6450d17e0f31e558d2 \
     --hash=sha256:fe346b143ff9685e40192a4960938545c699054ba11d4f9029f94751e3f71d87
-dynaconf==3.2.12 ; python_version >= "3.11" \
-    --hash=sha256:29cea583b007d890e6031fa89c0ac489b631c73dbee83bcd5e6f97602c26354e \
-    --hash=sha256:eb2a11865917dff8810c6098cd736b8f4d2f4e39ad914500e2dfbe064b82c499
+dynaconf==3.2.13 ; python_version >= "3.11" \
+    --hash=sha256:4305527aef4834bdba3e39479b23c005186e83fb85f65bcaa4bcea58fa26759b \
+    --hash=sha256:d79e0189d97b3f226b8ebb1717e2ce05d1a05cdf6ea05de66d24625fdb5a0cbd
 fastapi==0.128.0 ; python_version >= "3.11" \
     --hash=sha256:1cc179e1cef10a6be60ffe429f79b829dce99d8de32d7acb7e6c8dfdf7f2645a \
     --hash=sha256:aebd93f9716ee3b4f4fcfe13ffb7cf308d99c9f3ab5622d8877441072561582d
