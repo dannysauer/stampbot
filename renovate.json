@@ -29,6 +29,12 @@
       "groupName": "python dependencies"
     },
     {
+      "description": "Keep the Poetry Python support range managed manually",
+      "matchManagers": ["poetry"],
+      "matchPackageNames": ["python"],
+      "enabled": false
+    },
+    {
       "description": "Group GitHub Actions",
       "matchManagers": ["github-actions"],
       "groupName": "github actions"
