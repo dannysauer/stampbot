@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
   "author": "Danny Sauer <github@dannysauer.com>",
-  "timestamp": "2026-05-16T19:20:49Z",
-  "version": 16,
+  "timestamp": "2026-05-19T17:42:28Z",
+  "version": 17,
   "statements": [
     {
       "vulnerability": {
@@ -15,7 +15,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:pypi/protobuf"}
+            {
+              "@id": "pkg:pypi/protobuf"
+            }
           ]
         }
       ],
@@ -33,7 +35,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/glibc"}
+            {
+              "@id": "pkg:deb/debian/glibc"
+            }
           ]
         }
       ],
@@ -51,7 +55,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:pypi/jaraco.context"}
+            {
+              "@id": "pkg:pypi/jaraco.context"
+            }
           ]
         }
       ],
@@ -69,9 +75,15 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/openssl"},
-            {"@id": "pkg:deb/debian/libssl3t64"},
-            {"@id": "pkg:deb/debian/openssl-provider-legacy"}
+            {
+              "@id": "pkg:deb/debian/openssl"
+            },
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            },
+            {
+              "@id": "pkg:deb/debian/openssl-provider-legacy"
+            }
           ]
         }
       ],
@@ -89,9 +101,15 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/openssl"},
-            {"@id": "pkg:deb/debian/libssl3t64"},
-            {"@id": "pkg:deb/debian/openssl-provider-legacy"}
+            {
+              "@id": "pkg:deb/debian/openssl"
+            },
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            },
+            {
+              "@id": "pkg:deb/debian/openssl-provider-legacy"
+            }
           ]
         }
       ],
@@ -109,7 +127,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:pypi/PyJWT"}
+            {
+              "@id": "pkg:pypi/PyJWT"
+            }
           ]
         }
       ],
@@ -127,7 +147,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libssl3t64"}
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            }
           ]
         }
       ],
@@ -145,7 +167,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libncursesw6"}
+            {
+              "@id": "pkg:deb/debian/libncursesw6"
+            }
           ]
         }
       ],
@@ -163,7 +187,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libsystemd0"}
+            {
+              "@id": "pkg:deb/debian/libsystemd0"
+            }
           ]
         }
       ],
@@ -181,7 +207,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:pypi/dynaconf"}
+            {
+              "@id": "pkg:pypi/dynaconf"
+            }
           ]
         }
       ],
@@ -199,7 +227,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libc-bin"}
+            {
+              "@id": "pkg:deb/debian/libc-bin"
+            }
           ]
         }
       ],
@@ -217,7 +247,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libssl3t64"}
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            }
           ]
         }
       ],
@@ -235,7 +267,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libssl3t64"}
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            }
           ]
         }
       ],
@@ -253,13 +287,21 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libssl3t64"}
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            },
+            {
+              "@id": "pkg:deb/debian/openssl"
+            },
+            {
+              "@id": "pkg:deb/debian/openssl-provider-legacy"
+            }
           ]
         }
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
-      "impact_statement": "The application does not process untrusted cryptographic input, does not handle CRL or delta CRL files, and does not enable the X509_V_FLAG_USE_DELTAS flag in its certificate verification context. Additionally, the application only makes outbound HTTPS connections to trusted endpoints (GitHub API) and does not process user-uploaded files or untrusted certificates. Therefore, the vulnerable code cannot be exploited in the context of this application."
+      "impact_statement": "The application does not enable CRL or delta CRL processing during X.509 certificate verification, does not process untrusted cryptographic input, and does not handle user-uploaded files. Additionally, the application only makes outbound HTTPS connections to trusted endpoints (GitHub API) and does not process or verify CRLs. Therefore, the vulnerable code cannot be exploited in the context of this application."
     },
     {
       "vulnerability": {
@@ -271,7 +313,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libssl3t64"}
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            }
           ]
         }
       ],
@@ -289,7 +333,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libcap2"}
+            {
+              "@id": "pkg:deb/debian/libcap2"
+            }
           ]
         }
       ],
@@ -307,7 +353,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:pypi/urllib3"}
+            {
+              "@id": "pkg:pypi/urllib3"
+            }
           ]
         }
       ],
@@ -325,7 +373,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:pypi/urllib3"}
+            {
+              "@id": "pkg:pypi/urllib3"
+            }
           ]
         }
       ],
