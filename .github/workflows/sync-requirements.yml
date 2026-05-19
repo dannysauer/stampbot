@@ -56,3 +56,4 @@ jobs:
           git commit -m "chore: sync requirements.txt from poetry.lock"
           git push
           gh workflow run CI --ref "${GITHUB_REF_NAME}" -f run_full_ci=true
+          gh workflow run CodeQL --ref "${GITHUB_REF_NAME}"
