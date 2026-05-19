@@ -16,6 +16,8 @@ on:
         required: true
         type: string
 
+permissions: read-all
+
 # GCP Setup Requirements:
 # 1. Create a GCP project and enable Cloud Run API
 # 2. Create a service account with roles:
