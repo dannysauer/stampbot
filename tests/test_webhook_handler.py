@@ -17,6 +17,7 @@ def mock_github_client():
         mock.get_repo_file.return_value = None  # No config file, use defaults
         mock.approve_pr.return_value = True
         mock.create_pr_review_comment.return_value = True
+        mock.create_issue_comment.return_value = True
         mock.dismiss_approval.return_value = True
         mock.find_bot_reviews.return_value = []
         mock.repo_has_label.return_value = True
@@ -328,6 +329,84 @@ async def test_issue_comment_unknown_command(webhook_handler, mock_github_client
     assert result["status"] == "ignored"
     assert "unknown command" in result["message"].lower()
     mock_github_client.user_has_permission.assert_not_called()
+    mock_github_client.create_issue_comment.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_issue_comment_help_command(webhook_handler, mock_github_client):
+    """Test @stampbot help posts contextual help."""
+    payload = load_fixture("issue_comment_approve")
+    payload["comment"]["body"] = "@stampbot help"
+
+    result = await webhook_handler.handle_event("issue_comment", payload)
+
+    assert result["status"] == "success"
+    assert "help" in result["message"].lower()
+    mock_github_client.user_has_permission.assert_not_called()
+    mock_github_client.create_issue_comment.assert_called_once()
+    comment_args = mock_github_client.create_issue_comment.call_args[0]
+    assert comment_args[:3] == (12345, "octocat/hello-world", 42)
+    assert "@stampbot approve" in comment_args[3]
+    assert "@stampbot unapprove" in comment_args[3]
+    assert "`autoapprove`" in comment_args[3]
+
+
+@pytest.mark.asyncio
+async def test_issue_comment_help_uses_custom_repo_config(webhook_handler, mock_github_client):
+    """Test help reflects custom repo commands, labels, and filters."""
+    payload = load_fixture("issue_comment_approve")
+    payload["comment"]["body"] = "@stampbot help"
+    mock_github_client.get_repo_file.return_value = """
+approval_labels = ["ship-it"]
+approve_commands = ["approve-it"]
+unapprove_commands = ["hold-it"]
+required_labels = ["dependencies"]
+required_title_patterns = ["^chore:"]
+allowed_users = ["renovate[bot]"]
+allowed_teams = ["release-team"]
+"""
+
+    result = await webhook_handler.handle_event("issue_comment", payload)
+
+    assert result["status"] == "success"
+    help_text = mock_github_client.create_issue_comment.call_args[0][3]
+    assert "@stampbot approve-it" in help_text
+    assert "@stampbot hold-it" in help_text
+    assert "`ship-it`" in help_text
+    assert "`dependencies`" in help_text
+    assert "`^chore:`" in help_text
+    assert "`renovate[bot]`" in help_text
+    assert "`release-team`" in help_text
+
+
+@pytest.mark.asyncio
+async def test_issue_comment_help_shows_label_approval_disabled(
+    webhook_handler, mock_github_client
+):
+    """Test help indicates when label-based approval is disabled."""
+    payload = load_fixture("issue_comment_approve")
+    payload["comment"]["body"] = "@stampbot help"
+    mock_github_client.get_repo_file.return_value = "auto_approve_on_label = false"
+
+    result = await webhook_handler.handle_event("issue_comment", payload)
+
+    assert result["status"] == "success"
+    help_text = mock_github_client.create_issue_comment.call_args[0][3]
+    assert "Label-based auto-approval is disabled" in help_text
+
+
+@pytest.mark.asyncio
+async def test_issue_comment_help_disabled_with_chatops(webhook_handler, mock_github_client):
+    """Test help is ignored when chatops is disabled."""
+    payload = load_fixture("issue_comment_approve")
+    payload["comment"]["body"] = "@stampbot help"
+    mock_github_client.get_repo_file.return_value = "chatops_enabled = false"
+
+    result = await webhook_handler.handle_event("issue_comment", payload)
+
+    assert result["status"] == "ignored"
+    assert "not enabled" in result["message"].lower()
+    mock_github_client.create_issue_comment.assert_not_called()
 
 
 @pytest.mark.asyncio

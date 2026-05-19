@@ -588,6 +588,87 @@ class GitHubAppClient:
                 )
                 return False
 
+    def create_issue_comment(
+        self,
+        installation_id: int,
+        repo_full_name: str,
+        issue_number: int,
+        message: str,
+    ) -> bool:
+        """Create a comment on an issue or pull request.
+
+        Args:
+            installation_id: GitHub App installation ID
+            repo_full_name: Repository full name (owner/repo)
+            issue_number: Issue or pull request number
+            message: Comment body
+
+        Returns:
+            True if successful, False otherwise
+        """
+        start_time = time.time()
+
+        with create_span(
+            "github.create_issue_comment",
+            {
+                "github.repo": repo_full_name,
+                "github.issue_number": issue_number,
+                "github.installation_id": installation_id,
+            },
+        ) as span:
+            try:
+                client = self._get_installation_client(installation_id)
+                repo = client.get_repo(repo_full_name)
+                issue = repo.get_issue(issue_number)
+
+                issue.create_comment(message)
+
+                duration = time.time() - start_time
+                github_api_request_duration_seconds.labels(operation="issue_comment").observe(
+                    duration
+                )
+                github_api_requests_total.labels(operation="issue_comment", status="success").inc()
+
+                self._update_rate_limit_metrics(client, installation_id)
+
+                add_span_attributes(span, {"github.result": "commented"})
+                set_span_ok(span)
+
+                logger.info(
+                    "Posted issue comment on #%d in %s",
+                    issue_number,
+                    repo_full_name,
+                    extra={
+                        "repo": repo_full_name,
+                        "issue_number": issue_number,
+                        "installation_id": installation_id,
+                    },
+                )
+                return True
+
+            except Exception as e:
+                duration = time.time() - start_time
+                github_api_request_duration_seconds.labels(operation="issue_comment").observe(
+                    duration
+                )
+                github_api_requests_total.labels(operation="issue_comment", status="failure").inc()
+
+                set_span_error(span, e)
+
+                logger.warning(
+                    "Failed to post issue comment on #%d in %s: %s",
+                    issue_number,
+                    repo_full_name,
+                    _sanitize_error(e),
+                    extra={
+                        "repo": repo_full_name,
+                        "issue_number": issue_number,
+                        "installation_id": installation_id,
+                        "error": _sanitize_error(e),
+                    },
+                )
+                return False
+
     def repo_has_label(
         self,
         installation_id: int,

@@ -1255,6 +1255,96 @@ class TestCreatePrReviewComment:
             assert result is False
 
 
+class TestCreateIssueComment:
+    """Tests for create_issue_comment method."""
+
+    def test_create_issue_comment_success(self):
+        """Test successful issue comment creation."""
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth"),
+            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
+            patch("stampbot.github_client.Github") as mock_github_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            mock_integration = Mock()
+            mock_token = Mock()
+            mock_token.token = TEST_TOKEN
+            mock_integration.get_access_token.return_value = mock_token
+            mock_integration_cls.return_value = mock_integration
+
+            mock_issue = Mock()
+            mock_repo = Mock()
+            mock_repo.get_issue.return_value = mock_issue
+            mock_github = Mock()
+            mock_github.get_repo.return_value = mock_repo
+            mock_github.get_rate_limit.return_value = Mock(core=Mock(remaining=1, limit=2))
+            mock_github_cls.return_value = mock_github
+
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+            result = client.create_issue_comment(
+                123456,
+                "owner/repo",
+                42,
+                "Help text",
+            )
+
+            assert result is True
+            mock_repo.get_issue.assert_called_once_with(42)
+            mock_issue.create_comment.assert_called_once_with("Help text")
+
+    def test_create_issue_comment_failure(self):
+        """Test issue comment creation handles errors."""
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth"),
+            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
+            patch("stampbot.github_client.Github") as mock_github_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            mock_integration = Mock()
+            mock_token = Mock()
+            mock_token.token = TEST_TOKEN
+            mock_integration.get_access_token.return_value = mock_token
+            mock_integration_cls.return_value = mock_integration
+
+            mock_repo = Mock()
+            mock_repo.get_issue.side_effect = Exception("API Error")
+            mock_github = Mock()
+            mock_github.get_repo.return_value = mock_repo
+            mock_github_cls.return_value = mock_github
+
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+            result = client.create_issue_comment(
+                123456,
+                "owner/repo",
+                42,
+                "Help text",
+            )
+
+            assert result is False
+
+
 class TestSanitizeError:
     """Tests for _sanitize_error function."""
 

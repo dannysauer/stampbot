@@ -19,7 +19,7 @@ A GitHub App that automatically approves pull requests based on labels and chato
 ## Features
 
 - **Label-based Auto-Approval**: Automatically approve PRs when specific labels are added
-- **ChatOps Support**: Approve or unapprove PRs via `@stampbot approve` or `@stampbot unapprove` comments (permission required)
+- **ChatOps Support**: Approve or unapprove PRs via `@stampbot approve` or `@stampbot unapprove` comments (permission required), and show repo-specific help with `@stampbot help`
 - **PR Eligibility Filters**: Restrict auto-approval to PRs matching required labels, title patterns, allowed users, or allowed teams
 - **Configurable**: Per-repository configuration via `stampbot.toml`
 - **Fully Instrumented**: OpenTelemetry support for distributed tracing
@@ -202,8 +202,9 @@ Comment on a PR with:
 
 - `@stampbot approve` or `@stampbot stamp` - Approve the PR
 - `@stampbot unapprove` or `@stampbot unstamp` - Dismiss approval
+- `@stampbot help` - Show available commands and configured approval labels
 
-Only users with the required repository permission can use ChatOps commands.
+Approval and unapproval commands require the configured repository permission.
 By default, this is set to `maintain` and can be configured per repo.
 
 ## Metrics

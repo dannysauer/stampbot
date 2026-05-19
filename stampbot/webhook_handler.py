@@ -451,6 +451,29 @@ class WebhookHandler:
             command = command_match.group(1).lower()
             add_span_attributes(span, {"chatops.command": command})
 
+            if command == "help":
+                success = await self._post_help(
+                    installation_id,
+                    repo_full_name,
+                    pr_number,
+                    repo_config,
+                )
+
+                chatops_commands_total.labels(
+                    command="help",
+                    status="success" if success else "failure",
+                ).inc()
+
+                add_span_attributes(
+                    span, {"chatops.result": "help_posted" if success else "help_failed"}
+                )
+                set_span_ok(span)
+
+                return {
+                    "status": "success" if success else "error",
+                    "message": "Help message posted" if success else "Failed to post help message",
+                }
+
             if command in repo_config.approve_commands + repo_config.unapprove_commands:
                 has_permission = await run_in_threadpool(
                     github_client.user_has_permission,
@@ -650,6 +673,104 @@ class WebhookHandler:
         )
         set_span_ok(span)
         return repo_config
+
+    def _format_help_message(self, repo_config: RepoConfig) -> str:
+        """Format a help message for the effective repository configuration.
+
+        Args:
+            repo_config: Repository configuration
+
+        Returns:
+            Markdown help text.
+        """
+        lines = ["## Stampbot Help", ""]
+
+        lines.extend(
+            [
+                "### ChatOps Commands",
+                "",
+                (
+                    f"Approve and unapprove commands require "
+                    f"**{repo_config.chatops_required_permission}** permission or higher."
+                ),
+                "",
+            ]
+        )
+
+        approve_commands = ", ".join(
+            f"`@stampbot {command}`" for command in repo_config.approve_commands
+        )
+        unapprove_commands = ", ".join(
+            f"`@stampbot {command}`" for command in repo_config.unapprove_commands
+        )
+        lines.extend(
+            [
+                f"- **Approve**: {approve_commands}",
+                f"- **Unapprove**: {unapprove_commands}",
+                "- **Help**: `@stampbot help`",
+                "",
+                "### Label-Based Auto-Approval",
+                "",
+            ]
+        )
+
+        if repo_config.auto_approve_on_label:
+            approval_labels = ", ".join(f"`{label}`" for label in repo_config.approval_labels)
+            lines.append(f"Adding any of these labels can trigger approval: {approval_labels}")
+        else:
+            lines.append("Label-based auto-approval is disabled in this repository.")
+
+        filters = []
+        if repo_config.required_labels:
+            filters.append(
+                "required labels: "
+                + ", ".join(f"`{label}`" for label in repo_config.required_labels)
+            )
+        if repo_config.required_title_patterns:
+            filters.append(
+                "required title patterns: "
+                + ", ".join(f"`{pattern}`" for pattern in repo_config.required_title_patterns)
+            )
+        if repo_config.allowed_users:
+            filters.append(
+                "allowed users: " + ", ".join(f"`{user}`" for user in repo_config.allowed_users)
+            )
+        if repo_config.allowed_teams:
+            filters.append(
+                "allowed teams: " + ", ".join(f"`{team}`" for team in repo_config.allowed_teams)
+            )
+
+        if filters:
+            lines.extend(["", "Additional approval filters apply:"])
+            lines.extend(f"- {filter_text}" for filter_text in filters)
+
+        return "\n".join(lines)
+
+    async def _post_help(
+        self,
+        installation_id: int,
+        repo_full_name: str,
+        issue_number: int,
+        repo_config: RepoConfig,
+    ) -> bool:
+        """Post contextual help to an issue or pull request.
+
+        Args:
+            installation_id: GitHub App installation ID
+            repo_full_name: Repository full name
+            issue_number: Issue or pull request number
+            repo_config: Repository configuration
+
+        Returns:
+            True if successful.
+        """
+        return await run_in_threadpool(
+            github_client.create_issue_comment,
+            installation_id,
+            repo_full_name,
+            issue_number,
+            self._format_help_message(repo_config),
+        )
 
     async def _approve_pr(
         self,
