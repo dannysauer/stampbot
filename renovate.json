@@ -31,7 +31,7 @@
     {
       "description": "Keep the Poetry Python support range managed manually",
       "matchManagers": ["poetry"],
-      "matchPackageNames": ["python"],
+      "matchDepNames": ["python"],
       "enabled": false
     },
     {
