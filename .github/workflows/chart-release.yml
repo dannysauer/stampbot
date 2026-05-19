@@ -19,7 +19,8 @@ on:
         required: false
         type: string
 
-permissions: read-all
+permissions:
+  contents: read
 
 env:
   CHART_DIR: charts/stampbot
