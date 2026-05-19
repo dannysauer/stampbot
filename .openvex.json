@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
   "author": "Danny Sauer <github@dannysauer.com>",
-  "timestamp": "2026-05-16T19:20:49Z",
-  "version": 16,
+  "timestamp": "2026-05-19T17:42:16Z",
+  "version": 17,
   "statements": [
     {
       "vulnerability": {
@@ -15,7 +15,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:pypi/protobuf"}
+            {
+              "@id": "pkg:pypi/protobuf"
+            }
           ]
         }
       ],
@@ -33,7 +35,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/glibc"}
+            {
+              "@id": "pkg:deb/debian/glibc"
+            }
           ]
         }
       ],
@@ -51,7 +55,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:pypi/jaraco.context"}
+            {
+              "@id": "pkg:pypi/jaraco.context"
+            }
           ]
         }
       ],
@@ -69,9 +75,15 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/openssl"},
-            {"@id": "pkg:deb/debian/libssl3t64"},
-            {"@id": "pkg:deb/debian/openssl-provider-legacy"}
+            {
+              "@id": "pkg:deb/debian/openssl"
+            },
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            },
+            {
+              "@id": "pkg:deb/debian/openssl-provider-legacy"
+            }
           ]
         }
       ],
@@ -89,9 +101,15 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/openssl"},
-            {"@id": "pkg:deb/debian/libssl3t64"},
-            {"@id": "pkg:deb/debian/openssl-provider-legacy"}
+            {
+              "@id": "pkg:deb/debian/openssl"
+            },
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            },
+            {
+              "@id": "pkg:deb/debian/openssl-provider-legacy"
+            }
           ]
         }
       ],
@@ -109,7 +127,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:pypi/PyJWT"}
+            {
+              "@id": "pkg:pypi/PyJWT"
+            }
           ]
         }
       ],
@@ -127,7 +147,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libssl3t64"}
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            }
           ]
         }
       ],
@@ -145,13 +167,24 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libncursesw6"}
+            {
+              "@id": "pkg:deb/debian/libncursesw6"
+            },
+            {
+              "@id": "pkg:deb/debian/libtinfo6"
+            },
+            {
+              "@id": "pkg:deb/debian/ncurses-base"
+            },
+            {
+              "@id": "pkg:deb/debian/ncurses-bin"
+            }
           ]
         }
       ],
       "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The vulnerability affects the infocmp command-line tool in ncurses, which is not used by the application. Stampbot does not invoke infocmp or any related functionality, nor does it process terminal-related data that could exploit this vulnerability. Additionally, the application's security-relevant context does not involve scenarios where an adversary could control or influence the vulnerable code path."
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The vulnerability in the infocmp tool of the ncurses package is not exploitable in the context of the application because the application does not invoke the infocmp tool, does not process terminal capability data, and does not allow adversaries to control or influence the execution of the vulnerable code. Additionally, the application operates in a controlled environment where it only processes GitHub webhook events and makes outbound HTTPS connections, with no interaction involving the vulnerable functionality."
     },
     {
       "vulnerability": {
@@ -163,7 +196,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libsystemd0"}
+            {
+              "@id": "pkg:deb/debian/libsystemd0"
+            }
           ]
         }
       ],
@@ -181,7 +216,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:pypi/dynaconf"}
+            {
+              "@id": "pkg:pypi/dynaconf"
+            }
           ]
         }
       ],
@@ -199,7 +236,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libc-bin"}
+            {
+              "@id": "pkg:deb/debian/libc-bin"
+            }
           ]
         }
       ],
@@ -217,7 +256,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libssl3t64"}
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            }
           ]
         }
       ],
@@ -235,7 +276,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libssl3t64"}
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            }
           ]
         }
       ],
@@ -253,7 +296,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libssl3t64"}
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            }
           ]
         }
       ],
@@ -271,7 +316,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libssl3t64"}
+            {
+              "@id": "pkg:deb/debian/libssl3t64"
+            }
           ]
         }
       ],
@@ -289,7 +336,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:deb/debian/libcap2"}
+            {
+              "@id": "pkg:deb/debian/libcap2"
+            }
           ]
         }
       ],
@@ -307,7 +356,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:pypi/urllib3"}
+            {
+              "@id": "pkg:pypi/urllib3"
+            }
           ]
         }
       ],
@@ -325,7 +376,9 @@
         {
           "@id": "pkg:oci/stampbot?repository_url=ghcr.io%2Fdannysauer%2Fstampbot",
           "subcomponents": [
-            {"@id": "pkg:pypi/urllib3"}
+            {
+              "@id": "pkg:pypi/urllib3"
+            }
           ]
         }
       ],
