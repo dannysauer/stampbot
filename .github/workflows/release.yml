@@ -11,6 +11,8 @@ on:
         required: false
         type: string
 
+permissions: read-all
+
 env:
   GHCR_REGISTRY: ghcr.io
   GHCR_IMAGE: ${{ github.repository }}
@@ -193,6 +195,16 @@ jobs:
           VERSION: ${{ needs.determine-version.outputs.version }}
         run: cp .openvex.json "stampbot-${VERSION}.vex.json"
 
+      - name: Sign release artifacts
+        env:
+          VERSION: ${{ needs.determine-version.outputs.version }}
+        run: |
+          for artifact in sbom.spdx.json "stampbot-${VERSION}.vex.json"; do
+            cosign sign-blob --yes \
+              --bundle "${artifact}.sigstore.json" \
+              "${artifact}"
+          done
+
       - name: Generate changelog
         id: changelog
         env:
@@ -248,7 +260,9 @@ jobs:
           body_path: app-changelog.md
           files: |
             sbom.spdx.json
+            sbom.spdx.json.sigstore.json
             stampbot-${{ needs.determine-version.outputs.version }}.vex.json
+            stampbot-${{ needs.determine-version.outputs.version }}.vex.json.sigstore.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -261,6 +275,7 @@ jobs:
       app_version: ${{ needs.determine-version.outputs.version }}
     permissions:
       contents: write
+      id-token: write
       packages: write
 
   deploy-cloudrun:
