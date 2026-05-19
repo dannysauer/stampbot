@@ -61,5 +61,12 @@
     "labels": ["security"],
     "automerge": true
   },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on monday"],
+    "automerge": true,
+    "commitMessageAction": "refresh",
+    "commitMessageTopic": "lock files"
+  },
   "schedule": ["before 6am on monday"]
 }
