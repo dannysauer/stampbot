@@ -708,9 +708,9 @@ typing-extensions==4.15.0 ; python_version >= "3.11" \
 typing-inspection==0.4.2 ; python_version >= "3.11" \
     --hash=sha256:4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7 \
     --hash=sha256:ba561c48a67c5958007083d386c3295464928b01faa735ab8547c5692e87f464
-urllib3==2.6.3 ; python_version >= "3.11" \
-    --hash=sha256:1b62b6884944a57dbe321509ab94fd4d3b307075e0c2eae991ac71ee15ad38ed \
-    --hash=sha256:bf272323e553dfb2e87d9bfd225ca7b0f467b919d7bbd355436d3fd37cb0acd4
+urllib3==2.7.0 ; python_version >= "3.11" \
+    --hash=sha256:231e0ec3b63ceb14667c67be60f2f2c40a518cb38b03af60abc813da26505f4c \
+    --hash=sha256:9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897
 uvicorn==0.47.0 ; python_version >= "3.11" \
     --hash=sha256:2c5715bc12d1892d84752049f400cd1c3cb018514967fdfeb97640443a6a9432 \
     --hash=sha256:7c9a0ea1a9414106bbab7324609c162d8fa0cdcdcb703060987269d77c7bb533
