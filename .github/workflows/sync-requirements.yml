@@ -1,5 +1,5 @@
-# Sync requirements.txt when poetry files change
-# This workflow regenerates requirements.txt from pyproject.toml/poetry.lock
+# Sync Poetry lock and requirements.txt when poetry files change
+# This workflow regenerates poetry.lock and requirements.txt from pyproject.toml
 # when Renovate (or other bots) update dependencies.
 name: Sync requirements.txt
 
@@ -33,13 +33,16 @@ jobs:
       - name: Install Poetry export plugin
         run: poetry self add poetry-plugin-export==1.10.0
 
+      - name: Update poetry.lock
+        run: poetry lock
+
       - name: Export requirements.txt
         run: poetry export -f requirements.txt -o requirements.txt --only main
 
       - name: Check for changes
         id: changes
         run: |
-          if git diff --quiet requirements.txt; then
+          if git diff --quiet poetry.lock requirements.txt; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -52,8 +55,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add requirements.txt
-          git commit -m "chore: sync requirements.txt from poetry.lock"
+          git add poetry.lock requirements.txt
+          git commit -m "chore: sync poetry lock and requirements"
           git push
           gh workflow run CI --ref "${GITHUB_REF_NAME}" -f run_full_ci=true
           gh workflow run CodeQL --ref "${GITHUB_REF_NAME}"
