@@ -38,7 +38,7 @@ jobs:
           fetch-depth: 0  # Full history for version calculation
 
       - name: Set up tools
-        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
         with:
           cache: true
 
@@ -149,7 +149,7 @@ jobs:
 
       - name: Log in to Container Registry
         if: steps.check.outputs.skip != 'true'
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -239,7 +239,7 @@ jobs:
 
       - name: Create GitHub Release
         if: steps.check.outputs.skip != 'true'
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: "Helm Chart ${{ steps.version.outputs.version }}"
