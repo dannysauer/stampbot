@@ -25,6 +25,10 @@ Contributions are expected to:
 - avoid committing generated files unless the repository documents them as generated outputs
 - avoid committing secrets, credentials, tokens, or private keys
 
+By contributing, you certify that you have the right to submit the contribution under this
+project's Apache-2.0 license. This is the project's Developer Certificate of Origin style
+contribution requirement; no separate CLA is required.
+
 ## Development Requirements
 
 Use the repository virtual environment through Makefile targets. The Makefile creates and
@@ -84,6 +88,9 @@ Before opening or updating a pull request:
    changes.
 3. Run `make pre-commit`.
 4. Confirm the pull request title uses conventional commit format.
+
+Major new functionality should include automated tests covering the new behavior. Bug fixes
+should include a regression test when practical.
 
 ## Helm Chart Changes
 
