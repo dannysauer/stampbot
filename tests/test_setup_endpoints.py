@@ -1,6 +1,52 @@
 """Tests for setup endpoints."""
 
+import json
+from html import unescape
+from html.parser import HTMLParser
 from unittest.mock import AsyncMock, patch
+
+
+class SetupPageParser(HTMLParser):
+    """Extract structured setup page values for assertions."""
+
+    def __init__(self) -> None:
+        """Initialize parser state."""
+        super().__init__()
+        self.manifest_json = ""
+        self.code_texts: list[str] = []
+        self._in_code = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Handle HTML start tags."""
+        attributes = dict(attrs)
+        if tag == "input" and attributes.get("name") == "manifest":
+            self.manifest_json = attributes.get("value") or ""
+        elif tag == "code":
+            self._in_code = True
+
+    def handle_endtag(self, tag: str) -> None:
+        """Handle HTML end tags."""
+        if tag == "code":
+            self._in_code = False
+
+    def handle_data(self, data: str) -> None:
+        """Handle text data."""
+        if self._in_code:
+            self.code_texts.append(data)
+
+
+def parse_setup_page(html: str) -> tuple[dict[str, object], list[str]]:
+    """Parse setup page HTML into manifest data and visible code snippets.
+
+    Args:
+        html: Setup page HTML.
+
+    Returns:
+        Parsed manifest JSON and code snippets.
+    """
+    parser = SetupPageParser()
+    parser.feed(html)
+    return json.loads(unescape(parser.manifest_json)), parser.code_texts
 
 
 class TestSetupEndpointsConfigured:
@@ -102,10 +148,12 @@ class TestSetupEndpointsUnconfigured:
             )
 
             assert response.status_code == 200
-            # The manifest should use the forwarded host, not the internal Host header
-            # URLs appear in HTML-escaped JSON within the form's hidden input
-            assert "https://stampbot.example.com" in response.text
-            assert "internal-service" not in response.text
+            manifest, code_texts = parse_setup_page(response.text)
+            assert manifest["redirect_url"] == "https://stampbot.example.com/setup/callback"
+            hook_attributes = manifest["hook_attributes"]
+            assert isinstance(hook_attributes, dict)
+            assert hook_attributes["url"] == "https://stampbot.example.com/webhook"
+            assert code_texts == ["https://stampbot.example.com/webhook"]
 
     def test_setup_uses_configured_base_url(self):
         """Test /setup uses configured base_url over headers."""
@@ -131,11 +179,12 @@ class TestSetupEndpointsUnconfigured:
             )
 
             assert response.status_code == 200
-            # Configured base_url takes priority over forwarded headers
-            # URLs appear in HTML-escaped JSON within the form's hidden input
-            assert "https://configured.example.com" in response.text
-            assert "forwarded.example.com" not in response.text
-            assert "internal-service" not in response.text
+            manifest, code_texts = parse_setup_page(response.text)
+            assert manifest["redirect_url"] == "https://configured.example.com/setup/callback"
+            hook_attributes = manifest["hook_attributes"]
+            assert isinstance(hook_attributes, dict)
+            assert hook_attributes["url"] == "https://configured.example.com/webhook"
+            assert code_texts == ["https://configured.example.com/webhook"]
 
     def test_webhook_returns_503_when_unconfigured(self):
         """Test webhook returns 503 when not configured."""
