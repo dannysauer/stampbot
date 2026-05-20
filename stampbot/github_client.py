@@ -286,6 +286,70 @@ class GitHubAppClient:
                 )
                 return False
 
+    def get_pr_head_sha(
+        self,
+        installation_id: int,
+        repo_full_name: str,
+        pr_number: int,
+    ) -> str | None:
+        """Get the current head SHA for a pull request.
+
+        Args:
+            installation_id: GitHub App installation ID
+            repo_full_name: Repository full name (owner/repo)
+            pr_number: Pull request number
+
+        Returns:
+            Current pull request head SHA, or None on error.
+        """
+        start_time = time.time()
+
+        with create_span(
+            "github.get_pr_head_sha",
+            {
+                "github.repo": repo_full_name,
+                "github.pr_number": pr_number,
+                "github.installation_id": installation_id,
+            },
+        ) as span:
+            try:
+                client = self._get_installation_client(installation_id)
+                repo = client.get_repo(repo_full_name)
+                pr = repo.get_pull(pr_number)
+                head_sha: str = pr.head.sha
+
+                duration = time.time() - start_time
+                github_api_request_duration_seconds.labels(operation="get_pull").observe(duration)
+                github_api_requests_total.labels(operation="get_pull", status="success").inc()
+
+                self._update_rate_limit_metrics(client, installation_id)
+
+                add_span_attributes(span, {"github.head_sha": head_sha})
+                set_span_ok(span)
+
+                return head_sha
+
+            except Exception as e:
+                duration = time.time() - start_time
+                github_api_request_duration_seconds.labels(operation="get_pull").observe(duration)
+                github_api_requests_total.labels(operation="get_pull", status="failure").inc()
+
+                set_span_error(span, e)
+
+                logger.error(
+                    "Failed to get head SHA for PR #%s in %s: %s",
+                    pr_number,
+                    repo_full_name,
+                    _sanitize_error(e),
+                    extra={
+                        "repo": repo_full_name,
+                        "pr_number": pr_number,
+                        "installation_id": installation_id,
+                        "error": _sanitize_error(e),
+                    },
+                )
+                return None
+
     def dismiss_approval(
         self,
         installation_id: int,

@@ -452,15 +452,32 @@ class WebhookHandler:
         if not reviews:
             return False
 
+        return not self._has_current_active_approval(reviews, head_sha)
+
+    def _has_current_active_approval(
+        self,
+        reviews: list[BotReview],
+        head_sha: str | None,
+    ) -> bool:
+        """Check whether Stampbot already approved the current pull request head.
+
+        Args:
+            reviews: Bot approval reviews.
+            head_sha: Current PR head SHA.
+
+        Returns:
+            True when an active approval exists for the current head, or when
+            GitHub did not provide enough commit information to prove staleness.
+        """
         for review in reviews:
             if review["state"] != "APPROVED":
                 continue
 
             review_commit = review.get("commit_id")
             if not head_sha or not review_commit or review_commit == head_sha:
-                return False
+                return True
 
-        return True
+        return False
 
     async def _handle_pr_comment(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Handle PR comment events for chatops.
@@ -606,12 +623,19 @@ class WebhookHandler:
 
             # Handle approve commands
             if command in repo_config.approve_commands:
+                head_sha = await run_in_threadpool(
+                    github_client.get_pr_head_sha,
+                    installation_id,
+                    repo_full_name,
+                    pr_number,
+                )
                 success = await self._approve_pr(
                     installation_id,
                     repo_full_name,
                     pr_number,
                     f"Approved by @{commenter} via chatops",
                     "chatops",
+                    head_sha=head_sha,
                 )
 
                 chatops_commands_total.labels(
@@ -885,6 +909,7 @@ class WebhookHandler:
         comment: str,
         trigger_type: str,
         skip_existing_check: bool = False,
+        head_sha: str | None = None,
     ) -> bool:
         """Approve a PR and track metrics.
 
@@ -897,6 +922,7 @@ class WebhookHandler:
             comment: Approval comment
             trigger_type: What triggered the approval (label, chatops)
             skip_existing_check: Whether to skip duplicate active approval detection
+            head_sha: Current PR head SHA, used to distinguish stale approvals
 
         Returns:
             True if successful (or already approved)
@@ -910,17 +936,30 @@ class WebhookHandler:
             },
         ) as span:
             if not skip_existing_check:
-                # Check for existing active approval to avoid duplicates
-                existing_approvals = await run_in_threadpool(
-                    github_client.find_bot_reviews,
-                    installation_id,
-                    repo_full_name,
-                    pr_number,
-                )
+                if head_sha:
+                    existing_reviews = await run_in_threadpool(
+                        github_client.find_bot_approval_reviews,
+                        installation_id,
+                        repo_full_name,
+                        pr_number,
+                    )
+                    existing_approvals = [
+                        review["id"]
+                        for review in existing_reviews
+                        if self._has_current_active_approval([review], head_sha)
+                    ]
+                else:
+                    # Check for existing active approval to avoid duplicates
+                    existing_approvals = await run_in_threadpool(
+                        github_client.find_bot_reviews,
+                        installation_id,
+                        repo_full_name,
+                        pr_number,
+                    )
 
                 if existing_approvals:
                     logger.info(
-                        "PR #%d in %s already has active approval, skipping",
+                        "PR #%d in %s already has active approval for current head, skipping",
                         pr_number,
                         repo_full_name,
                         extra={
