@@ -7,6 +7,10 @@ approval_labels = ["autoapprove", "stamp", "ready-to-merge"]
 # Auto-approve when label is added (default: true)
 auto_approve_on_label = true
 
+# Re-approve when new commits are pushed and an approval label still applies
+# (default: false)
+reapprove = false
+
 # Enable chatops commands (default: true)
 chatops_enabled = true
 

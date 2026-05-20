@@ -20,6 +20,7 @@ def mock_github_client():
         mock.create_issue_comment.return_value = True
         mock.dismiss_approval.return_value = True
         mock.find_bot_reviews.return_value = []
+        mock.find_bot_approval_reviews.return_value = []
         mock.repo_has_label.return_value = True
         mock.user_has_permission.return_value = True
         mock.get_user_team_slugs.return_value = []  # No team memberships by default
@@ -124,6 +125,115 @@ async def test_pr_labeled_autoapprove(webhook_handler, mock_github_client):
     assert result["status"] == "success"
     assert "approved" in result["message"].lower()
     mock_github_client.approve_pr.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_pr_labeled_unrelated_label_with_approval_label_ignored(
+    webhook_handler, mock_github_client
+):
+    """Test unrelated label changes do not re-approve just because an approval label exists."""
+    payload = load_fixture("pr_labeled_autoapprove")
+    payload["label"] = {"name": "bug"}
+    payload["pull_request"]["labels"].append({"name": "bug"})
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "ignored"
+    assert "no action" in result["message"].lower()
+    mock_github_client.find_bot_approval_reviews.assert_called_once()
+    mock_github_client.approve_pr.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pr_labeled_unrelated_label_reapproves_dismissed_review(
+    webhook_handler, mock_github_client
+):
+    """Test unrelated label changes re-approve when prior Stampbot approval was dismissed."""
+    payload = load_fixture("pr_labeled_autoapprove")
+    payload["label"] = {"name": "bug"}
+    payload["pull_request"]["labels"].append({"name": "bug"})
+    mock_github_client.find_bot_approval_reviews.return_value = [
+        {"id": 123, "state": "DISMISSED", "commit_id": "abc123def456"}
+    ]
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "success"
+    mock_github_client.approve_pr.assert_called_once()
+    mock_github_client.find_bot_reviews.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pr_synchronize_reapprove_disabled(webhook_handler, mock_github_client):
+    """Test new commits do not re-approve by default."""
+    payload = load_fixture("pr_labeled_autoapprove")
+    payload["action"] = "synchronize"
+    payload.pop("label", None)
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "ignored"
+    assert "no action" in result["message"].lower()
+    mock_github_client.find_bot_approval_reviews.assert_not_called()
+    mock_github_client.approve_pr.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pr_synchronize_reapprove_enabled_for_stale_review(
+    webhook_handler, mock_github_client
+):
+    """Test new commits re-approve when reapprove is enabled and prior approval is stale."""
+    payload = load_fixture("pr_labeled_autoapprove")
+    payload["action"] = "synchronize"
+    payload.pop("label", None)
+    mock_github_client.get_repo_file.return_value = "reapprove = true"
+    mock_github_client.find_bot_approval_reviews.return_value = [
+        {"id": 123, "state": "APPROVED", "commit_id": "oldsha"}
+    ]
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "success"
+    mock_github_client.approve_pr.assert_called_once()
+    mock_github_client.find_bot_reviews.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pr_synchronize_reapprove_enabled_current_review_ignored(
+    webhook_handler, mock_github_client
+):
+    """Test new commits do not re-approve when current head already has approval."""
+    payload = load_fixture("pr_labeled_autoapprove")
+    payload["action"] = "synchronize"
+    payload.pop("label", None)
+    mock_github_client.get_repo_file.return_value = "reapprove = true"
+    mock_github_client.find_bot_approval_reviews.return_value = [
+        {"id": 123, "state": "APPROVED", "commit_id": "abc123def456"}
+    ]
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "ignored"
+    mock_github_client.approve_pr.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_should_approve_for_unsupported_pr_event(webhook_handler):
+    """Test approval decision helper rejects unsupported PR actions."""
+    from stampbot.config import RepoConfig
+
+    should_approve, skip_existing_check = await webhook_handler._should_approve_for_pr_event(
+        "closed",
+        {},
+        "current-head",
+        12345,
+        "octocat/hello-world",
+        42,
+        RepoConfig.default(),
+    )
+
+    assert should_approve is False
+    assert skip_existing_check is False
 
 
 @pytest.mark.asyncio

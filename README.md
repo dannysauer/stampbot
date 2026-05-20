@@ -131,6 +131,10 @@ approval_labels = ["autoapprove", "stamp", "ready-to-merge"]
 # Auto-approve when label is added (default: true)
 auto_approve_on_label = true
 
+# Re-approve when new commits are pushed and an approval label still applies
+# (default: false)
+reapprove = false
+
 # Enable chatops commands (default: true)
 chatops_enabled = true
 
@@ -195,6 +199,10 @@ and redirects to `/setup` where you can create your GitHub App automatically.
 1. Add an approval label (e.g., `autoapprove`) to a PR
 2. Stampbot automatically approves the PR
 3. Remove the label to dismiss the approval
+
+By default, Stampbot does not approve again when new commits are pushed after
+approval. Set `reapprove = true` to opt in to re-approval on new commits while
+an approval label still applies.
 
 ### ChatOps Commands
 

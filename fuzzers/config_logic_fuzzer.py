@@ -34,6 +34,7 @@ def TestOneInput(data: bytes) -> None:
     config = RepoConfig(
         approval_labels=_slice(fields, 0) or ["stamp"],
         auto_approve_on_label=bool(data[:1] and data[0] % 2),
+        reapprove=bool(data[2:3] and data[2] % 2),
         chatops_enabled=bool(data[1:2] and data[1] % 2),
         chatops_required_permission="maintain",
         approve_commands=_slice(fields, 4) or ["stamp"],

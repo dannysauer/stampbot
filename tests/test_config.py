@@ -12,6 +12,7 @@ def test_repo_config_from_toml():
     toml_content = """
 approval_labels = ["test", "autoapprove"]
 auto_approve_on_label = true
+reapprove = true
 chatops_enabled = true
 chatops_required_permission = "write"
 approve_commands = ["approve", "stamp"]
@@ -21,6 +22,7 @@ unapprove_commands = ["unapprove"]
     assert "test" in config.approval_labels
     assert "autoapprove" in config.approval_labels
     assert config.auto_approve_on_label is True
+    assert config.reapprove is True
     assert config.chatops_enabled is True
     assert config.chatops_required_permission == "write"
     assert "approve" in config.approve_commands
@@ -32,6 +34,7 @@ def test_repo_config_default():
     config = RepoConfig.default()
     assert isinstance(config.approval_labels, list)
     assert config.auto_approve_on_label is True
+    assert config.reapprove is False
     assert config.chatops_enabled is True
     assert config.chatops_required_permission == "maintain"
     assert len(config.approve_commands) > 0
@@ -90,6 +93,7 @@ def test_repo_config_from_toml_empty_content():
     assert "autoapprove" in config.approval_labels
     assert "stamp" in config.approval_labels
     assert config.auto_approve_on_label is True
+    assert config.reapprove is False
     assert config.chatops_enabled is True
     assert config.chatops_required_permission == "maintain"
 

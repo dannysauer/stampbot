@@ -5,6 +5,7 @@
 
 import re
 import time
+from typing import TypedDict
 
 from github import Auth, Github, GithubIntegration
 from github.GithubException import GithubException
@@ -29,6 +30,14 @@ logger = get_logger(__name__)
 
 # Pattern to match GitHub tokens (installation tokens, PATs, etc.)
 _TOKEN_PATTERN = re.compile(r"(ghs_[A-Za-z0-9]{36}|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]+)")
+
+
+class BotReview(TypedDict):
+    """Minimal review state needed for Stampbot approval decisions."""
+
+    id: int
+    state: str
+    commit_id: str | None
 
 
 def _sanitize_error(error: Exception) -> str:
@@ -499,6 +508,94 @@ class GitHubAppClient:
 
                 logger.error(
                     "Failed to find bot reviews for PR #%s in %s: %s",
+                    pr_number,
+                    repo_full_name,
+                    _sanitize_error(e),
+                    extra={
+                        "repo": repo_full_name,
+                        "pr_number": pr_number,
+                        "installation_id": installation_id,
+                        "error": _sanitize_error(e),
+                    },
+                )
+                return []
+
+    def find_bot_approval_reviews(
+        self,
+        installation_id: int,
+        repo_full_name: str,
+        pr_number: int,
+    ) -> list[BotReview]:
+        """Find approval review states created by this bot on a PR.
+
+        Args:
+            installation_id: GitHub App installation ID
+            repo_full_name: Repository full name (owner/repo)
+            pr_number: Pull request number
+
+        Returns:
+            Review state details for bot approval reviews.
+        """
+        start_time = time.time()
+
+        with create_span(
+            "github.find_bot_approval_reviews",
+            {
+                "github.repo": repo_full_name,
+                "github.pr_number": pr_number,
+                "github.installation_id": installation_id,
+            },
+        ) as span:
+            try:
+                client = self._get_installation_client(installation_id)
+                repo = client.get_repo(repo_full_name)
+                pr = repo.get_pull(pr_number)
+
+                # Get bot user via JWT-authenticated integration (installation tokens
+                # cannot call GET /user, which is restricted by GitHub Apps integration)
+                app_info = self.integration.get_app()
+                bot_user = f"{app_info.slug}[bot]"
+
+                bot_reviews: list[BotReview] = []
+                for review in pr.get_reviews():
+                    if review.user.login == bot_user and review.state in (
+                        "APPROVED",
+                        "DISMISSED",
+                    ):
+                        bot_reviews.append(
+                            {
+                                "id": review.id,
+                                "state": review.state,
+                                "commit_id": getattr(review, "commit_id", None),
+                            }
+                        )
+
+                duration = time.time() - start_time
+                github_api_request_duration_seconds.labels(operation="find_reviews").observe(
+                    duration
+                )
+                github_api_requests_total.labels(operation="find_reviews", status="success").inc()
+
+                self._update_rate_limit_metrics(client, installation_id)
+
+                add_span_attributes(
+                    span, {"github.reviews_found": len(bot_reviews), "github.bot_user": bot_user}
+                )
+                set_span_ok(span)
+
+                return bot_reviews
+
+            except Exception as e:
+                duration = time.time() - start_time
+                github_api_request_duration_seconds.labels(operation="find_reviews").observe(
+                    duration
+                )
+                github_api_requests_total.labels(operation="find_reviews", status="failure").inc()
+
+                set_span_error(span, e)
+
+                logger.error(
+                    "Failed to find bot approval reviews for PR #%s in %s: %s",
                     pr_number,
                     repo_full_name,
                     _sanitize_error(e),
