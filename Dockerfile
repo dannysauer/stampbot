@@ -10,14 +10,19 @@ COPY constraints.txt requirements.txt ./
 
 # Install pinned pip first (CVE-2026-1703 fix), then dependencies
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r constraints.txt && \
-    pip install --no-cache-dir -r requirements.txt
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    pip install --no-cache-dir --require-hashes -r constraints.txt && \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    pip install --no-cache-dir --require-hashes -r requirements.txt
 
 # Production stage
 FROM python:3.14-slim@sha256:7a500125bc50693f2214e842a621440a1b1b9cbb2188f74ab045d29ed2ea5856
 
-# Create non-root user
-RUN useradd -m -u 1000 stampbot && \
+# Apply current Debian security updates, then create the non-root user
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd -m -u 1000 stampbot && \
     mkdir -p /app && \
     chown -R stampbot:stampbot /app
 
