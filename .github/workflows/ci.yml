@@ -145,6 +145,45 @@ jobs:
       - name: Initialize mutation testing
         run: poetry run cosmic-ray init cosmic-ray.toml .mutation.sqlite
 
+      - name: Filter mutation operators
+        run: |
+          poetry run python << 'EOF'
+          import re
+          import sqlite3
+          import tomllib
+
+          with open("cosmic-ray.toml", "rb") as config_file:
+              config = tomllib.load(config_file)
+
+          exclude_operators = config["cosmic-ray"]["filters"]["operators-filter"][
+              "exclude-operators"
+          ]
+          operator_filter = re.compile("|".join(f"(?:{operator})" for operator in exclude_operators))
+
+          connection = sqlite3.connect(".mutation.sqlite")
+          job_ids = [
+              job_id
+              for job_id, operator_name in connection.execute(
+                  "SELECT job_id, operator_name FROM mutation_specs"
+              )
+              if operator_filter.match(operator_name)
+          ]
+
+          if job_ids:
+              placeholders = ",".join("?" for _ in job_ids)
+              connection.execute(
+                  f"DELETE FROM mutation_specs WHERE job_id IN ({placeholders})",
+                  job_ids,
+              )
+              connection.execute(
+                  f"DELETE FROM work_items WHERE job_id IN ({placeholders})",
+                  job_ids,
+              )
+              connection.commit()
+
+          print(f"Filtered {len(job_ids)} mutation work items")
+          EOF
+
       - name: Run mutation testing
         run: poetry run cosmic-ray --verbosity INFO exec cosmic-ray.toml .mutation.sqlite
 
