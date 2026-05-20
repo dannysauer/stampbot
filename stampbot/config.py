@@ -248,7 +248,10 @@ class RepoConfig:
         # Parse the repo-specific TOML
         repo_settings: dict[str, Any] = {}
         if toml_content:
-            repo_settings = toml.loads(toml_content)
+            try:
+                repo_settings = toml.loads(toml_content)
+            except Exception as e:
+                raise ValueError(f"Invalid TOML content: {e}") from e
 
         # Merge: repo settings override defaults
         merged = {**defaults, **repo_settings}

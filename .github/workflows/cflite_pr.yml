@@ -1,0 +1,47 @@
+name: ClusterFuzzLite PR fuzzing
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - '.clusterfuzzlite/**'
+      - '.github/workflows/cflite_pr.yml'
+      - 'fuzzers/**'
+      - 'pyproject.toml'
+      - 'stampbot/**'
+
+permissions: read-all
+
+jobs:
+  pr:
+    name: PR fuzzing
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Build fuzzers
+        id: build
+        uses: google/clusterfuzzlite/actions/build_fuzzers@82652fb49e77bc29c35da1167bb286e93c6bcc05 # v1
+        with:
+          language: python
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          sanitizer: address
+
+      - name: Run fuzzers
+        id: run
+        uses: google/clusterfuzzlite/actions/run_fuzzers@82652fb49e77bc29c35da1167bb286e93c6bcc05 # v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fuzz-seconds: 120
+          mode: code-change
+          sanitizer: address
+          output-sarif: true
+          parallel-fuzzing: true

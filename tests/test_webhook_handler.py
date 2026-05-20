@@ -654,6 +654,14 @@ def test_verify_signature_invalid(webhook_handler):
     assert webhook_handler.verify_signature(payload, signature) is False
 
 
+def test_verify_signature_non_ascii(webhook_handler):
+    """Test non-ASCII signature content is rejected."""
+    payload = b'{"test": "data"}'
+    signature = "sha256=\u2603"
+
+    assert webhook_handler.verify_signature(payload, signature) is False
+
+
 def test_verify_signature_missing(webhook_handler):
     """Test missing signature is rejected."""
     payload = b'{"test": "data"}'

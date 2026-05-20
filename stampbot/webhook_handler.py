@@ -74,7 +74,10 @@ class WebhookHandler:
             "sha256=" + hmac.new(self.webhook_secret, payload, hashlib.sha256).hexdigest()
         )
 
-        return hmac.compare_digest(expected_signature, signature)
+        try:
+            return hmac.compare_digest(expected_signature, signature)
+        except TypeError:
+            return False
 
     async def handle_event(
         self,
