@@ -13,12 +13,13 @@ name = "local"
 [cosmic-ray.cloning]
 method = "copy"
 
-# Use all default operators for thorough mutation testing.
-# To exclude specific operators, uncomment and modify:
-# [cosmic-ray.filters.operators-filter]
-# exclude-operators = [
-#     "core/RemoveDecorator",
-# ]
+# Use all default operators except bitwise-or replacements. This codebase uses
+# `|` as a type-union operator, and annotation-only mutations do not change
+# runtime behavior under the current test command.
+[cosmic-ray.filters.operators-filter]
+exclude-operators = [
+    "core/ReplaceBinaryOperator_BitOr_.*",
+]
 
 # Note: Lines can be excluded from mutation with:
 # pragma: no mutate
