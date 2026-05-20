@@ -21,6 +21,7 @@ def mock_github_client():
         mock.dismiss_approval.return_value = True
         mock.find_bot_reviews.return_value = []
         mock.find_bot_approval_reviews.return_value = []
+        mock.get_pr_head_sha.return_value = "current-head"
         mock.repo_has_label.return_value = True
         mock.user_has_permission.return_value = True
         mock.get_user_team_slugs.return_value = []  # No team memberships by default
@@ -377,16 +378,35 @@ async def test_issue_comment_approve(webhook_handler, mock_github_client):
 async def test_issue_comment_approve_skips_duplicate(webhook_handler, mock_github_client):
     """Test chatops approve skips duplicate when PR already approved."""
     payload = load_fixture("issue_comment_approve")
-    # Simulate existing active approval
-    mock_github_client.find_bot_reviews.return_value = [12345]
+    mock_github_client.find_bot_approval_reviews.return_value = [
+        {"id": 12345, "state": "APPROVED", "commit_id": "current-head"}
+    ]
 
     result = await webhook_handler.handle_event("issue_comment", payload)
 
     assert result["status"] == "success"
-    # Should check for existing approval
-    mock_github_client.find_bot_reviews.assert_called()
-    # Should NOT post duplicate approval
+    mock_github_client.get_pr_head_sha.assert_called_once()
+    mock_github_client.find_bot_approval_reviews.assert_called_once()
+    mock_github_client.find_bot_reviews.assert_not_called()
     mock_github_client.approve_pr.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_issue_comment_approve_refreshes_stale_approval(webhook_handler, mock_github_client):
+    """Test chatops approve creates a new approval when the old approval is stale."""
+    payload = load_fixture("issue_comment_approve")
+    mock_github_client.get_pr_head_sha.return_value = "new-head"
+    mock_github_client.find_bot_approval_reviews.return_value = [
+        {"id": 12345, "state": "APPROVED", "commit_id": "old-head"}
+    ]
+
+    result = await webhook_handler.handle_event("issue_comment", payload)
+
+    assert result["status"] == "success"
+    mock_github_client.get_pr_head_sha.assert_called_once()
+    mock_github_client.find_bot_approval_reviews.assert_called_once()
+    mock_github_client.find_bot_reviews.assert_not_called()
+    mock_github_client.approve_pr.assert_called_once()
 
 
 @pytest.mark.asyncio

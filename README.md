@@ -8,6 +8,7 @@
 [![Release](https://github.com/dannysauer/stampbot/workflows/Release/badge.svg)](https://github.com/dannysauer/stampbot/actions/workflows/release.yml)
 [![codecov](https://codecov.io/gh/dannysauer/stampbot/branch/main/graph/badge.svg)](https://codecov.io/gh/dannysauer/stampbot)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/dannysauer/stampbot/badge)](https://scorecard.dev/viewer/?uri=github.com/dannysauer/stampbot)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12925/badge)](https://www.bestpractices.dev/projects/12925)
 [![Mutation Score](https://dannysauer.github.io/stampbot/mutation/mutation-badge.svg)](https://dannysauer.github.io/stampbot/mutation/mutation-report.html)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-yellow.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)

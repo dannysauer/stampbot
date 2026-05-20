@@ -352,6 +352,83 @@ class TestApprovePR:
             assert result is False
 
 
+class TestGetPRHeadSHA:
+    """Tests for get_pr_head_sha method."""
+
+    def test_get_pr_head_sha_success(self):
+        """Test successful PR head SHA lookup."""
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth"),
+            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
+            patch("stampbot.github_client.Github") as mock_github_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            mock_integration = Mock()
+            mock_token = Mock()
+            mock_token.token = TEST_TOKEN
+            mock_integration.get_access_token.return_value = mock_token
+            mock_integration_cls.return_value = mock_integration
+
+            mock_pr = Mock()
+            mock_pr.head.sha = "current-head"
+            mock_repo = Mock()
+            mock_repo.get_pull.return_value = mock_pr
+            mock_github = Mock()
+            mock_github.get_repo.return_value = mock_repo
+            mock_github.get_rate_limit.return_value = Mock(core=Mock(remaining=4500, limit=5000))
+            mock_github_cls.return_value = mock_github
+
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+            result = client.get_pr_head_sha(123456, "owner/repo", 42)
+
+            assert result == "current-head"
+
+    def test_get_pr_head_sha_returns_none_on_error(self):
+        """Test PR head SHA lookup returns None on API errors."""
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth"),
+            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
+            patch("stampbot.github_client.Github") as mock_github_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            mock_integration = Mock()
+            mock_token = Mock()
+            mock_token.token = TEST_TOKEN
+            mock_integration.get_access_token.return_value = mock_token
+            mock_integration_cls.return_value = mock_integration
+
+            mock_github = Mock()
+            mock_github.get_repo.side_effect = Exception("API Error")
+            mock_github_cls.return_value = mock_github
+
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+            result = client.get_pr_head_sha(123456, "owner/repo", 42)
+
+            assert result is None
+
+
 class TestDismissApproval:
     """Tests for dismiss_approval method."""
 
