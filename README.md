@@ -16,6 +16,11 @@
 
 A GitHub App that automatically approves pull requests based on labels and chatops commands.
 
+Stampbot solves a narrow workflow problem for repositories that intentionally allow a
+trusted label or maintainer ChatOps command to satisfy pull request approval requirements.
+It watches GitHub pull request webhooks, checks repository-specific policy, and creates or
+dismisses Stampbot's own pull request approval review.
+
 ## Features
 
 - **Label-based Auto-Approval**: Automatically approve PRs when specific labels are added
@@ -66,6 +71,22 @@ Stampbot includes a built-in setup wizard that creates your GitHub App automatic
    Install your new GitHub App on the repositories you want to use
 
 For manual setup or production deployment, see [INSTALLATION.md](INSTALLATION.md).
+
+## Project Information
+
+- **Obtain Stampbot**: Clone this repository, build the Docker image, or install the Helm
+  chart from GitHub Container Registry. See [Quick Start](#quick-start) and
+  [INSTALLATION.md](INSTALLATION.md).
+- **Report bugs or request enhancements**: Open a public
+  [GitHub Issue](https://github.com/dannysauer/stampbot/issues). Report suspected
+  vulnerabilities privately using [SECURITY.md](SECURITY.md).
+- **Contribute changes**: Follow [CONTRIBUTING.md](CONTRIBUTING.md) for contribution
+  requirements, coding standards, commit format, and pull request expectations.
+- **External interface reference**: See [docs/reference.md](docs/reference.md) for HTTP
+  endpoints, webhook inputs, repository configuration, ChatOps commands, GitHub outputs,
+  and metrics.
+- **Language**: Project documentation, issue discussion, code review, and maintainer
+  responses are in English.
 
 ## Quick Start
 
@@ -276,27 +297,8 @@ Stampbot is built with:
 
 ## Contributing
 
-We use conventional commits and conventional branches:
-
-### Commit Format
-
-```
-<type>(<scope>): <subject>
-
-<body>
-
-<footer>
-```
-
-Types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `ci`
-
-### Branch Format
-
-- `feat/*` - New features
-- `fix/*` - Bug fixes
-- `docs/*` - Documentation
-- `chore/*` - Maintenance
-- `refactor/*` - Code refactoring
+See [CONTRIBUTING.md](CONTRIBUTING.md) for acceptable contributions, coding standards,
+required checks, commit format, and pull request expectations.
 
 ## CI/CD
 
@@ -308,7 +310,7 @@ The project uses GitHub Actions for CI/CD:
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details
+Apache License 2.0 - see [LICENSE](LICENSE) for details.
 
 ## Support
 
