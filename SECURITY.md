@@ -17,4 +17,8 @@ steps to reproduce, impact, and any suggested remediation when possible.
 ## Security Checks
 
 This repository uses GitHub CodeQL, Trivy container scanning, Dependabot alerts, secret
-scanning with push protection, and OpenSSF Scorecard.
+scanning with push protection, OpenSSF Scorecard, release signing, SBOMs, VEX documents,
+and SLSA provenance for new release artifacts.
+
+Security requirements are documented in [docs/security-requirements.md](docs/security-requirements.md).
+Release verification is documented in [docs/release-verification.md](docs/release-verification.md).

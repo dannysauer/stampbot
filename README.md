@@ -83,9 +83,15 @@ For manual setup or production deployment, see [INSTALLATION.md](INSTALLATION.md
   vulnerabilities privately using [SECURITY.md](SECURITY.md).
 - **Contribute changes**: Follow [CONTRIBUTING.md](CONTRIBUTING.md) for contribution
   requirements, coding standards, commit format, and pull request expectations.
+- **Governance and roadmap**: See [GOVERNANCE.md](GOVERNANCE.md) for project roles and
+  decision making, and [ROADMAP.md](ROADMAP.md) for current direction.
 - **External interface reference**: See [docs/reference.md](docs/reference.md) for HTTP
   endpoints, webhook inputs, repository configuration, ChatOps commands, GitHub outputs,
   and metrics.
+- **Architecture and security requirements**: See [docs/architecture.md](docs/architecture.md)
+  and [docs/security-requirements.md](docs/security-requirements.md).
+- **Release verification**: See [docs/release-verification.md](docs/release-verification.md)
+  for Sigstore bundle and SLSA provenance verification.
 - **Language**: Project documentation, issue discussion, code review, and maintainer
   responses are in English.
 
