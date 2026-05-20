@@ -1,0 +1,3 @@
+[[IgnoredVulns]]
+id = "PYSEC-2025-183"
+reason = "CVE-2025-45768 is disputed by the PyJWT supplier; the reported weak encryption depends on application-selected key length, not vulnerable library code. Stampbot signs GitHub App JWTs with RS256 using the configured GitHub App private key and does not expose user-controlled JWT key selection."
