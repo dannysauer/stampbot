@@ -40,6 +40,12 @@
       "groupName": "github actions"
     },
     {
+      "description": "Keep SLSA reusable workflows tag-pinned for slsa-verifier compatibility",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["slsa-framework/slsa-github-generator"],
+      "pinDigests": false
+    },
+    {
       "description": "Group Helm chart dependencies",
       "matchManagers": ["helm-values", "helmfile"],
       "groupName": "helm dependencies"

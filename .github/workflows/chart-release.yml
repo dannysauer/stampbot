@@ -35,6 +35,11 @@ jobs:
       contents: write
       id-token: write  # For keyless signing with cosign/Sigstore
       packages: write
+    outputs:
+      release_asset_hashes: ${{ steps.provenance-subjects.outputs.hashes }}
+      skip: ${{ steps.check.outputs.skip }}
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -162,6 +167,13 @@ jobs:
             --bundle "stampbot-${CHART_VERSION}.tgz.sigstore.json" \
             "stampbot-${CHART_VERSION}.tgz"
 
+      - name: Generate SLSA provenance subjects
+        id: provenance-subjects
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          CHART_VERSION="${{ steps.version.outputs.version }}"
+          echo "hashes=$(sha256sum "stampbot-${CHART_VERSION}.tgz" | base64 -w0)" >> "$GITHUB_OUTPUT"
+
       - name: Log in to Container Registry
         if: steps.check.outputs.skip != 'true'
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
@@ -264,3 +276,19 @@ jobs:
             stampbot-${{ steps.version.outputs.version }}.tgz.sigstore.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release-chart-provenance:
+    name: Generate Chart Release SLSA Provenance
+    needs: release-chart
+    if: needs.release-chart.outputs.skip != 'true'
+    permissions:
+      actions: read  # For reusable workflow path detection
+      contents: write  # For release asset upload
+      id-token: write  # For keyless SLSA provenance signing
+    # SLSA generator workflows must use a full semantic tag for slsa-verifier compatibility.
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ needs.release-chart.outputs.release_asset_hashes }}
+      provenance-name: stampbot-chart-${{ needs.release-chart.outputs.version }}.intoto.jsonl
+      upload-assets: true
+      upload-tag-name: ${{ needs.release-chart.outputs.tag }}
