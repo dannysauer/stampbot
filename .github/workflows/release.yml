@@ -112,6 +112,8 @@ jobs:
       contents: write
       packages: write
       id-token: write  # For keyless signing with cosign/Sigstore
+    outputs:
+      release_asset_hashes: ${{ steps.provenance-subjects.outputs.hashes }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -205,6 +207,13 @@ jobs:
               "${artifact}"
           done
 
+      - name: Generate SLSA provenance subjects
+        id: provenance-subjects
+        env:
+          VERSION: ${{ needs.determine-version.outputs.version }}
+        run: |
+          echo "hashes=$(sha256sum sbom.spdx.json "stampbot-${VERSION}.vex.json" | base64 -w0)" >> "$GITHUB_OUTPUT"
+
       - name: Generate changelog
         id: changelog
         env:
@@ -266,6 +275,22 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  app-release-provenance:
+    name: Generate App Release SLSA Provenance
+    needs: [determine-version, build-and-publish-image]
+    if: needs.determine-version.outputs.should_release == 'true'
+    permissions:
+      actions: read  # For reusable workflow path detection
+      contents: write  # For release asset upload
+      id-token: write  # For keyless SLSA provenance signing
+    # SLSA generator workflows must use a full semantic tag for slsa-verifier compatibility.
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ needs.build-and-publish-image.outputs.release_asset_hashes }}
+      provenance-name: stampbot-${{ needs.determine-version.outputs.version }}.intoto.jsonl
+      upload-assets: true
+      upload-tag-name: v${{ needs.determine-version.outputs.version }}
+
   release-chart:
     name: Release Helm Chart
     needs: [determine-version, build-and-publish-image]
@@ -274,6 +299,7 @@ jobs:
     with:
       app_version: ${{ needs.determine-version.outputs.version }}
     permissions:
+      actions: read
       contents: write
       id-token: write
       packages: write
