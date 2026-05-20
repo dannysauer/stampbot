@@ -12,7 +12,7 @@ from typing import Any
 from fastapi.concurrency import run_in_threadpool
 
 from stampbot.config import RepoConfig, settings
-from stampbot.github_client import github_client
+from stampbot.github_client import BotReview, github_client
 from stampbot.logger import get_logger
 from stampbot.metrics import (
     chatops_commands_total,
@@ -233,88 +233,103 @@ class WebhookHandler:
                 "synchronize",
             ]:
                 labels = [label["name"] for label in pr.get("labels", [])]
-                pr_title = pr.get("title", "")
-                pr_author = pr.get("user", {}).get("login", "")
+                approval_label = self._find_approval_label(labels, repo_config)
+                if approval_label:
+                    should_approve, skip_existing_check = await self._should_approve_for_pr_event(
+                        action,
+                        payload,
+                        pr.get("head", {}).get("sha"),
+                        installation_id,
+                        repo_full_name,
+                        pr_number,
+                        repo_config,
+                    )
+                    if not should_approve:
+                        add_span_attributes(span, {"webhook.result": "no_action"})
+                        set_span_ok(span)
+                        return {"status": "ignored", "message": "No action needed"}
 
-                for label in labels:
-                    if label in repo_config.approval_labels:
-                        # Check if team membership verification is needed
-                        author_team_slugs: list[str] | None = None
-                        if repo_config.needs_team_check(pr_author) and owner_login:
-                            author_team_slugs = await run_in_threadpool(
-                                github_client.get_user_team_slugs,
-                                installation_id,
-                                owner_login,
-                                pr_author,
-                                repo_config.allowed_teams,
-                            )
+                    pr_title = pr.get("title", "")
+                    pr_author = pr.get("user", {}).get("login", "")
 
-                        # Check if PR passes eligibility filters
-                        is_eligible, reason = repo_config.is_pr_eligible(
-                            labels, pr_title, pr_author, author_team_slugs
+                    # Check if team membership verification is needed
+                    author_team_slugs: list[str] | None = None
+                    if repo_config.needs_team_check(pr_author) and owner_login:
+                        author_team_slugs = await run_in_threadpool(
+                            github_client.get_user_team_slugs,
+                            installation_id,
+                            owner_login,
+                            pr_author,
+                            repo_config.allowed_teams,
                         )
-                        if not is_eligible:
-                            logger.info(
-                                "PR #%d not eligible for auto-approval: %s",
-                                pr_number,
-                                reason,
-                                extra={
-                                    "repo": repo_full_name,
-                                    "pr_number": pr_number,
-                                    "pr_author": pr_author,
-                                    "reason": reason,
-                                },
-                            )
-                            add_span_attributes(
-                                span,
-                                {
-                                    "webhook.result": "not_eligible",
-                                    "webhook.ineligible_reason": reason,
-                                },
-                            )
-                            set_span_ok(span)
-                            return {
-                                "status": "ignored",
-                                "message": f"PR not eligible: {reason}",
-                            }
 
+                    # Check if PR passes eligibility filters
+                    is_eligible, reason = repo_config.is_pr_eligible(
+                        labels, pr_title, pr_author, author_team_slugs
+                    )
+                    if not is_eligible:
                         logger.info(
-                            "PR #%d has approval label: %s",
+                            "PR #%d not eligible for auto-approval: %s",
                             pr_number,
-                            label,
+                            reason,
                             extra={
                                 "repo": repo_full_name,
                                 "pr_number": pr_number,
-                                "label": label,
+                                "pr_author": pr_author,
+                                "reason": reason,
                             },
                         )
-
-                        # Approve the PR
-                        success = await self._approve_pr(
-                            installation_id,
-                            repo_full_name,
-                            pr_number,
-                            f"Auto-approved by Stampbot (label: {label})",
-                            "label",
-                        )
-
                         add_span_attributes(
                             span,
                             {
-                                "webhook.result": "approved" if success else "approval_failed",
-                                "webhook.trigger_label": label,
+                                "webhook.result": "not_eligible",
+                                "webhook.ineligible_reason": reason,
                             },
                         )
                         set_span_ok(span)
-
                         return {
-                            "status": "success" if success else "error",
-                            "message": (
-                                f"PR approved via label: {label}"
-                                if success
-                                else "Failed to approve PR"
-                            ),
+                            "status": "ignored",
+                            "message": f"PR not eligible: {reason}",
                         }
+
+                    logger.info(
+                        "PR #%d has approval label: %s",
+                        pr_number,
+                        approval_label,
+                        extra={
+                            "repo": repo_full_name,
+                            "pr_number": pr_number,
+                            "label": approval_label,
+                        },
+                    )
+
+                    # Approve the PR
+                    success = await self._approve_pr(
+                        installation_id,
+                        repo_full_name,
+                        pr_number,
+                        f"Auto-approved by Stampbot (label: {approval_label})",
+                        "label",
+                        skip_existing_check=skip_existing_check,
+                    )
+
+                    add_span_attributes(
+                        span,
+                        {
+                            "webhook.result": "approved" if success else "approval_failed",
+                            "webhook.trigger_label": approval_label,
+                        },
+                    )
+                    set_span_ok(span)
+
+                    return {
+                        "status": "success" if success else "error",
+                        "message": (
+                            f"PR approved via label: {approval_label}"
+                            if success
+                            else "Failed to approve PR"
+                        ),
+                    }
 
             # Check if we should remove approval when label is removed
             if repo_config.auto_approve_on_label and action == "unlabeled":
@@ -359,6 +374,93 @@ class WebhookHandler:
             add_span_attributes(span, {"webhook.result": "no_action"})
             set_span_ok(span)
             return {"status": "ignored", "message": "No action needed"}
+
+    def _find_approval_label(self, labels: list[str], repo_config: RepoConfig) -> str | None:
+        """Find the first configured approval label present on the PR.
+
+        Args:
+            labels: Current PR labels.
+            repo_config: Repository configuration.
+
+        Returns:
+            Matching approval label, if present.
+        """
+        for label in labels:
+            if label in repo_config.approval_labels:
+                return label
+        return None
+
+    async def _should_approve_for_pr_event(
+        self,
+        action: str | None,
+        payload: dict[str, Any],
+        head_sha: str | None,
+        installation_id: int,
+        repo_full_name: str,
+        pr_number: int,
+        repo_config: RepoConfig,
+    ) -> tuple[bool, bool]:
+        """Decide whether a pull request event should create a new approval.
+
+        Args:
+            action: Pull request event action.
+            payload: Event payload.
+            head_sha: Current PR head SHA.
+            installation_id: GitHub App installation ID.
+            repo_full_name: Repository full name.
+            pr_number: Pull request number.
+            repo_config: Repository configuration.
+
+        Returns:
+            Tuple of (should approve, skip existing approval check).
+        """
+        if action in ("opened", "reopened"):
+            return True, False
+
+        added_label = payload.get("label", {}).get("name")
+        if action == "labeled" and added_label in repo_config.approval_labels:
+            return True, False
+
+        if action == "synchronize" and not repo_config.reapprove:
+            return False, False
+
+        if action not in ("labeled", "synchronize"):
+            return False, False
+
+        reviews = await run_in_threadpool(
+            github_client.find_bot_approval_reviews,
+            installation_id,
+            repo_full_name,
+            pr_number,
+        )
+        return self._approval_needs_refresh(reviews, head_sha), True
+
+    def _approval_needs_refresh(
+        self,
+        reviews: list[BotReview],
+        head_sha: str | None,
+    ) -> bool:
+        """Check whether prior Stampbot approval state should be refreshed.
+
+        Args:
+            reviews: Bot approval reviews.
+            head_sha: Current PR head SHA.
+
+        Returns:
+            True when a prior approval exists but no active approval applies to the current head.
+        """
+        if not reviews:
+            return False
+
+        for review in reviews:
+            if review["state"] != "APPROVED":
+                continue
+
+            review_commit = review.get("commit_id")
+            if not head_sha or not review_commit or review_commit == head_sha:
+                return False
+
+        return True
 
     async def _handle_pr_comment(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Handle PR comment events for chatops.
@@ -782,6 +884,7 @@ class WebhookHandler:
         pr_number: int,
         comment: str,
         trigger_type: str,
+        skip_existing_check: bool = False,
     ) -> bool:
         """Approve a PR and track metrics.
 
@@ -793,6 +896,7 @@ class WebhookHandler:
             pr_number: PR number
             comment: Approval comment
             trigger_type: What triggered the approval (label, chatops)
+            skip_existing_check: Whether to skip duplicate active approval detection
 
         Returns:
             True if successful (or already approved)
@@ -805,34 +909,35 @@ class WebhookHandler:
                 "approval.trigger_type": trigger_type,
             },
         ) as span:
-            # Check for existing active approval to avoid duplicates
-            existing_approvals = await run_in_threadpool(
-                github_client.find_bot_reviews,
-                installation_id,
-                repo_full_name,
-                pr_number,
-            )
-
-            if existing_approvals:
-                logger.info(
-                    "PR #%d in %s already has active approval, skipping",
-                    pr_number,
+            if not skip_existing_check:
+                # Check for existing active approval to avoid duplicates
+                existing_approvals = await run_in_threadpool(
+                    github_client.find_bot_reviews,
+                    installation_id,
                     repo_full_name,
-                    extra={
-                        "repo": repo_full_name,
-                        "pr_number": pr_number,
-                        "existing_review_ids": existing_approvals,
-                    },
+                    pr_number,
                 )
-                add_span_attributes(
-                    span,
-                    {
-                        "approval.result": "already_approved",
-                        "approval.existing_reviews": len(existing_approvals),
-                    },
-                )
-                set_span_ok(span)
-                return True
+
+                if existing_approvals:
+                    logger.info(
+                        "PR #%d in %s already has active approval, skipping",
+                        pr_number,
+                        repo_full_name,
+                        extra={
+                            "repo": repo_full_name,
+                            "pr_number": pr_number,
+                            "existing_review_ids": existing_approvals,
+                        },
+                    )
+                    add_span_attributes(
+                        span,
+                        {
+                            "approval.result": "already_approved",
+                            "approval.existing_reviews": len(existing_approvals),
+                        },
+                    )
+                    set_span_ok(span)
+                    return True
 
             start_time = time.time()
 

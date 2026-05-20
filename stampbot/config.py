@@ -14,6 +14,7 @@ from dynaconf import Dynaconf  # type: ignore[import-untyped]
 REPO_CONFIG_DEFAULTS = {
     "approval_labels": ["autoapprove", "stamp"],
     "auto_approve_on_label": True,
+    "reapprove": False,
     "chatops_enabled": True,
     "chatops_required_permission": "maintain",
     "approve_commands": ["approve", "stamp"],
@@ -82,6 +83,7 @@ class RepoConfig:
         self,
         approval_labels: list[str],
         auto_approve_on_label: bool,
+        reapprove: bool,
         chatops_enabled: bool,
         chatops_required_permission: str,
         approve_commands: list[str],
@@ -97,6 +99,7 @@ class RepoConfig:
         Args:
             approval_labels: Labels that trigger auto-approval
             auto_approve_on_label: Whether to auto-approve when label is added
+            reapprove: Whether to re-approve when new commits are pushed
             chatops_enabled: Whether chatops commands are enabled
             chatops_required_permission: Minimum repo permission for chatops commands
             approve_commands: Commands that trigger approval
@@ -109,6 +112,7 @@ class RepoConfig:
         """
         self.approval_labels = approval_labels
         self.auto_approve_on_label = auto_approve_on_label
+        self.reapprove = reapprove
         self.chatops_enabled = chatops_enabled
         self.chatops_required_permission = chatops_required_permission
         self.approve_commands = approve_commands
@@ -277,6 +281,7 @@ class RepoConfig:
         return cls(
             approval_labels=merged.get("approval_labels", []),
             auto_approve_on_label=merged.get("auto_approve_on_label", True),
+            reapprove=merged.get("reapprove", False),
             chatops_enabled=merged.get("chatops_enabled", True),
             chatops_required_permission=required_permission,
             approve_commands=merged.get("approve_commands", ["approve", "stamp"]),
@@ -298,6 +303,7 @@ class RepoConfig:
         return cls(
             approval_labels=defaults["approval_labels"],
             auto_approve_on_label=defaults["auto_approve_on_label"],
+            reapprove=defaults["reapprove"],
             chatops_enabled=defaults["chatops_enabled"],
             chatops_required_permission=defaults["chatops_required_permission"],
             approve_commands=defaults["approve_commands"],

@@ -642,6 +642,114 @@ class TestFindBotReviews:
             assert result == []
 
 
+class TestFindBotApprovalReviews:
+    """Tests for find_bot_approval_reviews method."""
+
+    def test_find_bot_approval_reviews_success(self):
+        """Test successful bot approval review state lookup."""
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth"),
+            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
+            patch("stampbot.github_client.Github") as mock_github_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            mock_integration = Mock()
+            mock_token = Mock()
+            mock_token.token = TEST_TOKEN
+            mock_integration.get_access_token.return_value = mock_token
+            mock_integration.get_app.return_value = Mock(slug="stampbot")
+            mock_integration_cls.return_value = mock_integration
+
+            bot_approved_review = Mock()
+            bot_approved_review.user.login = "stampbot[bot]"
+            bot_approved_review.state = "APPROVED"
+            bot_approved_review.id = 123
+            bot_approved_review.commit_id = "headsha"
+
+            bot_dismissed_review = Mock()
+            bot_dismissed_review.user.login = "stampbot[bot]"
+            bot_dismissed_review.state = "DISMISSED"
+            bot_dismissed_review.id = 124
+            bot_dismissed_review.commit_id = "oldsha"
+
+            bot_commented_review = Mock()
+            bot_commented_review.user.login = "stampbot[bot]"
+            bot_commented_review.state = "COMMENTED"
+            bot_commented_review.id = 125
+
+            other_review = Mock()
+            other_review.user.login = "other-user"
+            other_review.state = "APPROVED"
+            other_review.id = 456
+
+            mock_pr = Mock()
+            mock_pr.get_reviews.return_value = [
+                bot_approved_review,
+                bot_dismissed_review,
+                bot_commented_review,
+                other_review,
+            ]
+            mock_repo = Mock()
+            mock_repo.get_pull.return_value = mock_pr
+            mock_github = Mock()
+            mock_github.get_repo.return_value = mock_repo
+            mock_github.get_rate_limit.return_value = Mock(core=Mock(remaining=4500, limit=5000))
+            mock_github_cls.return_value = mock_github
+
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+            result = client.find_bot_approval_reviews(123456, "owner/repo", 42)
+
+            assert result == [
+                {"id": 123, "state": "APPROVED", "commit_id": "headsha"},
+                {"id": 124, "state": "DISMISSED", "commit_id": "oldsha"},
+            ]
+
+    def test_find_bot_approval_reviews_returns_empty_on_error(self):
+        """Test that find_bot_approval_reviews returns empty list on error."""
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth"),
+            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
+            patch("stampbot.github_client.Github") as mock_github_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            mock_integration = Mock()
+            mock_token = Mock()
+            mock_token.token = TEST_TOKEN
+            mock_integration.get_access_token.return_value = mock_token
+            mock_integration_cls.return_value = mock_integration
+
+            mock_github = Mock()
+            mock_github.get_repo.side_effect = Exception("API Error")
+            mock_github_cls.return_value = mock_github
+
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+            result = client.find_bot_approval_reviews(123456, "owner/repo", 42)
+
+            assert result == []
+
+
 class TestUserHasPermission:
     """Tests for user_has_permission method."""
 
