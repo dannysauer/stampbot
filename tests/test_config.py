@@ -94,6 +94,12 @@ def test_repo_config_from_toml_empty_content():
     assert config.chatops_required_permission == "maintain"
 
 
+def test_repo_config_from_toml_parser_error():
+    """Test parser errors are normalized as config validation errors."""
+    with pytest.raises(ValueError, match="Invalid TOML content"):
+        RepoConfig.from_toml(";\r")
+
+
 def test_repo_config_invalid_permission():
     """Test invalid permission raises a ValueError."""
     toml_content = 'chatops_required_permission = "invalid"'

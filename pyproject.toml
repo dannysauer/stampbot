@@ -76,6 +76,7 @@ ignore = [
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
+"fuzzers/*_fuzzer.py" = ["N802"]  # Atheris requires TestOneInput naming
 "tests/*" = ["D", "S101", "S104"]  # No docstrings in tests, allow assert, allow 0.0.0.0 in mocks
 
 [tool.ruff.format]
