@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
   "author": "Danny Sauer <github@dannysauer.com>",
-  "timestamp": "2026-05-19T18:09:21Z",
-  "version": 24,
+  "timestamp": "2026-05-28T13:41:03Z",
+  "version": 28,
   "statements": [
     {
       "vulnerability": {
@@ -328,6 +328,66 @@
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
       "impact_statement": "The application only makes outbound HTTPS connections to the GitHub API, which is a trusted source. It does not process responses from untrusted sources, nor does it use the Brotli library or call HTTPResponse.drain_conn(). Therefore, the vulnerability cannot be exploited in this context."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-42496",
+        "name": "CVE-2026-42496",
+        "description": "Archive::Tar versions before 3.08 for Perl extract symlinks with attac ..."
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process or extract tar files, nor does it handle user-uploaded files or untrusted input that could exploit the Archive::Tar vulnerability. The vulnerability is not exploitable in the context of this application."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-42497",
+        "name": "CVE-2026-42497",
+        "description": "Archive::Tar versions before 3.08 for Perl extract hardlinks to attack ..."
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process user-uploaded files or untrusted input, and it does not use the Archive::Tar module for extracting tar files. Therefore, the vulnerable code cannot be triggered or exploited in the context of this application."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-8376",
+        "name": "CVE-2026-8376",
+        "description": "Perl versions through 5.43.10 have a heap buffer overflow when compili ..."
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The vulnerability requires an attacker to supply a malicious regular expression to exploit the heap buffer overflow. However, the application does not process user-supplied input, including regular expressions, nor does it compile or execute attacker-controlled regular expressions. Additionally, the application operates in a controlled environment where it only interacts with trusted sources (e.g., GitHub API and a trusted OTLP trace collector). Therefore, the vulnerability is not exploitable in this context."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-9538",
+        "name": "CVE-2026-9538",
+        "description": "Archive::Tar versions before 3.10 for Perl allow memory exhaustion via ..."
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The vulnerability in Archive::Tar is not exploitable in the context of this application because the application does not process tar files or any user-uploaded files. Additionally, the application does not handle untrusted input that could influence the vulnerable code path. The use of the perl-base package in this application does not involve the Archive::Tar module in a way that could be exploited by an attacker."
     }
   ]
 }
