@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
   "author": "Danny Sauer <github@dannysauer.com>",
-  "timestamp": "2026-05-19T18:09:21Z",
-  "version": 24,
+  "timestamp": "2026-05-29T12:42:19Z",
+  "version": 28,
   "statements": [
     {
       "vulnerability": {
@@ -328,6 +328,66 @@
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
       "impact_statement": "The application only makes outbound HTTPS connections to the GitHub API, which is a trusted source. It does not process responses from untrusted sources, nor does it use the Brotli library or call HTTPResponse.drain_conn(). Therefore, the vulnerability cannot be exploited in this context."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-42496",
+        "name": "CVE-2026-42496",
+        "description": "Archive::Tar versions before 3.08 for Perl extract symlinks with attac ..."
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process user-uploaded files or untrusted input, and it does not use the Archive::Tar module for any functionality. The vulnerability in Archive::Tar is therefore not exploitable in the context of this application."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-42497",
+        "name": "CVE-2026-42497",
+        "description": "Archive::Tar versions before 3.08 for Perl extract hardlinks to attack ..."
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process user-uploaded files or untrusted input, and it does not use the Archive::Tar module in a way that could allow an attacker to exploit the vulnerability. The vulnerability requires an attacker to control the tar archive being extracted, which is not applicable in the context of this application."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-8376",
+        "name": "CVE-2026-8376",
+        "description": "Perl versions through 5.43.10 have a heap buffer overflow when compili ..."
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The vulnerability requires an attacker to control the regular expression being compiled by the Perl interpreter. In the context of this application, regular expressions are not compiled based on untrusted or attacker-controlled input. The application processes GitHub webhook events and does not handle user-uploaded files or untrusted cryptographic input. Therefore, the vulnerable code cannot be exploited in this application's use case."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-9538",
+        "name": "CVE-2026-9538",
+        "description": "Archive::Tar versions before 3.10 for Perl allow memory exhaustion via ..."
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process user-uploaded files, does not parse tar archives, and does not handle untrusted input that could exploit the Archive::Tar vulnerability. The vulnerable code cannot be triggered in the application's execution path, and there is no adversary-controlled input that could lead to memory exhaustion."
     }
   ]
 }
