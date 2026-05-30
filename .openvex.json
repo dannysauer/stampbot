@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
   "author": "Danny Sauer <github@dannysauer.com>",
-  "timestamp": "2026-05-19T18:09:21Z",
-  "version": 24,
+  "timestamp": "2026-05-30T11:13:31Z",
+  "version": 29,
   "statements": [
     {
       "vulnerability": {
@@ -328,6 +328,81 @@
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
       "impact_statement": "The application only makes outbound HTTPS connections to the GitHub API, which is a trusted source. It does not process responses from untrusted sources, nor does it use the Brotli library or call HTTPResponse.drain_conn(). Therefore, the vulnerability cannot be exploited in this context."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-42496",
+        "name": "CVE-2026-42496",
+        "description": "Archive::Tar versions before 3.08 for Perl extract symlinks with attac ..."
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process user-uploaded files or untrusted input, and it does not use the Archive::Tar module for any functionality. The vulnerability requires an attacker to control the symlink target during tar extraction, which is not applicable in the application's context. Therefore, the vulnerability is not exploitable in this application."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-42497",
+        "name": "CVE-2026-42497",
+        "description": "Archive::Tar versions before 3.08 for Perl extract hardlinks to attack ..."
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process user-uploaded files or untrusted input, and it does not use the Archive::Tar module for extracting tar files. Therefore, the vulnerability cannot be exploited in the context of this application."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-48962",
+        "name": "CVE-2026-48962",
+        "description": "perl-IO-Compress: perl-IO-Compress: Arbitrary code execution via attacker-controlled output glob"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process user-uploaded files or accept untrusted input that could be used to manipulate the output glob in IO::Compress. Additionally, the application does not use functionality related to file compression or globbing, which are required to exploit this vulnerability. Therefore, the vulnerable code cannot be controlled by an adversary in the context of this application."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-8376",
+        "name": "CVE-2026-8376",
+        "description": "Perl versions through 5.43.10 have a heap buffer overflow when compili ..."
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The vulnerability in Perl involves a heap buffer overflow when compiling attacker-controlled regular expressions on 32-bit builds. However, the application does not process or compile user-controlled regular expressions, nor does it accept untrusted input that could exploit this vulnerability. Therefore, the vulnerability is not exploitable in the context of this application."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-9538",
+        "name": "CVE-2026-9538",
+        "description": "Archive::Tar versions before 3.10 for Perl allow memory exhaustion via ..."
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process user-uploaded files, does not parse tar archives, and does not handle untrusted input that could exploit the Archive::Tar vulnerability. The vulnerable code cannot be triggered in the application's execution path, as it does not involve any functionality related to tar file handling or memory allocation based on untrusted input."
     }
   ]
 }
