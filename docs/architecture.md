@@ -6,19 +6,64 @@ reviews.
 
 ## Request Flow
 
-```text
-GitHub Webhook
-  -> POST /webhook
-  -> WebhookHandler.handle_event()
-  -> GitHubAppClient
-  -> GitHub pull request review API
+The following diagram shows the normal webhook path from GitHub to Stampbot's
+GitHub API writes:
+
+```mermaid
+flowchart LR
+    github["GitHub webhook delivery"]
+    webhook["FastAPI POST /webhook"]
+    signature["Verify X-Hub-Signature-256"]
+    handler["WebhookHandler.handle_event()"]
+    policy["Load repository policy"]
+    client["GitHubAppClient installation token"]
+    output["GitHub PR review or comment API"]
+    timeline["Pull request timeline"]
+    telemetry["Metrics, logs, and traces"]
+
+    github --> webhook
+    webhook --> signature
+    signature --> handler
+    handler --> policy
+    policy --> client
+    client --> output
+    output --> timeline
+    handler --> telemetry
 ```
+
+In text form, GitHub sends a signed webhook to `/webhook`; Stampbot verifies the
+signature, routes the event, loads repository policy, authenticates as the GitHub
+App installation, writes only its own review/comment outputs, and emits
+operational telemetry.
 
 The webhook handler supports:
 
 - `ping` events for GitHub App health checks
 - `pull_request` events for label-driven approval and dismissal
 - `issue_comment` events for ChatOps commands such as `@stampbot stamp`
+
+## Approval State Model
+
+The following state diagram summarizes how Stampbot treats a pull request across
+label, ChatOps, and new-commit events:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Ignored: event is unsupported or policy does not match
+    [*] --> Eligible: label or ChatOps command matches policy
+    Eligible --> Approved: policy passes and GitHub review succeeds
+    Eligible --> Ignored: filters or permissions fail
+    Approved --> Dismissed: approval label removed or unapprove command accepted
+    Approved --> Stale: new commits arrive and reapprove is false
+    Approved --> Eligible: new commits arrive and reapprove is true
+    Stale --> Eligible: approval label still applies and reapprove becomes true
+    Dismissed --> Eligible: approval label or approve command returns
+    Ignored --> [*]
+```
+
+In text form, Stampbot ignores unsupported events, approves only when policy and
+permissions pass, dismisses only its own approval when policy no longer applies,
+and reapproves after new commits only when repository configuration opts in.
 
 ## Main Components
 
