@@ -1,422 +1,305 @@
 # Stampbot Installation Guide
 
-This guide covers how to set up and deploy Stampbot in various environments.
+This guide explains how to create the GitHub App and run Stampbot locally, with Docker,
+or on Kubernetes. For exact configuration keys and failure behavior, see
+[docs/configuration.md](docs/configuration.md).
 
-## Table of Contents
+## GitHub App Setup
 
-- [Creating a GitHub App](#creating-a-github-app)
-- [Local Development](#local-development)
-- [Docker Deployment](#docker-deployment)
-- [Kubernetes Deployment](#kubernetes-deployment)
-  - [Basic Helm Installation](#basic-helm-installation)
-  - [EKS with AWS Secrets Manager](#eks-with-aws-secrets-manager)
-  - [With External Secrets Operator](#with-external-secrets-operator)
-  - [With VPA and Custom Metrics HPA](#with-vpa-and-custom-metrics-hpa)
-- [Configuration](#configuration)
+Stampbot must run as a GitHub App. You can create the app with the built-in setup wizard
+or manually in GitHub.
 
-## Creating a GitHub App
+### Automated Setup
 
-### Option 1: Automated Setup (Recommended)
+1. Start Stampbot without GitHub App credentials:
 
-Stampbot includes a built-in setup wizard that creates your GitHub App automatically with the correct permissions.
-
-1. **Start stampbot without credentials**
    ```bash
+   make install-dev
    make dev
    ```
 
-2. **Open the setup page**
-   - Visit http://localhost:8000 (or your deployed URL)
-   - You'll be automatically redirected to `/setup`
+2. Open <http://localhost:8000>. Stampbot redirects to `/setup` when credentials are
+   missing and setup mode is enabled.
 
-3. **Create your GitHub App**
-   - Click "Create GitHub App"
-   - GitHub will show the app creation page with pre-configured permissions
-   - Complete the creation process
+3. Click **Create GitHub App** and complete the GitHub manifest flow.
 
-4. **Enter your webhook URL**
-   - GitHub will prompt you to enter the webhook URL during app creation
-   - Use your public URL with `/webhook` path (e.g., `https://your-domain.com/webhook`)
-   - For local development with ngrok, use your ngrok URL
+4. Save the returned credentials as environment variables or deployment secrets:
 
-5. **Save credentials**
-   - After creation, you'll be redirected back to stampbot
-   - Copy the displayed credentials to your `.env` file or Kubernetes secrets
-
-6. **Restart stampbot**
-   ```bash
-   make dev
+   ```env
+   STAMPBOT_APP_ID=123456
+   STAMPBOT_WEBHOOK_SECRET=replace-with-webhook-secret
+   STAMPBOT_PRIVATE_KEY="[PEM private key content with newlines escaped]"
    ```
 
-7. **Install the app**
-   - Follow the link on the completion page to install the app on your repositories
+5. Restart Stampbot and install the GitHub App on the repositories you want to automate.
 
-### Option 2: Manual Setup
+For deployed setup behind a proxy or Cloud Run, set `STAMPBOT_BASE_URL` to the public
+HTTPS origin before opening `/setup`.
 
-If you prefer to create the GitHub App manually:
+### Manual Setup
 
-1. **Navigate to GitHub App Settings**
-   - Go to your organization or user settings
-   - Click "Developer settings" → "GitHub Apps" → "New GitHub App"
+Create a GitHub App under the target user or organization:
 
-2. **Configure Basic Information**
-   - **Name**: `stampbot` (or your preferred name)
-   - **Homepage URL**: Your application URL
-   - **Webhook URL**: `https://your-domain.com/webhook`
-   - **Webhook secret**: Generate a secure random string
+| GitHub App setting | Value |
+| --- | --- |
+| Homepage URL | Public Stampbot base URL. |
+| Webhook URL | Public Stampbot base URL plus `/webhook`. |
+| Webhook secret | Random secret that also becomes `STAMPBOT_WEBHOOK_SECRET`. |
+| Public app | Disabled unless you intentionally operate a public app. |
 
-3. **Set Permissions**
+Repository permissions:
 
-   Repository permissions:
-   - **Pull requests**: Read & write
-   - **Contents**: Read-only (to read stampbot.toml)
-   - **Metadata**: Read-only
+| Permission | Level | Required for |
+| --- | --- | --- |
+| Pull requests | Read and write | Read PR state, create approval reviews, dismiss Stampbot approvals. |
+| Contents | Read-only | Read `stampbot.toml` from target repos and org `.github` fallback. |
+| Metadata | Read-only | Required baseline GitHub App repository metadata. |
+| Issues | Read-only | Receive and inspect PR issue comments for ChatOps. |
+| Members | Read-only | Check `allowed_teams` membership. |
+| Administration | Read-only | Check collaborator permission for ChatOps authorization. |
 
-4. **Subscribe to Events**
-   - Pull request
-   - Pull request review comment
-   - Issue comment
+Subscribe to these events:
 
-5. **Create the App**
-   - Click "Create GitHub App"
-   - Note your **App ID**
-   - Generate and download a **private key**
+- Pull request
+- Issue comment
+- Pull request review comment
 
-6. **Install the App**
-   - Go to "Install App" in the left sidebar
-   - Install on your organization or repositories
+After creating the app, record the App ID, generate a private key, and install the app on
+the target repositories.
 
 ## Local Development
 
-### Prerequisites
+Prerequisites:
 
-- Python 3.11 or higher
-- pip or poetry
+- Python 3.11 or newer.
+- Poetry, or use the checked-in requirements file.
 
-### Steps
+Install dependencies:
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/dannysauer/stampbot.git
-   cd stampbot
-   ```
-
-2. **Install dependencies**
-   ```bash
-   # Using make
-   make install-dev
-
-   # Or using pip directly
-   pip install -r requirements.txt
-   ```
-
-3. **Run stampbot and complete setup**
-   ```bash
-   make dev
-   ```
-
-   Open http://localhost:8000 and follow the setup wizard to create your GitHub App.
-   After setup, save the credentials to your `.env` file and restart.
-
-4. **Set up ngrok for webhook testing** (optional)
-
-   For local development, you'll need a public URL for GitHub webhooks:
-   ```bash
-   ngrok http 8000
-   ```
-
-   During GitHub App setup, enter your ngrok URL with `/webhook` path
-   (e.g., `https://abc123.ngrok.io/webhook`). You can update this later
-   in your GitHub App's settings if the URL changes.
-
-5. **Test the application**
-   ```bash
-   curl http://localhost:8000/health
-   ```
-
-### Manual Configuration (Alternative)
-
-Stampbot uses Dynaconf for configuration. In order of precedence it reads:
-environment variables (`STAMPBOT_*`), `.secrets.toml`, `settings.toml`, and `.env`
-(use `.env` only for local development).
-
-If you already have credentials from the automated setup or manual GitHub App creation,
-set the environment variables (or create a local `.env` file for dev):
-
-Example `.env`:
-```env
-STAMPBOT_APP_ID=123456
-STAMPBOT_PRIVATE_KEY=/path/to/your-private-key.pem
-STAMPBOT_WEBHOOK_SECRET=your-webhook-secret
-STAMPBOT_LOG_LEVEL=DEBUG
+```bash
+git clone https://github.com/dannysauer/stampbot.git
+cd stampbot
+make install-dev
 ```
 
-Run the application:
+Run the service:
+
 ```bash
 make dev
 ```
 
-## Docker Deployment
-
-### Build the Image
+Verify:
 
 ```bash
-# Using make
-make docker-build
-
-# Or using docker directly
-docker build -t stampbot:latest .
+curl http://localhost:8000/health
 ```
 
-### Run the Container
+For GitHub webhook testing from a local machine, expose port `8000` through a public HTTPS
+tunnel and set the GitHub App webhook URL to `https://YOUR-TUNNEL/webhook`.
+
+## Docker
+
+Build:
 
 ```bash
-docker run -d \
+make docker-build
+```
+
+Run with a local `.env` file:
+
+```bash
+docker run --rm \
   --name stampbot \
   -p 8000:8000 \
-  -e STAMPBOT_APP_ID=123456 \
-  -e STAMPBOT_PRIVATE_KEY="$(cat private-key.pem)" \
-  -e STAMPBOT_WEBHOOK_SECRET=your-webhook-secret \
+  --env-file .env \
   stampbot:latest
 ```
 
-### Using Docker Compose
+Required production variables:
 
-Create `docker-compose.yml`:
-
-```yaml
-version: '3.8'
-
-services:
-  stampbot:
-    build: .
-    ports:
-      - "8000:8000"
-    environment:
-      STAMPBOT_APP_ID: ${STAMPBOT_APP_ID}
-      STAMPBOT_PRIVATE_KEY: ${STAMPBOT_PRIVATE_KEY}
-      STAMPBOT_WEBHOOK_SECRET: ${STAMPBOT_WEBHOOK_SECRET}
-      STAMPBOT_LOG_LEVEL: INFO
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+```env
+STAMPBOT_APP_ID=123456
+STAMPBOT_PRIVATE_KEY=/run/secrets/stampbot-private-key.pem
+STAMPBOT_WEBHOOK_SECRET=replace-with-webhook-secret
+STAMPBOT_SETUP_ENABLED=false
 ```
 
-Run with:
-```bash
-docker-compose up -d
-```
+## Kubernetes with Helm
 
-## Kubernetes Deployment
+The chart is documented as an installable package in
+[charts/stampbot/README.md](charts/stampbot/README.md).
 
-### Installing from OCI Registry
-
-The Stampbot Helm chart is published to GitHub Container Registry as an OCI artifact.
+Create credentials:
 
 ```bash
-# Add the OCI registry (one-time setup)
-# Note: OCI registries don't require 'helm repo add', you reference them directly
-
-# Install the latest chart version
-helm install stampbot oci://ghcr.io/dannysauer/charts/stampbot \
+kubectl create namespace stampbot
+kubectl create secret generic stampbot-github \
   --namespace stampbot \
-  --create-namespace \
-  --set github.existingSecret=stampbot-github
-
-# Install a specific version
-helm install stampbot oci://ghcr.io/dannysauer/charts/stampbot \
-  --version 1.0.0 \
-  --namespace stampbot \
-  --create-namespace \
-  --set github.existingSecret=stampbot-github
-
-# Upgrade to latest
-helm upgrade stampbot oci://ghcr.io/dannysauer/charts/stampbot \
-  --namespace stampbot \
-  --reuse-values
-
-# Pull chart locally for inspection
-helm pull oci://ghcr.io/dannysauer/charts/stampbot --untar
+  --from-literal=STAMPBOT_APP_ID=123456 \
+  --from-file=STAMPBOT_PRIVATE_KEY=./private-key.pem \
+  --from-literal=STAMPBOT_WEBHOOK_SECRET=replace-with-webhook-secret
 ```
 
-### Basic Helm Installation
+Install from the OCI registry:
 
-1. **Create a namespace**
-   ```bash
-   kubectl create namespace stampbot
-   ```
+```bash
+helm install stampbot oci://ghcr.io/dannysauer/charts/stampbot \
+  --namespace stampbot \
+  --set github.existingSecret=stampbot-github
+```
 
-2. **Create secrets**
-   ```bash
-   kubectl create secret generic stampbot-github \
-     --from-literal=STAMPBOT_APP_ID=123456 \
-     --from-file=STAMPBOT_PRIVATE_KEY=./private-key.pem \
-     --from-literal=STAMPBOT_WEBHOOK_SECRET=your-webhook-secret \
-     -n stampbot
-   ```
-
-3. **Install with Helm**
-   ```bash
-   # From OCI registry (recommended)
-   helm install stampbot oci://ghcr.io/dannysauer/charts/stampbot \
-     --namespace stampbot \
-     --set github.existingSecret=stampbot-github
-
-   # Or from local chart (for development)
-   helm install stampbot charts/stampbot \
-     --namespace stampbot \
-     --set github.existingSecret=stampbot-github
-   ```
-
-4. **Verify deployment**
-   ```bash
-   kubectl get pods -n stampbot
-   kubectl logs -f deployment/stampbot -n stampbot
-   ```
-
-### EKS with AWS Secrets Manager
-
-This setup uses IRSA (IAM Roles for Service Accounts) and External Secrets Operator.
-
-#### Prerequisites
-
-- External Secrets Operator installed in your cluster
-- AWS Secrets Manager secret created
-
-#### Steps
-
-1. **Create AWS Secrets Manager secret**
-   ```bash
-   aws secretsmanager create-secret \
-     --name stampbot/github-credentials \
-     --secret-string '{
-       "app_id": "123456",
-       "private_key": "-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----",
-       "webhook_secret": "your-webhook-secret"
-     }' \
-     --region us-east-1
-   ```
-
-2. **Create IAM policy**
-   ```json
-   {
-     "Version": "2012-10-17",
-     "Statement": [
-       {
-         "Effect": "Allow",
-         "Action": [
-           "secretsmanager:GetSecretValue",
-           "secretsmanager:DescribeSecret"
-         ],
-         "Resource": "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:stampbot/github-credentials*"
-       }
-     ]
-   }
-   ```
-
-3. **Create IAM role with IRSA**
-   ```bash
-   eksctl create iamserviceaccount \
-     --name stampbot \
-     --namespace stampbot \
-     --cluster your-cluster-name \
-     --attach-policy-arn arn:aws:iam::ACCOUNT_ID:policy/stampbot-secrets-policy \
-     --approve
-   ```
-
-4. **Install External Secrets Operator** (if not already installed)
-   ```bash
-   helm repo add external-secrets https://charts.external-secrets.io
-   helm install external-secrets \
-     external-secrets/external-secrets \
-     -n external-secrets-system \
-     --create-namespace
-   ```
-
-5. **Create SecretStore**
-   ```yaml
-   apiVersion: external-secrets.io/v1beta1
-   kind: SecretStore
-   metadata:
-     name: aws-secrets-manager
-     namespace: stampbot
-   spec:
-     provider:
-       aws:
-         service: SecretsManager
-         region: us-east-1
-         auth:
-           jwt:
-             serviceAccountRef:
-               name: stampbot
-   ```
-
-6. **Install Stampbot with External Secrets**
-   ```bash
-   helm install stampbot charts/stampbot \
-     --namespace stampbot \
-     --set externalSecrets.enabled=true \
-     --set externalSecrets.secretStore.name=aws-secrets-manager \
-     --set awsSecretsManager.enabled=true \
-     --set awsSecretsManager.secretName=stampbot/github-credentials \
-     --set awsSecretsManager.region=us-east-1 \
-     --set image.repository=ghcr.io/dannysauer/stampbot \
-     --set image.tag=latest
-   ```
-
-### With External Secrets Operator
-
-If you're not using AWS but have External Secrets Operator:
+Install from a local checkout:
 
 ```bash
 helm install stampbot charts/stampbot \
   --namespace stampbot \
-  --set externalSecrets.enabled=true \
-  --set externalSecrets.secretStore.name=your-secret-store \
-  --set externalSecrets.secretStore.kind=SecretStore \
-  --set image.repository=ghcr.io/dannysauer/stampbot \
-  --set image.tag=latest
+  --set github.existingSecret=stampbot-github
 ```
 
-### With VPA and Custom Metrics HPA
-
-#### Prerequisites
-
-- Vertical Pod Autoscaler installed
-- Prometheus Adapter or custom metrics API server
-
-#### Install VPA
+Verify:
 
 ```bash
-git clone https://github.com/kubernetes/autoscaler.git
-cd autoscaler/vertical-pod-autoscaler
-./hack/vpa-up.sh
+kubectl rollout status deployment/stampbot --namespace stampbot
+kubectl logs deployment/stampbot --namespace stampbot --tail=100
+kubectl port-forward svc/stampbot 8000:80 --namespace stampbot
+curl http://127.0.0.1:8000/health
 ```
 
-#### Install Prometheus Adapter
-
-```bash
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm install prometheus-adapter prometheus-community/prometheus-adapter \
-  -n monitoring \
-  --create-namespace
-```
-
-#### Deploy Stampbot with VPA and Custom Metrics
-
-Create `values-production.yaml`:
+For production ingress:
 
 ```yaml
-replicaCount: 3
+github:
+  existingSecret: stampbot-github
 
+setup:
+  enabled: false
+  baseUrl: https://stampbot.example.com
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: stampbot.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: stampbot-tls
+      hosts:
+        - stampbot.example.com
+```
+
+## EKS with External Secrets and IRSA
+
+Prerequisites:
+
+- External Secrets Operator installed.
+- AWS Secrets Manager secret with GitHub App credential properties.
+- IAM policy allowing `secretsmanager:GetSecretValue` and
+  `secretsmanager:DescribeSecret` for that secret.
+
+Example AWS secret value:
+
+```json
+{
+  "app_id": "123456",
+  "private_key": "[PEM private key content]",
+  "webhook_secret": ""
+}
+```
+
+Create a SecretStore that uses the Stampbot service account:
+
+```yaml
+apiVersion: external-secrets.io/v1beta1
+kind: SecretStore
+metadata:
+  name: aws-secrets-manager
+  namespace: stampbot
+spec:
+  provider:
+    aws:
+      service: SecretsManager
+      region: us-east-1
+      auth:
+        jwt:
+          serviceAccountRef:
+            name: stampbot
+```
+
+Use one service account ownership model.
+
+### Pre-created Service Account
+
+Create the service account with `eksctl`, then tell Helm to use it:
+
+```bash
+eksctl create iamserviceaccount \
+  --cluster example-cluster \
+  --namespace stampbot \
+  --name stampbot \
+  --attach-policy-arn arn:aws:iam::123456789012:policy/stampbot-secrets-policy \
+  --approve
+
+helm upgrade --install stampbot charts/stampbot \
+  --namespace stampbot \
+  --set serviceAccount.create=false \
+  --set serviceAccount.name=stampbot \
+  --set externalSecrets.enabled=true \
+  --set externalSecrets.secretStore.name=aws-secrets-manager
+```
+
+### Helm-created Service Account
+
+Let Helm create the service account and provide the role ARN:
+
+```bash
+helm upgrade --install stampbot charts/stampbot \
+  --namespace stampbot \
+  --set awsSecretsManager.enabled=true \
+  --set awsSecretsManager.roleArn=arn:aws:iam::123456789012:role/stampbot-secrets \
+  --set externalSecrets.enabled=true \
+  --set externalSecrets.secretStore.name=aws-secrets-manager
+```
+
+When `awsSecretsManager.enabled=true`, `awsSecretsManager.roleArn` is required. Rendering
+fails if the ARN is empty.
+
+Verify External Secrets:
+
+```bash
+kubectl get serviceaccount stampbot --namespace stampbot -o yaml
+kubectl get externalsecret --namespace stampbot
+kubectl get secret stampbot-external --namespace stampbot
+kubectl rollout status deployment/stampbot --namespace stampbot
+```
+
+## Optional Autoscaling and Monitoring
+
+Enable ServiceMonitor only when the Prometheus Operator CRDs are installed:
+
+```yaml
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+```
+
+Enable VPA only when the Vertical Pod Autoscaler CRDs are installed:
+
+```yaml
+vpa:
+  enabled: true
+  updateMode: Auto
+```
+
+Enable custom HPA metrics only when the custom metrics API is available:
+
+```yaml
 autoscaling:
   enabled: true
-  minReplicas: 3
-  maxReplicas: 20
-  targetCPUUtilizationPercentage: 70
   customMetrics:
     enabled: true
     metrics:
@@ -427,155 +310,18 @@ autoscaling:
           target:
             type: AverageValue
             averageValue: "100"
-
-vpa:
-  enabled: true
-  updateMode: "Auto"
-  minAllowed:
-    cpu: 100m
-    memory: 128Mi
-  maxAllowed:
-    cpu: 2000m
-    memory: 2Gi
-
-resources:
-  requests:
-    cpu: 200m
-    memory: 256Mi
-  limits:
-    cpu: 1000m
-    memory: 1Gi
-
-podDisruptionBudget:
-  enabled: true
-  minAvailable: 2
-
-metrics:
-  enabled: true
-  serviceMonitor:
-    enabled: true
 ```
 
-Install:
+## Troubleshooting and Rollback
+
+Use [docs/operations.md](docs/operations.md) for webhook delivery triage, GitHub App
+permission problems, invalid repository config, metrics, rate limits, and rollback steps.
+
+Common verification commands:
 
 ```bash
-helm install stampbot charts/stampbot \
-  --namespace stampbot \
-  --values values-production.yaml \
-  --set github.existingSecret=stampbot-github
+curl http://localhost:8000/health
+curl http://localhost:8000/setup/status
+helm lint charts/stampbot
+helm template stampbot charts/stampbot --set github.existingSecret=stampbot-github
 ```
-
-## Configuration
-
-### Ingress Setup
-
-For production, configure an Ingress:
-
-```yaml
-ingress:
-  enabled: true
-  className: nginx
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
-  hosts:
-    - host: stampbot.yourdomain.com
-      paths:
-        - path: /
-          pathType: Prefix
-  tls:
-    - secretName: stampbot-tls
-      hosts:
-        - stampbot.yourdomain.com
-```
-
-### OpenTelemetry
-
-Enable distributed tracing:
-
-```yaml
-config:
-  otelEnabled: true
-  otelEndpoint: "http://otel-collector:4317"
-```
-
-### Network Policies
-
-Enable network policies for security:
-
-```yaml
-networkPolicy:
-  enabled: true
-  ingress:
-    - from:
-      - namespaceSelector:
-          matchLabels:
-            name: ingress-nginx
-  egress:
-    - to:
-      - namespaceSelector: {}
-    - ports:
-      - protocol: TCP
-        port: 443
-```
-
-## Verification
-
-1. **Check pod status**
-   ```bash
-   kubectl get pods -n stampbot
-   ```
-
-2. **Check logs**
-   ```bash
-   kubectl logs -f deployment/stampbot -n stampbot
-   ```
-
-3. **Test health endpoint**
-   ```bash
-   kubectl port-forward svc/stampbot 8000:80 -n stampbot
-   curl http://localhost:8000/health
-   ```
-
-4. **Check metrics**
-   ```bash
-   kubectl port-forward svc/stampbot 8000:80 -n stampbot
-   curl http://localhost:8000/metrics
-   ```
-
-## Troubleshooting
-
-### Pod not starting
-
-Check events:
-```bash
-kubectl describe pod -n stampbot
-```
-
-### Authentication errors
-
-Verify secrets:
-```bash
-kubectl get secret stampbot-github -n stampbot -o yaml
-```
-
-### Webhook not receiving events
-
-1. Check GitHub App webhook settings
-2. Verify ingress is working
-3. Check webhook secret matches
-
-### High memory usage
-
-Enable VPA:
-```bash
-helm upgrade stampbot charts/stampbot \
-  --set vpa.enabled=true \
-  --reuse-values
-```
-
-## Next Steps
-
-- Configure `stampbot.toml` in your repositories
-- Set up monitoring and alerting
-- Review logs and metrics
-- Test approval workflows

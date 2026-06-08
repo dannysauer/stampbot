@@ -38,9 +38,13 @@ This document records the security properties Stampbot is expected to preserve.
 - Python dependencies and generated lock/requirements files must remain pinned.
 - Container images must be built from pinned base images and scanned before release.
 - Releases should include SBOM, VEX, Sigstore signatures, and SLSA provenance artifacts.
+  Verification commands are documented in [release-verification.md](release-verification.md).
 
 ## Observability
 
 - Security-relevant failures should be logged with structured context, without leaking
   secrets.
 - Metrics should use bounded-cardinality labels.
+
+Operational escalation data and webhook troubleshooting are documented in
+[operations.md](operations.md).

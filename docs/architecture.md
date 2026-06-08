@@ -30,6 +30,9 @@ The webhook handler supports:
 - `stampbot/telemetry.py`: OpenTelemetry setup
 - `charts/stampbot/`: Kubernetes deployment chart
 
+See [reference.md](reference.md) for public HTTP routes and
+[configuration.md](configuration.md) for settings, permissions, and repository policy.
+
 ## Configuration Model
 
 Application configuration comes from environment variables and local configuration files.
@@ -58,3 +61,5 @@ policy.
 Stampbot can create pull request approval reviews, dismiss its own reviews, post ChatOps
 help comments, expose health responses, expose Prometheus metrics, and emit structured
 logs/traces. Stampbot does not merge pull requests.
+
+Operational triage for these outputs is in [operations.md](operations.md).

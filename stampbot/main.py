@@ -425,6 +425,9 @@ async def setup_page(request: Request) -> Response:
                 <li>Pull requests: Read &amp; write</li>
                 <li>Contents: Read-only</li>
                 <li>Metadata: Read-only</li>
+                <li>Issues: Read-only</li>
+                <li>Members: Read-only</li>
+                <li>Administration: Read-only</li>
             </ul>
             <strong>Events:</strong>
             <ul>

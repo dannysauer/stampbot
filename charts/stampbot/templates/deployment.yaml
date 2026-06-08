@@ -37,7 +37,7 @@ spec:
       - name: {{ .Chart.Name }}
         securityContext:
           {{- toYaml .Values.securityContext | nindent 12 }}
-        image: "{{ .Values.image.repository }}:{{ include "stampbot.imageTag" . }}"
+        image: "{{ include "stampbot.image" . }}"
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         ports:
         - name: http

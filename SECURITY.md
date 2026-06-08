@@ -22,3 +22,4 @@ and SLSA provenance for new release artifacts.
 
 Security requirements are documented in [docs/security-requirements.md](docs/security-requirements.md).
 Release verification is documented in [docs/release-verification.md](docs/release-verification.md).
+Operational troubleshooting is documented in [docs/operations.md](docs/operations.md).
