@@ -2,9 +2,25 @@
 name = "stampbot"
 version = "0.1.0"
 description = "A GitHub app that auto-approves PRs based on labels and chatops commands"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["Danny Sauer <dannysauer@users.noreply.github.com>"]
 readme = "README.md"
-license = "MIT"
+license = "Apache-2.0"
+homepage = "https://github.com/dannysauer/stampbot"
+repository = "https://github.com/dannysauer/stampbot"
+documentation = "https://github.com/dannysauer/stampbot/tree/main/docs"
+keywords = ["github-app", "pull-requests", "automation", "chatops"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Version Control :: Git",
+]
 
 [tool.poetry.dependencies]
 python = ">=3.11"

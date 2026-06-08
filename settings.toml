@@ -39,7 +39,12 @@ setup_enabled = true
 [defaults]
 approval_labels = ["autoapprove", "stamp"]
 auto_approve_on_label = true
+reapprove = false
 chatops_enabled = true
 chatops_required_permission = "maintain"
 approve_commands = ["approve", "stamp"]
 unapprove_commands = ["unapprove", "unstamp"]
+required_labels = []
+required_title_patterns = []
+allowed_users = []
+allowed_teams = []

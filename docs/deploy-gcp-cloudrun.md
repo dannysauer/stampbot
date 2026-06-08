@@ -1,185 +1,268 @@
-# Deploying StampBot to Google Cloud Run
+# Deploy Stampbot to Google Cloud Run
 
-This guide covers deploying StampBot to Google Cloud Run using the automated GitHub Actions workflow.
+This guide deploys Stampbot to Cloud Run with the repository's
+`Deploy to Cloud Run` GitHub Actions workflow.
+
+The workflow deploys `docker.io/stampbot/stampbot:<tag>` and keeps the Cloud Run
+service's existing environment variable and Secret Manager configuration. Configure
+Stampbot credentials on the Cloud Run service before sending production webhooks.
 
 ## Prerequisites
 
-- A Google Cloud account with billing enabled (free trial works)
-- The `gcloud` CLI installed and authenticated
-- A Docker Hub account (free tier works)
-- Repository admin access to configure secrets and variables
+- Google Cloud project with billing enabled.
+- `gcloud` CLI authenticated with permission to manage Cloud Run, IAM, Workload Identity
+  Federation, and Secret Manager.
+- Repository admin access for GitHub Actions secrets and variables.
+- A Docker Hub token stored as GitHub Actions secret `DOCKERHUB_TOKEN` for the release
+  workflow.
+- GitHub App credentials from the setup wizard or manual app creation.
 
-## Docker Hub Setup
-
-Cloud Run pulls images from Docker Hub. The release workflow pushes to `stampbot/stampbot`.
-
-1. Create a Docker Hub account at https://hub.docker.com
-2. Create an Access Token: Account Settings > Security > New Access Token
-3. Add the token as a GitHub repository secret named `DOCKERHUB_TOKEN`
-
-## GCP Setup
-
-### 1. Create a Project (if needed)
+Use placeholders consistently:
 
 ```bash
-gcloud projects create YOUR_PROJECT_ID --name="StampBot"
-gcloud config set project YOUR_PROJECT_ID
+PROJECT_ID=example-project
+PROJECT_NUMBER=123456789012
+REGION=us-central1
+SERVICE_NAME=stampbot
+REPOSITORY=dannysauer/stampbot
 ```
 
-### 2. Enable Required APIs
+## Enable APIs
 
 ```bash
-gcloud services enable run.googleapis.com iamcredentials.googleapis.com
+gcloud config set project "${PROJECT_ID}"
+gcloud services enable \
+  run.googleapis.com \
+  iamcredentials.googleapis.com \
+  secretmanager.googleapis.com
 ```
 
-### 3. Create a Service Account
+## Create a Deploy Service Account
 
 ```bash
 gcloud iam service-accounts create github-actions-deployer \
   --display-name="GitHub Actions Cloud Run Deployer"
 
-# Grant Cloud Run Admin
-gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
-  --member="serviceAccount:github-actions-deployer@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+  --member="serviceAccount:github-actions-deployer@${PROJECT_ID}.iam.gserviceaccount.com" \
   --role="roles/run.admin"
 
-# Grant Service Account User (to act as the runtime service account)
-gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
-  --member="serviceAccount:github-actions-deployer@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+  --member="serviceAccount:github-actions-deployer@${PROJECT_ID}.iam.gserviceaccount.com" \
   --role="roles/iam.serviceAccountUser"
 ```
 
-### 4. Set Up Workload Identity Federation
-
-This allows GitHub Actions to authenticate to GCP without storing long-lived credentials.
+## Configure Workload Identity Federation
 
 ```bash
-# Create Workload Identity Pool
 gcloud iam workload-identity-pools create github-pool \
-  --location="global" \
+  --location=global \
   --display-name="GitHub Actions Pool"
 
-# Create OIDC Provider (replace OWNER/REPO with your GitHub repository)
 gcloud iam workload-identity-pools providers create-oidc github-provider \
-  --location="global" \
-  --workload-identity-pool="github-pool" \
+  --location=global \
+  --workload-identity-pool=github-pool \
   --display-name="GitHub Provider" \
   --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
-  --attribute-condition="assertion.repository == 'OWNER/REPO'" \
+  --attribute-condition="assertion.repository == '${REPOSITORY}'" \
   --issuer-uri="https://token.actions.githubusercontent.com"
 
-# Get your project number
-PROJECT_NUMBER=$(gcloud projects describe YOUR_PROJECT_ID --format='value(projectNumber)')
+PROJECT_NUMBER="$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')"
 
-# Allow GitHub repo to impersonate service account
 gcloud iam service-accounts add-iam-policy-binding \
-  github-actions-deployer@YOUR_PROJECT_ID.iam.gserviceaccount.com \
-  --role="roles/iam.workloadIdentityUser" \
-  --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github-pool/attribute.repository/OWNER/REPO"
+  "github-actions-deployer@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --role=roles/iam.workloadIdentityUser \
+  --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github-pool/attribute.repository/${REPOSITORY}"
 ```
 
-### 5. Configure GitHub Repository Variables
+## Configure GitHub Actions Variables
 
-Go to your repository's Settings > Secrets and variables > Actions > Variables tab.
+In the GitHub repository, open **Settings > Secrets and variables > Actions > Variables**
+and set:
 
-| Variable | Required | Description |
-|----------|----------|-------------|
+| Variable | Required | Value |
+| --- | --- | --- |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | Yes | `projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github-pool/providers/github-provider` |
-| `GCP_SERVICE_ACCOUNT` | Yes | `github-actions-deployer@YOUR_PROJECT_ID.iam.gserviceaccount.com` |
-| `CLOUDRUN_REGION` | No | GCP region (default: `us-central1`) |
-| `CLOUDRUN_SERVICE_NAME` | No | Service name (default: `stampbot`) |
+| `GCP_SERVICE_ACCOUNT` | Yes | `github-actions-deployer@PROJECT_ID.iam.gserviceaccount.com` |
+| `CLOUDRUN_REGION` | No | Cloud Run region, default `us-central1`. |
+| `CLOUDRUN_SERVICE_NAME` | No | Cloud Run service name, default `stampbot`. |
 
-## Deploying
+## Create Runtime Secrets
 
-The workflow automatically deploys when a new release is published. You can also trigger a manual deployment:
-
-1. Go to Actions > "Deploy to Cloud Run"
-2. Click "Run workflow"
-3. Optionally specify an image tag (defaults to latest release)
-
-## Configuring StampBot
-
-After the first deployment, configure StampBot's environment variables in Cloud Run:
+Store GitHub App credentials in Secret Manager:
 
 ```bash
-gcloud run services update stampbot \
-  --region=us-central1 \
-  --set-env-vars="GITHUB_APP_ID=12345" \
-  --set-env-vars="GITHUB_WEBHOOK_SECRET=..." \
-  --set-env-vars="GITHUB_PRIVATE_KEY=..."  # pragma: allowlist secret
+printf '%s' '123456' | gcloud secrets create stampbot-app-id --data-file=-
+gcloud secrets create stampbot-private-key --data-file=./private-key.pem
+printf '%s' 'replace-with-webhook-secret' | \
+  gcloud secrets create stampbot-webhook-secret --data-file=-
 ```
 
-Or use the [Cloud Console](https://console.cloud.google.com/run) to configure environment variables and secrets.
-
-**Note:** The deployment workflow configures Cloud Run to use port 8000 (StampBot's default) and allows unauthenticated access (required for GitHub webhooks).
-
-## Custom Domain (Optional)
-
-Cloud Run supports custom domain mapping with free managed SSL certificates.
-
-### 1. Verify Domain Ownership
+Grant the Cloud Run runtime service account access to the secrets. If you use the default
+runtime service account, get it first:
 
 ```bash
-# Add your domain to Cloud Run
-gcloud run domain-mappings create \
-  --service=stampbot \
-  --domain=stampbot.example.com \
-  --region=us-central1
+RUNTIME_SERVICE_ACCOUNT="$(
+  gcloud run services describe "${SERVICE_NAME}" \
+    --region "${REGION}" \
+    --format='value(spec.template.spec.serviceAccountName)' 2>/dev/null || true
+)"
+
+if [ -z "${RUNTIME_SERVICE_ACCOUNT}" ]; then
+  RUNTIME_SERVICE_ACCOUNT="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+fi
+
+for SECRET in stampbot-app-id stampbot-private-key stampbot-webhook-secret; do
+  gcloud secrets add-iam-policy-binding "${SECRET}" \
+    --member="serviceAccount:${RUNTIME_SERVICE_ACCOUNT}" \
+    --role=roles/secretmanager.secretAccessor
+done
 ```
 
-### 2. Configure DNS
+## First Deployment
 
-Add the DNS records shown in the output. Typically:
-- For apex domains: A records pointing to Google's IPs
-- For subdomains: CNAME record pointing to `ghs.googlehosted.com`
+Run the GitHub Actions `Deploy to Cloud Run` workflow manually and provide an image tag,
+or publish an app release. The workflow uses these deployment flags:
 
-Example for a subdomain:
-```
-stampbot.example.com.  CNAME  ghs.googlehosted.com.
-```
+- `--port=8000`
+- `--allow-unauthenticated`
 
-### 3. Wait for SSL Provisioning
+Unauthenticated ingress is required for GitHub webhooks. Disable the setup endpoint after
+the one-time setup flow because unauthenticated users can otherwise reach `/setup`.
 
-SSL certificate provisioning can take up to 24 hours (usually faster). Check status:
+## Configure Stampbot Environment
+
+After the service exists, attach secrets and source-backed `STAMPBOT_*` settings:
 
 ```bash
-gcloud run domain-mappings describe \
-  --domain=stampbot.example.com \
-  --region=us-central1
+SERVICE_URL="$(
+  gcloud run services describe "${SERVICE_NAME}" \
+    --region "${REGION}" \
+    --format='value(status.url)'
+)"
+SECRET_MOUNTS="STAMPBOT_APP_ID=stampbot-app-id:latest,STAMPBOT_PRIVATE_KEY=stampbot-private-key:latest,STAMPBOT_WEBHOOK_SECRET=stampbot-webhook-secret:latest" # pragma: allowlist secret
+
+gcloud run services update "${SERVICE_NAME}" \
+  --region "${REGION}" \
+  --update-secrets="${SECRET_MOUNTS}" \
+  --update-env-vars="STAMPBOT_SETUP_ENABLED=false,STAMPBOT_BASE_URL=${SERVICE_URL},STAMPBOT_LOG_FORMAT=json"
 ```
 
-Once provisioned, update your GitHub App's webhook URL to use your custom domain.
+Set the GitHub App webhook URL to:
 
-## Cost Management
+```text
+SERVICE_URL/webhook
+```
 
-Cloud Run has a generous free tier:
-- 2 million requests/month
-- 360,000 GB-seconds of memory
-- 180,000 vCPU-seconds
+For a custom domain, set `STAMPBOT_BASE_URL` to the custom HTTPS origin instead of the
+`run.app` URL.
 
-StampBot only runs when GitHub sends webhooks, so usage is minimal. To limit scaling:
+## One-Time Setup Flow
+
+If you do not already have GitHub App credentials, temporarily enable setup:
 
 ```bash
-gcloud run services update stampbot --max-instances=1 --region=us-central1
+SERVICE_URL="$(
+  gcloud run services describe "${SERVICE_NAME}" \
+    --region "${REGION}" \
+    --format='value(status.url)'
+)"
+
+gcloud run services update "${SERVICE_NAME}" \
+  --region "${REGION}" \
+  --update-env-vars="STAMPBOT_SETUP_ENABLED=true,STAMPBOT_BASE_URL=${SERVICE_URL}"
 ```
+
+Open `SERVICE_URL/setup`, create the GitHub App, store the returned credentials in Secret
+Manager, then disable setup:
+
+```bash
+gcloud run services update "${SERVICE_NAME}" \
+  --region "${REGION}" \
+  --update-env-vars="STAMPBOT_SETUP_ENABLED=false,STAMPBOT_BASE_URL=${SERVICE_URL}"
+```
+
+## Verification
+
+```bash
+SERVICE_URL="$(
+  gcloud run services describe "${SERVICE_NAME}" \
+    --region "${REGION}" \
+    --format='value(status.url)'
+)"
+
+curl -fsS "${SERVICE_URL}/health"
+curl -fsS "${SERVICE_URL}/setup/status"
+```
+
+Expected production setup status:
+
+```json
+{
+  "configured": true,
+  "setup_enabled": false,
+  "app_id": "123456"
+}
+```
+
+Check logs:
+
+```bash
+gcloud run services logs read "${SERVICE_NAME}" \
+  --region "${REGION}" \
+  --limit=50
+```
+
+In the GitHub App settings, send a `ping` redelivery. Expected response:
+
+```json
+{
+  "status": "ok",
+  "message": "pong"
+}
+```
+
+## Rollback
+
+List revisions:
+
+```bash
+gcloud run revisions list \
+  --service "${SERVICE_NAME}" \
+  --region "${REGION}"
+```
+
+Route all traffic to a previous revision:
+
+```bash
+gcloud run services update-traffic "${SERVICE_NAME}" \
+  --region "${REGION}" \
+  --to-revisions "REVISION_NAME=100"
+```
+
+Rollback changes only the Cloud Run revision. It does not revert GitHub App webhook URLs,
+GitHub App permissions, or Secret Manager secret versions. Restore those separately if
+they changed.
+
+## Troubleshooting
+
+| Symptom | Check | Remediation |
+| --- | --- | --- |
+| `/webhook` returns `503` | `/setup/status` has `configured: false`. | Attach `STAMPBOT_APP_ID`, `STAMPBOT_PRIVATE_KEY`, and `STAMPBOT_WEBHOOK_SECRET` secrets. |
+| GitHub delivery returns `401` | Webhook secret mismatch. | Update Secret Manager and GitHub App webhook secret to the same value, then redeploy or refresh the revision. |
+| Setup creates wrong callback or webhook URL | `STAMPBOT_BASE_URL` missing or points to an internal host. | Set `STAMPBOT_BASE_URL` to the public HTTPS origin. |
+| Deployment workflow succeeds but config does not change | Workflow preserves existing Cloud Run service config. | Run `gcloud run services update` to change env vars or secrets. |
+| GitHub cannot reach Cloud Run | Service not unauthenticated or webhook URL wrong. | Confirm `--allow-unauthenticated` and set webhook URL to `https://.../webhook`. |
+
+More troubleshooting steps are in [operations.md](operations.md).
 
 ## Cleanup
 
-To completely remove StampBot from Cloud Run:
-
 ```bash
-gcloud run services delete stampbot --region=us-central1
-```
-
-To remove all GCP resources created for this deployment:
-
-```bash
-# Delete the Cloud Run service
-gcloud run services delete stampbot --region=us-central1
-
-# Delete the service account
-gcloud iam service-accounts delete github-actions-deployer@YOUR_PROJECT_ID.iam.gserviceaccount.com
-
-# Delete the Workload Identity Pool (this also deletes the provider)
+gcloud run services delete "${SERVICE_NAME}" --region "${REGION}"
+gcloud iam service-accounts delete "github-actions-deployer@${PROJECT_ID}.iam.gserviceaccount.com"
 gcloud iam workload-identity-pools delete github-pool --location=global
+gcloud secrets delete stampbot-app-id
+gcloud secrets delete stampbot-private-key
+gcloud secrets delete stampbot-webhook-secret
 ```

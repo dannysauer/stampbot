@@ -52,6 +52,16 @@ tests:
           path: spec.template.spec.containers[0].image
           value: "ghcr.io/dannysauer/stampbot:v1.2.3"
 
+  - it: should prefer image digest when specified
+    template: deployment.yaml
+    set:
+      image.tag: "v1.2.3"
+      image.digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "ghcr.io/dannysauer/stampbot@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
   - it: should set security context
     template: deployment.yaml
     asserts:

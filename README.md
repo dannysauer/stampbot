@@ -30,7 +30,7 @@ dismisses Stampbot's own pull request approval review.
 - **Configurable**: Per-repository configuration via `stampbot.toml`
 - **Fully Instrumented**: OpenTelemetry support for distributed tracing
 - **Prometheus Metrics**: Comprehensive metrics for monitoring
-- **Production Ready**:
+- **Deployment options**:
   - Kubernetes deployment with Helm chart
   - Horizontal Pod Autoscaler (HPA) with custom metrics support
   - Vertical Pod Autoscaler (VPA) support
@@ -57,8 +57,8 @@ Stampbot includes a built-in setup wizard that creates your GitHub App automatic
 
 3. **Create your GitHub App**
    Click "Create GitHub App" and follow the prompts on GitHub.
-   GitHub will ask for your webhook URL - enter your public URL with `/webhook` path
-   (e.g., `https://your-domain.com/webhook` or your ngrok URL for local development)
+   Stampbot includes the detected webhook URL in the manifest. If you are running behind
+   a tunnel or proxy, set `STAMPBOT_BASE_URL` to the public origin before opening setup.
 
 4. **Save your credentials**
    Copy the displayed credentials to your `.env` file
@@ -71,7 +71,8 @@ Stampbot includes a built-in setup wizard that creates your GitHub App automatic
 6. **Install the app**
    Install your new GitHub App on the repositories you want to use
 
-For manual setup or production deployment, see [INSTALLATION.md](INSTALLATION.md).
+For manual setup, production deployment, and the full permission table, see
+[INSTALLATION.md](INSTALLATION.md).
 
 ## Project Information
 
@@ -85,9 +86,15 @@ For manual setup or production deployment, see [INSTALLATION.md](INSTALLATION.md
   requirements, coding standards, commit format, and pull request expectations.
 - **Governance and roadmap**: See [GOVERNANCE.md](GOVERNANCE.md) for project roles and
   decision making, and [ROADMAP.md](ROADMAP.md) for current direction.
+- **Documentation index**: See [docs/README.md](docs/README.md) for the GitHub-native
+  documentation map.
+- **Configuration reference**: See [docs/configuration.md](docs/configuration.md) for
+  app settings, `stampbot.toml`, GitHub App permissions, events, defaults, and failure
+  behavior.
 - **External interface reference**: See [docs/reference.md](docs/reference.md) for HTTP
-  endpoints, webhook inputs, repository configuration, ChatOps commands, GitHub outputs,
-  and metrics.
+  endpoints, webhook inputs, ChatOps commands, GitHub outputs, and metrics.
+- **Operations runbook**: See [docs/operations.md](docs/operations.md) for webhook
+  triage, permission failures, metrics, rollback, and escalation data.
 - **Architecture and security requirements**: See [docs/architecture.md](docs/architecture.md)
   and [docs/security-requirements.md](docs/security-requirements.md).
 - **Release verification**: See [docs/release-verification.md](docs/release-verification.md)
@@ -138,13 +145,20 @@ docker run -p 8000:8000 --env-file .env stampbot:latest
 Deploy with Helm:
 
 ```bash
+kubectl create namespace stampbot
+kubectl create secret generic stampbot-github \
+  --namespace stampbot \
+  --from-literal=STAMPBOT_APP_ID=YOUR_APP_ID \
+  --from-file=STAMPBOT_PRIVATE_KEY=./private-key.pem \
+  --from-literal=STAMPBOT_WEBHOOK_SECRET=YOUR_WEBHOOK_SECRET
+
 helm install stampbot charts/stampbot \
-  --set github.appId=YOUR_APP_ID \
-  --set github.privateKey="$(cat private-key.pem)" \
-  --set github.webhookSecret=YOUR_WEBHOOK_SECRET
+  --namespace stampbot \
+  --set github.existingSecret=stampbot-github
 ```
 
-For detailed installation instructions, see [INSTALLATION.md](INSTALLATION.md).
+For detailed installation instructions and chart values, see [INSTALLATION.md](INSTALLATION.md) and
+[charts/stampbot/README.md](charts/stampbot/README.md).
 
 ## Configuration
 
@@ -209,9 +223,15 @@ Configure the app via environment variables:
 | `STAMPBOT_PRIVATE_KEY` | GitHub App private key or path | - (use /setup) |
 | `STAMPBOT_WEBHOOK_SECRET` | Webhook secret | - (use /setup) |
 | `STAMPBOT_SETUP_ENABLED` | Enable /setup endpoint | `true` |
+| `STAMPBOT_BASE_URL` | Public base URL for setup callback and webhook URL generation | auto-detected |
+| `STAMPBOT_HOST` | Host used by `python -m stampbot` | `0.0.0.0` |
+| `STAMPBOT_PORT` | Port used by `python -m stampbot` | `8000` |
 | `STAMPBOT_LOG_LEVEL` | Logging level | `INFO` |
+| `STAMPBOT_LOG_FORMAT` | `json`, `console`, or `auto` | `auto` |
+| `STAMPBOT_CLIENT_IP_HEADER` | Header used for logged client IP | `X-Forwarded-For` |
 | `STAMPBOT_OTEL_ENABLED` | Enable OpenTelemetry | `false` |
 | `STAMPBOT_OTEL_ENDPOINT` | OTLP endpoint | - |
+| `STAMPBOT_OTEL_SERVICE_NAME` | OpenTelemetry service name | `stampbot` |
 
 Stampbot uses Dynaconf for configuration. In order of precedence it reads:
 environment variables (`STAMPBOT_*`), `.secrets.toml`, `settings.toml`, and `.env`
@@ -219,6 +239,10 @@ environment variables (`STAMPBOT_*`), `.secrets.toml`, `settings.toml`, and `.en
 
 **Note:** If GitHub App credentials are not configured, stampbot runs in setup mode
 and redirects to `/setup` where you can create your GitHub App automatically.
+Disable `STAMPBOT_SETUP_ENABLED` after production setup.
+
+See [docs/configuration.md](docs/configuration.md) for every app setting, repository
+configuration key, validation rule, permission, event subscription, and failure mode.
 
 ## Usage
 

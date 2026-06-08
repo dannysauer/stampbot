@@ -1,18 +1,18 @@
 name: Bug Report
-description: Report a bug or unexpected behavior
+description: Report a Stampbot bug or unexpected behavior
 labels: ["bug", "triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting! Please fill out the sections below.
+        Thanks for reporting. Do not include private keys, webhook secrets, tokens, or unsanitized logs.
 
   - type: textarea
     id: description
     attributes:
       label: What happened?
-      description: A clear description of the bug
-      placeholder: Describe the issue...
+      description: Describe the failed approval, dismissal, webhook, setup flow, deployment, or command.
+      placeholder: Stampbot did not approve a PR after the autoapprove label was added.
     validations:
       required: true
 
@@ -20,7 +20,67 @@ body:
     id: expected
     attributes:
       label: What did you expect?
-      placeholder: What should have happened instead?
+      placeholder: Stampbot should have approved the PR once the label was added.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: deployment-mode
+    attributes:
+      label: Deployment mode
+      options:
+        - Local development
+        - Docker
+        - Helm
+        - EKS with External Secrets
+        - Cloud Run
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Stampbot version
+      description: App version, commit SHA, container tag/digest, and chart version if applicable.
+      placeholder: "v0.1.0, ghcr.io/dannysauer/stampbot@sha256:..., chart 0.1.0"
+    validations:
+      required: false
+
+  - type: input
+    id: webhook-delivery
+    attributes:
+      label: GitHub webhook delivery
+      description: Delivery ID, event, action, response code, and response body summary.
+      placeholder: "delivery abc123, pull_request/labeled, HTTP 200, status ignored"
+    validations:
+      required: false
+
+  - type: textarea
+    id: app-permissions
+    attributes:
+      label: GitHub App permissions and events
+      description: Confirm the installed app has the documented permissions and subscribed events.
+      placeholder: |
+        Pull requests: read/write
+        Contents: read
+        Metadata: read
+        Issues: read
+        Members: read
+        Administration: read
+        Events: pull_request, issue_comment, pull_request_review_comment
+    validations:
+      required: false
+
+  - type: textarea
+    id: sanitized-config
+    attributes:
+      label: Sanitized configuration
+      description: Include relevant `stampbot.toml`, Helm values, or Cloud Run env names. Remove secrets and private data.
+      render: toml
+      placeholder: |
+        approval_labels = ["autoapprove"]
+        chatops_required_permission = "maintain"
     validations:
       required: false
 
@@ -28,28 +88,19 @@ body:
     id: reproduction
     attributes:
       label: How can we reproduce this?
-      description: Steps to reproduce (if applicable)
+      description: Include labels, command text, PR state, and webhook redelivery steps when applicable.
       placeholder: |
-        1. Configure...
-        2. Send webhook...
-        3. See error...
+        1. Add label autoapprove to PR #123.
+        2. Redeliver the pull_request/labeled webhook.
+        3. Check PR reviews and Stampbot logs.
     validations:
       required: false
 
   - type: textarea
     id: logs
     attributes:
-      label: Relevant logs
-      description: Any error messages or logs (will be formatted as code)
+      label: Relevant sanitized logs
+      description: Remove private keys, webhook secrets, tokens, customer data, and unrelated log lines.
       render: shell
-    validations:
-      required: false
-
-  - type: input
-    id: version
-    attributes:
-      label: Version
-      description: Stampbot version or commit SHA
-      placeholder: "v0.1.0 or abc1234"
     validations:
       required: false

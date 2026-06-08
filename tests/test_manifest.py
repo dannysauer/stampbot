@@ -69,6 +69,8 @@ class TestCreateManifest:
         assert manifest["default_permissions"]["contents"] == "read"
         assert manifest["default_permissions"]["metadata"] == "read"
         assert manifest["default_permissions"]["issues"] == "read"
+        assert manifest["default_permissions"]["members"] == "read"
+        assert manifest["default_permissions"]["administration"] == "read"
 
     def test_manifest_contains_required_events(self):
         """Test manifest contains required events."""

@@ -122,6 +122,8 @@ class TestSetupEndpointsUnconfigured:
             assert "Stampbot Setup" in response.text
             assert "Create GitHub App" in response.text
             assert "Pull requests: Read" in response.text
+            assert "Members: Read-only" in response.text
+            assert "Administration: Read-only" in response.text
             assert "/webhook" in response.text  # Shown in instructions
 
     def test_setup_uses_forwarded_headers(self):
