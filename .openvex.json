@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
   "author": "Danny Sauer <github@dannysauer.com>",
-  "timestamp": "2026-05-30T11:13:31Z",
-  "version": 29,
+  "timestamp": "2026-06-16T14:52:47Z",
+  "version": 37,
   "statements": [
     {
       "vulnerability": {
@@ -403,6 +403,132 @@
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
       "impact_statement": "The application does not process user-uploaded files, does not parse tar archives, and does not handle untrusted input that could exploit the Archive::Tar vulnerability. The vulnerable code cannot be triggered in the application's execution path, as it does not involve any functionality related to tar file handling or memory allocation based on untrusted input."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-11822",
+        "name": "CVE-2026-11822",
+        "description": "SQLite before 3.53.2 contains memory corruption vulnerabilities in the ..."
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libsqlite3-0"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The vulnerability in SQLite's FTS5 extension is not exploitable in the context of the application because the app does not process user-uploaded files, does not execute FTS5 MATCH queries, and does not interact with untrusted or attacker-controlled databases. The application only makes outbound HTTPS connections to the GitHub API and processes webhook events, which do not involve the use of SQLite's FTS5 functionality."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-11824",
+        "name": "CVE-2026-11824",
+        "description": "SQLite before 3.53.2 contains a heap-based buffer overflow vulnerabili ..."
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libsqlite3-0"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not use the FTS5 full-text search extension of SQLite, nor does it process untrusted or attacker-controlled SQLite databases. The vulnerability requires a crafted database with malicious continuation page metadata, which is not applicable to the application's functionality or data processing workflows. Therefore, the vulnerability is not exploitable in this context."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-45447",
+        "name": "CVE-2026-45447",
+        "description": "openssl: Heap Use-After-Free in OpenSSL PKCS7_verify()"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libssl3t64"
+        },
+        {
+          "@id": "pkg:deb/debian/openssl"
+        },
+        {
+          "@id": "pkg:deb/debian/openssl-provider-legacy"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The application does not process PKCS#7, S/MIME, or CMS files, nor does it accept untrusted cryptographic input. The vulnerable code path in OpenSSL PKCS7_verify() is not exercised by the application's functionality, which is limited to JWT signing and outbound HTTPS connections to trusted endpoints."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-48526",
+        "name": "CVE-2026-48526",
+        "description": "python-pyjwt: PyJWT: Authentication bypass due to forged JSON Web Tokens"
+      },
+      "products": [
+        {
+          "@id": "pkg:pypi/pyjwt"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application uses PyJWT for signing JWTs with RS256 using PEM-format private keys and does not accept untrusted cryptographic input or process user-provided JWTs. The vulnerability requires an attacker to provide a maliciously crafted JWT to exploit the issue, which is not possible in this application's context. Therefore, the vulnerability is not exploitable in this application."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-48818",
+        "name": "CVE-2026-48818",
+        "description": "Starlette: SSRF and NTLM credential theft via UNC paths in StaticFiles on Windows"
+      },
+      "products": [
+        {
+          "@id": "pkg:pypi/starlette"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The application does not use the `StaticFiles` functionality of the Starlette package, which is the component affected by the vulnerability. Additionally, the application does not serve static files or process user-uploaded files, and its outbound connections are limited to HTTPS requests to the GitHub API. Therefore, the vulnerable code cannot be executed in the application's context, and the vulnerability is not exploitable."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-48959",
+        "name": "CVE-2026-48959",
+        "description": "IO::Uncompress::Unzip versions before 2.220 for Perl allow CPU exhaust ..."
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process user-uploaded files or untrusted input, nor does it use the IO::Uncompress::Unzip module to handle ZIP files. The vulnerability is not exploitable in this context because there is no attack vector for an adversary to supply a malicious ZIP file to the application."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-54283",
+        "name": "CVE-2026-54283",
+        "description": "Starlette: request.form() limits silently ignored for application/x-www-form-urlencoded enable DoS"
+      },
+      "products": [
+        {
+          "@id": "pkg:pypi/starlette"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application processes GitHub webhook events and does not handle user-provided form data or `application/x-www-form-urlencoded` requests. Since the vulnerability is specific to the parsing of such requests via `request.form()`, and the application does not expose endpoints where an attacker could exploit this behavior, the vulnerability is not exploitable in this context."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/GHSA-537c-gmf6-5ccf",
+        "name": "GHSA-537c-gmf6-5ccf",
+        "description": "Vulnerable OpenSSL included in cryptography wheels"
+      },
+      "products": [
+        {
+          "@id": "pkg:pypi/cryptography"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process untrusted cryptographic input, does not parse CMS, PKCS#7, S/MIME, or PKCS#12 files, and only uses PEM-format private keys for JWT signing. Additionally, the application makes outbound HTTPS connections to a trusted endpoint (GitHub API) and does not handle user-uploaded files. Therefore, the vulnerability in the statically linked OpenSSL within the cryptography package cannot be exploited in this context."
     }
   ]
 }
