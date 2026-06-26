@@ -1,4 +1,4 @@
-FROM gcr.io/oss-fuzz-base/base-builder-python:v1@sha256:e4115b784c4ca914cd88e17d033c653c894e2a05b6e034dd93d9a0c4a309df1e
+FROM gcr.io/oss-fuzz-base/base-builder-python:v1@sha256:e0e18dea5d2e4107a4f5d04652e6c278fbea32dc6d6861ee8de29402d0916746
 
 COPY . $SRC/stampbot-project
 WORKDIR $SRC/stampbot-project
