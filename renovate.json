@@ -29,6 +29,12 @@
       "groupName": "python dependencies"
     },
     {
+      "description": "Group OpenTelemetry packages separately - interdependent and version-locked, so an OTel resolution failure does not block unrelated Python updates",
+      "matchManagers": ["pip_setup", "poetry"],
+      "matchPackageNames": ["/^opentelemetry-/"],
+      "groupName": "opentelemetry"
+    },
+    {
       "description": "Keep the Poetry Python support range managed manually",
       "matchManagers": ["poetry"],
       "matchDepNames": ["python"],
