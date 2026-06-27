@@ -248,17 +248,27 @@ async def health() -> dict[str, str]:
 async def ready() -> Response:
     """Readiness check endpoint.
 
-    Reports whether Stampbot is ready to serve webhooks. Unlike /health (a
-    shallow liveness signal), this returns 503 until the GitHub App credentials
-    are configured, so the Kubernetes readiness probe holds traffic away from an
-    unconfigured pod that would only answer /webhook with 503.
+    Reports whether the pod should receive traffic. Unlike /health (a shallow
+    liveness signal), readiness reflects whether Stampbot can serve its current
+    purpose:
+
+    - configured: ready to serve webhooks;
+    - setup mode enabled: ready to serve the /setup flow so an operator can
+      configure the app.
+
+    Returning 503 while setup mode is enabled would remove the pod from the
+    Service endpoints and make /setup unreachable through the Service/ingress —
+    a configuration deadlock. So an unconfigured pod stays Ready as long as
+    setup mode is on; only an unconfigured pod with setup disabled is "not
+    ready", since it can neither serve webhooks nor be configured.
 
     Returns:
-        JSON response with a per-check breakdown: 200 when every check passes,
-        503 otherwise.
+        JSON response with a per-check breakdown: 200 when ready, 503 otherwise.
     """
-    checks = {"configured": is_configured()}
-    is_ready = all(checks.values())
+    configured = is_configured()
+    setup_enabled = bool(settings.setup_enabled)
+    checks = {"configured": configured, "setup_enabled": setup_enabled}
+    is_ready = configured or setup_enabled
     return JSONResponse(
         status_code=200 if is_ready else 503,
         content={"status": "ready" if is_ready else "not ready", "checks": checks},
