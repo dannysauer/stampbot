@@ -49,11 +49,31 @@ def test_root_endpoint(test_client: TestClient):
 
 
 def test_health_endpoint(test_client: TestClient):
-    """Test health check endpoint."""
+    """Test liveness endpoint always reports healthy while the app is up."""
     response = test_client.get("/health")
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "healthy"
+
+
+def test_ready_endpoint_configured(test_client: TestClient):
+    """Test readiness endpoint returns 200 when the app is configured."""
+    with patch("stampbot.main.is_configured", return_value=True):
+        response = test_client.get("/ready")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ready"
+    assert data["checks"]["configured"] is True
+
+
+def test_ready_endpoint_unconfigured(test_client: TestClient):
+    """Test readiness endpoint returns 503 when the app is not configured."""
+    with patch("stampbot.main.is_configured", return_value=False):
+        response = test_client.get("/ready")
+    assert response.status_code == 503
+    data = response.json()
+    assert data["status"] == "not ready"
+    assert data["checks"]["configured"] is False
 
 
 def test_metrics_endpoint(test_client: TestClient):
