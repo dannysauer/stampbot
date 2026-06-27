@@ -1,0 +1,103 @@
+# Copyright 2026 Danny Sauer
+# SPDX-License-Identifier: Apache-2.0
+#
+# Helm test hook: end-to-end verification of the /webhook signature path
+# against the deployed pod. A correctly HMAC-signed `ping` must be accepted
+# (200) and a tampered signature must be rejected (401). Run with:
+#   helm test <release>
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "stampbot.fullname" . }}-test-webhook"
+  labels:
+    {{- include "stampbot.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  restartPolicy: Never
+  securityContext:
+    {{- toYaml .Values.podSecurityContext | nindent 4 }}
+  containers:
+  - name: test-webhook
+    image: "{{ include "stampbot.image" . }}"
+    imagePullPolicy: {{ .Values.image.pullPolicy }}
+    securityContext:
+      {{- toYaml .Values.securityContext | nindent 6 }}
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
+    env:
+    # Same secret the deployment reads, so the test can forge a valid signature.
+    - name: STAMPBOT_WEBHOOK_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: {{ if .Values.github.existingSecret }}{{ .Values.github.existingSecret }}{{ else if .Values.externalSecrets.enabled }}{{ include "stampbot.fullname" . }}-external{{ else }}{{ include "stampbot.fullname" . }}{{ end }}
+          key: STAMPBOT_WEBHOOK_SECRET
+    command: ["python3", "-c"]
+    args:
+    - |
+      import hashlib
+      import hmac
+      import json
+      import os
+      import sys
+      import urllib.error
+      import urllib.request
+
+      base = "http://{{ include "stampbot.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}"
+      secret = os.environ["STAMPBOT_WEBHOOK_SECRET"].encode()
+      body = json.dumps({"zen": "Keep it logically awesome.", "hook_id": 1}).encode()
+
+      def get_json(path):
+          try:
+              with urllib.request.urlopen(base + path, timeout=10) as resp:
+                  return resp.status, json.loads(resp.read())
+          except urllib.error.HTTPError as exc:
+              try:
+                  return exc.code, json.loads(exc.read())
+              except ValueError:
+                  return exc.code, {}
+
+      def post(signature):
+          req = urllib.request.Request(base + "/webhook", data=body, method="POST")
+          req.add_header("Content-Type", "application/json")
+          req.add_header("X-GitHub-Event", "ping")
+          req.add_header("X-Hub-Signature-256", signature)
+          try:
+              with urllib.request.urlopen(req, timeout=10) as resp:
+                  return resp.status
+          except urllib.error.HTTPError as exc:
+              return exc.code
+
+      # Signature verification only runs once the app is configured; on a
+      # setup-only install /webhook short-circuits to 503, so skip gracefully.
+      _, ready = get_json("/ready")
+      if not ready.get("checks", {}).get("configured"):
+          print("SKIP webhook test: app is not configured yet")
+          sys.exit(0)
+
+      valid = "sha256=" + hmac.new(secret, body, hashlib.sha256).hexdigest()
+      invalid = "sha256=" + "0" * 64
+
+      failures = []
+      status = post(valid)
+      if status != 200:
+          failures.append(("valid signature", "expected 200", status))
+      status = post(invalid)
+      if status != 401:
+          failures.append(("tampered signature", "expected 401", status))
+
+      for case, expected, got in failures:
+          print(f"FAIL {case}: {expected}, got {got}", file=sys.stderr)
+      if failures:
+          sys.exit(1)
+      print("webhook signature checks passed (valid -> 200, tampered -> 401)")

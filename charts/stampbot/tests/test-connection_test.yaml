@@ -1,0 +1,46 @@
+# Copyright 2026 Danny Sauer
+# SPDX-License-Identifier: Apache-2.0
+
+suite: Helm test connection hook
+templates:
+  - tests/test-connection.yaml
+values:
+  - ../values.yaml
+tests:
+  - it: renders a test Pod with the helm test hook annotations
+    asserts:
+      - isKind:
+          of: Pod
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-stampbot-test-connection
+      - equal:
+          path: metadata.annotations["helm.sh/hook"]
+          value: test
+      - equal:
+          path: metadata.annotations["helm.sh/hook-delete-policy"]
+          value: before-hook-creation,hook-succeeded
+      - equal:
+          path: spec.restartPolicy
+          value: Never
+
+  - it: targets the in-cluster service URL and core endpoints
+    asserts:
+      - matchRegex:
+          path: spec.containers[0].args[0]
+          pattern: "RELEASE-NAME-stampbot\\..*\\.svc:80"
+      - matchRegex:
+          path: spec.containers[0].args[0]
+          pattern: "/health"
+      - matchRegex:
+          path: spec.containers[0].args[0]
+          pattern: "/ready"
+      - matchRegex:
+          path: spec.containers[0].args[0]
+          pattern: "/metrics"
+
+  - it: reuses the application image
+    asserts:
+      - matchRegex:
+          path: spec.containers[0].image
+          pattern: "ghcr.io/dannysauer/stampbot:"
