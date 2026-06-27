@@ -1328,3 +1328,145 @@ jobs:
         run: |
           helm uninstall stampbot -n stampbot-test || true
           kubectl delete namespace stampbot-test || true
+
+  helm-upgrade-test-matrix:
+    name: Discover Helm Upgrade Versions
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule' && (github.event_name != 'workflow_dispatch' || inputs.run_full_ci)
+    outputs:
+      from-versions: ${{ steps.discover.outputs.from-versions }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Discover upgrade-from versions
+        id: discover
+        run: |
+          # Upgrade-from set = latest patch of the current chart minor line and
+          # the previous up-to-two minor lines (i.e. the newest patch of each of
+          # the top 3 minor lines). Computed from chart-vX.Y.Z tags so it tracks
+          # future releases instead of being hardcoded.
+          versions=$(git tag -l 'chart-v*' \
+            | sed 's/^chart-v//' \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' || true)
+          if [ -z "$versions" ]; then
+            echo "::warning::No chart-v* tags found; skipping upgrade test"
+            echo 'from-versions=[]' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Latest patch per major.minor line.
+          latest=$(echo "$versions" \
+            | sort -t. -k1,1n -k2,2n -k3,3n \
+            | awk -F. '{ latest[$1"."$2]=$0 } END { for (k in latest) print latest[k] }')
+          # Newest 3 minor lines, as a JSON array.
+          json=$(echo "$latest" \
+            | sort -t. -k1,1nr -k2,2nr | head -3 \
+            | awk 'BEGIN{printf "["} {printf "%s\"%s\"", (NR>1?",":""), $0} END{printf "]"}')
+          echo "from-versions=$json" >> "$GITHUB_OUTPUT"
+          echo "Upgrade-from versions: $json"
+
+  helm-upgrade-test:
+    name: Helm Upgrade Test (from ${{ matrix.from-version }})
+    runs-on: ubuntu-latest
+    needs: helm-upgrade-test-matrix
+    if: needs.helm-upgrade-test-matrix.outputs.from-versions != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        from-version: ${{ fromJson(needs.helm-upgrade-test-matrix.outputs.from-versions) }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up tools
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          cache: true
+          version: "2026.3.10"
+
+      - name: Create kind cluster
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        with:
+          cluster_name: stampbot-upgrade
+
+      - name: Build and load image into kind
+        run: |
+          docker build -t stampbot:ci-test .
+          kind load docker-image stampbot:ci-test --name stampbot-upgrade
+
+      - name: Create test namespace
+        run: kubectl create namespace stampbot-test
+
+      - name: Create test secret
+        run: |
+          # Fake test key for CI (not a real key)
+          TEST_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
+          MIIEpQIBAAKCAQEA0Z3VS5JJcds3xfn/ygWyF8PbnGy0AHB7MxszR3xyEhXxAbdM
+          zQPf3+eBe5KMBbOuXKHqfTl3lAwn4nMiPbQGSoNRS9pp0YQWfSSSKFBPSldF3VB5
+          k5mUMOiSCXR3JqvXcEpeltwMXJdPOYWh4pmhLMnPJNWGiGJ1SsLVRm8aQsLNwBkS
+          fsxNNHxPgDT3AZ3CfzP9tBK0W3o3xP9LPf3lHhXD1v9XhdcGJkBC3qU5vdqN5Pj5
+          mJkPS1BzW5wp0kIxFkPf5ta2lJWjnc0TzyiX4dJSASeAljVwxPf5k9y0BANK7g9D
+          NNMTMb5A5k3xj1P9wTNFI4dD9gLxXBPq9QI4XQIDAQABAoIBAF8iu4L0Q8OLFNAB
+          rC1zT3HPFnjb0jLYhJl3ozdNsbq2cL9IpoReM27v0VEMC0DKKO4l7xOz2KqYVMaY
+          nk4ob9GNdGr2mSYNKY9/+3wvEObLLY2E8E9PBgGOaOkimL7h5z9B7k+RX0aHzlOC
+          TEST_KEY_NOT_REAL_PLACEHOLDER_FOR_CI_TESTING_PURPOSES_ONLY
+          -----END RSA PRIVATE KEY-----"  # pragma: allowlist secret
+          kubectl create secret generic stampbot-github \
+            --namespace stampbot-test \
+            --from-literal=STAMPBOT_APP_ID=123456 \
+            --from-literal=STAMPBOT_PRIVATE_KEY="$TEST_PRIVATE_KEY" \
+            --from-literal=STAMPBOT_WEBHOOK_SECRET=test-webhook-secret
+
+      - name: Install released chart ${{ matrix.from-version }}
+        run: |
+          # Pull and install the previously released chart, but run it on the
+          # locally built image so the test exercises the *chart* upgrade
+          # (manifests, immutable fields, hooks) rather than image availability.
+          helm pull oci://ghcr.io/dannysauer/charts/stampbot \
+            --version "${{ matrix.from-version }}" \
+            --untar --untardir /tmp/oldchart
+          helm install stampbot /tmp/oldchart/stampbot \
+            --namespace stampbot-test \
+            --set image.repository=stampbot \
+            --set image.tag=ci-test \
+            --set image.pullPolicy=Never \
+            --set replicaCount=1 \
+            --set autoscaling.enabled=false \
+            --set podDisruptionBudget.enabled=false \
+            --set github.existingSecret=stampbot-github \
+            --wait \
+            --timeout 120s
+
+      - name: Upgrade to working-tree chart
+        run: |
+          helm upgrade stampbot charts/stampbot \
+            --namespace stampbot-test \
+            --values charts/stampbot/ci/default-values.yaml \
+            --wait \
+            --timeout 120s
+
+      - name: Verify rollout after upgrade
+        run: |
+          kubectl rollout status deployment/stampbot -n stampbot-test --timeout=60s
+          kubectl wait --for=condition=ready pod \
+            -l app.kubernetes.io/name=stampbot \
+            -n stampbot-test \
+            --timeout=60s
+
+      - name: Run helm tests
+        run: |
+          # Verify the upgraded release with the chart-shipped helm test hooks.
+          helm test stampbot -n stampbot-test --logs --timeout 120s
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          kubectl describe pods -n stampbot-test
+          kubectl logs -l app.kubernetes.io/name=stampbot -n stampbot-test --tail=100 --prefix
+
+      - name: Cleanup
+        if: always()
+        run: |
+          helm uninstall stampbot -n stampbot-test || true
+          kubectl delete namespace stampbot-test || true

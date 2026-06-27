@@ -240,6 +240,7 @@ When modifying any Helm chart component (values, templates, helpers, or document
 | Unit | `helm-unittest` | Fast | Logic, conditionals |
 | Install | `kind` cluster | Slow | Real deployment issues |
 | Post-install | `helm test` | Slow | Live endpoint reachability, readiness, and the webhook signature path in-cluster |
+| Upgrade | `helm upgrade` in `kind` | Slow | Upgrade-only breakage (immutable fields, removed values, hook ordering) when moving from a released chart to the working tree |
 
 **Running Helm tests locally:**
 ```bash
@@ -272,6 +273,14 @@ Cases beyond `default` exercise feature toggles: `ingress`, `autoscaling`,
 `networkpolicy`, and `servicemonitor` (the last installs the ServiceMonitor CRD
 via its setup hook). External Secrets is validated by helm-unittest rather than
 an install case, since it needs a live operator + backend to become Ready.
+
+**Upgrade testing:** the `helm-upgrade-test` job installs a previously released
+chart, `helm upgrade`s it to the working-tree chart, and re-runs `helm test`.
+The upgrade-from set is computed dynamically from `chart-v*` tags — the latest
+patch of the current chart minor line plus the previous up-to-two minor lines —
+so it tracks new releases without edits. The released chart is run on the
+locally built image so the test isolates *chart* upgrade behavior (immutable
+fields, hook ordering) rather than image availability.
 
 **Chart versioning:** The chart uses placeholder versions (`0.0.0-placeholder`) in source control. The release workflow automatically replaces these with the actual version when publishing. Never commit a real version number to Chart.yaml.
 

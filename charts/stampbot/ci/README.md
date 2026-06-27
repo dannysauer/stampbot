@@ -51,6 +51,20 @@ All test cases must:
 | `networkpolicy-values.yaml` | NetworkPolicy enabled (renders/installs; kindnet does not enforce) |
 | `servicemonitor-values.yaml` | ServiceMonitor enabled (CRD installed via `servicemonitor-setup.sh`) |
 
+## Upgrade testing
+
+A separate `helm-upgrade-test` job installs a previously **released** chart and
+then `helm upgrade`s it to the working-tree chart, re-running `helm test` after
+the upgrade. This catches upgrade-only breakage that a clean install never sees:
+immutable-field changes (Service `clusterIP`, selector labels), removed/renamed
+values, and broken hook ordering.
+
+The upgrade-from versions are computed dynamically from `chart-v*` git tags —
+the latest patch of the current chart minor line plus the previous up-to-two
+minor lines — so the set tracks new releases automatically. The released chart
+runs on the locally built image (via `--set image.*`), so the test isolates the
+*chart* upgrade rather than image availability.
+
 ### Not an install case: External Secrets
 
 External Secrets (`externalSecrets.enabled`) is intentionally **not** an install
