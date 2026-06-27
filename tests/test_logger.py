@@ -122,6 +122,28 @@ def test_configure_logging_without_otel():
         mock_instrumentor.return_value.instrument.assert_not_called()
 
 
+def test_configure_logging_emits_logger_name(capsys):
+    """Test that log records include the logger name under the "logger" key.
+
+    The name passed to get_logger (typically __name__) should be surfaced in
+    the rendered output via the add_logger_name processor.
+    """
+    with patch("stampbot.logger.settings") as mock_settings:
+        mock_settings.log_format = "json"
+        mock_settings.log_level = "INFO"
+        mock_settings.otel_enabled = False
+
+        from stampbot.logger import configure_logging, get_logger
+
+        configure_logging()
+
+        logger = get_logger("stampbot.test_module")
+        logger.info("hello")
+
+        captured = capsys.readouterr()
+        assert '"logger": "stampbot.test_module"' in captured.out
+
+
 def test_configure_logging_installs_stdlib_handler():
     """Test that configure_logging installs a ProcessorFormatter on the root logger.
 

@@ -62,6 +62,9 @@ def configure_logging() -> None:
     # Applied to every record before the final renderer.
     shared_processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
+        # Emit the logger name (passed to get_logger, typically __name__) under
+        # the "logger" key, for both structlog-native and foreign stdlib records.
+        structlog.stdlib.add_logger_name,
         structlog.processors.add_log_level,
         structlog.processors.StackInfoRenderer(),
         structlog.dev.set_exc_info,
