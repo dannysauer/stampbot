@@ -66,14 +66,36 @@ def test_ready_endpoint_configured(test_client: TestClient):
     assert data["checks"]["configured"] is True
 
 
-def test_ready_endpoint_unconfigured(test_client: TestClient):
-    """Test readiness endpoint returns 503 when the app is not configured."""
-    with patch("stampbot.main.is_configured", return_value=False):
+def test_ready_endpoint_unconfigured_setup_enabled(test_client: TestClient):
+    """Test readiness is 200 in setup mode so /setup stays reachable.
+
+    An unconfigured pod with setup mode on must stay in the Service endpoints,
+    otherwise the operator can never reach /setup to configure it.
+    """
+    with (
+        patch("stampbot.main.is_configured", return_value=False),
+        patch("stampbot.main.settings") as mock_settings,
+    ):
+        mock_settings.setup_enabled = True
+        response = test_client.get("/ready")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ready"
+    assert data["checks"] == {"configured": False, "setup_enabled": True}
+
+
+def test_ready_endpoint_unconfigured_setup_disabled(test_client: TestClient):
+    """Test readiness is 503 only when unconfigured and setup is disabled."""
+    with (
+        patch("stampbot.main.is_configured", return_value=False),
+        patch("stampbot.main.settings") as mock_settings,
+    ):
+        mock_settings.setup_enabled = False
         response = test_client.get("/ready")
     assert response.status_code == 503
     data = response.json()
     assert data["status"] == "not ready"
-    assert data["checks"]["configured"] is False
+    assert data["checks"] == {"configured": False, "setup_enabled": False}
 
 
 def test_metrics_endpoint(test_client: TestClient):
