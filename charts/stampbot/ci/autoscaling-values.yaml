@@ -1,0 +1,30 @@
+# Copyright 2026 Danny Sauer
+# SPDX-License-Identifier: Apache-2.0
+#
+# CI test values: horizontal pod autoscaling enabled
+# Verifies the HPA object installs and references the deployment. metrics-server
+# is not present in kind, so the HPA reports unknown metrics — we assert the
+# object installs and the pod becomes Ready, not that scaling actually occurs.
+
+replicaCount: 1
+
+# Use locally built image in kind cluster
+image:
+  repository: stampbot
+  tag: ci-test
+  pullPolicy: Never
+
+# Feature under test: this case deliberately overrides the default-case rule of
+# autoscaling.enabled=false. minReplicas is kept at 1 to keep the test fast.
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 2
+  targetCPUUtilizationPercentage: 80
+
+podDisruptionBudget:
+  enabled: false
+
+# Use existing secret (created by CI)
+github:
+  existingSecret: stampbot-github

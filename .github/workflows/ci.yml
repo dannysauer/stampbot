@@ -1275,6 +1275,19 @@ jobs:
             --from-literal=STAMPBOT_PRIVATE_KEY="$TEST_PRIVATE_KEY" \
             --from-literal=STAMPBOT_WEBHOOK_SECRET=test-webhook-secret
 
+      - name: Run test-case setup hook (if present)
+        run: |
+          # Optional per-case hook for prerequisites a feature needs before
+          # install (e.g. CRDs). Auto-discovered like the values files: a case
+          # named <case> may ship charts/stampbot/ci/<case>-setup.sh.
+          HOOK="charts/stampbot/ci/${{ matrix.test-case }}-setup.sh"
+          if [ -f "$HOOK" ]; then
+            echo "Running setup hook: $HOOK"
+            bash "$HOOK"
+          else
+            echo "No setup hook for test case '${{ matrix.test-case }}'"
+          fi
+
       - name: Install chart
         run: |
           helm install stampbot charts/stampbot \

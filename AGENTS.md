@@ -264,7 +264,14 @@ make helm-unittest   # Run unit tests via Docker (no plugin install needed)
 **Adding a new integration test case:**
 1. Create `charts/stampbot/ci/<name>-values.yaml`
 2. Set required values (see `charts/stampbot/ci/README.md`)
-3. CI will automatically discover and run the new test case
+3. (Optional) Add `charts/stampbot/ci/<name>-setup.sh` to install prerequisites
+   (e.g. CRDs) before `helm install` — auto-discovered like the values file
+4. CI will automatically discover and run the new test case
+
+Cases beyond `default` exercise feature toggles: `ingress`, `autoscaling`,
+`networkpolicy`, and `servicemonitor` (the last installs the ServiceMonitor CRD
+via its setup hook). External Secrets is validated by helm-unittest rather than
+an install case, since it needs a live operator + backend to become Ready.
 
 **Chart versioning:** The chart uses placeholder versions (`0.0.0-placeholder`) in source control. The release workflow automatically replaces these with the actual version when publishing. Never commit a real version number to Chart.yaml.
 
