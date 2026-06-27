@@ -239,6 +239,7 @@ When modifying any Helm chart component (values, templates, helpers, or document
 | Validate | `kubeconform` | Fast | K8s schema issues |
 | Unit | `helm-unittest` | Fast | Logic, conditionals |
 | Install | `kind` cluster | Slow | Real deployment issues |
+| Post-install | `helm test` | Slow | Live endpoint reachability, readiness, and the webhook signature path in-cluster |
 
 **Running Helm tests locally:**
 ```bash
@@ -254,9 +255,11 @@ make helm-unittest   # Run unit tests via Docker (no plugin install needed)
 
 **Unit tests:** Located in `charts/stampbot/tests/`. Each `*_test.yaml` file tests a specific template. When adding new templates or modifying existing ones, update/add corresponding tests.
 
+**Post-install tests (`helm test`):** Chart-shipped test hooks live in `charts/stampbot/templates/tests/` and run against a deployed release with `helm test <release>`. `test-connection` checks `/health`, `/ready`, `/metrics`, and `/` reachability from inside the cluster; `test-webhook` verifies the `/webhook` HMAC signature path (valid `ping` → 200, tampered → 401). The CI install job runs these after the pod is Ready. They reuse the application image, so no extra image needs pinning.
+
 **Pre-commit hooks:** The `helm-kubeconform` hook validates templates on commit. Requires `kubeconform` installed locally (`go install github.com/yannh/kubeconform/cmd/kubeconform@latest`).
 
-**CI testing:** GitHub Actions runs lint, kubeconform validation, unit tests, and integration tests in kind clusters. Integration tests are auto-discovered from `charts/stampbot/ci/*-values.yaml` files.
+**CI testing:** GitHub Actions runs lint, kubeconform validation, unit tests, and integration tests in kind clusters. Integration tests are auto-discovered from `charts/stampbot/ci/*-values.yaml` files, and each installed release is verified with `helm test` (the chart-shipped hooks above).
 
 **Adding a new integration test case:**
 1. Create `charts/stampbot/ci/<name>-values.yaml`

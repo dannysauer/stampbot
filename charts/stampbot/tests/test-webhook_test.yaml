@@ -1,0 +1,45 @@
+# Copyright 2026 Danny Sauer
+# SPDX-License-Identifier: Apache-2.0
+
+suite: Helm test webhook hook
+templates:
+  - tests/test-webhook.yaml
+values:
+  - ../values.yaml
+tests:
+  - it: renders a test Pod with the helm test hook annotations
+    asserts:
+      - isKind:
+          of: Pod
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-stampbot-test-webhook
+      - equal:
+          path: metadata.annotations["helm.sh/hook"]
+          value: test
+
+  - it: reads the webhook secret from the generated secret by default
+    asserts:
+      - equal:
+          path: spec.containers[0].env[?(@.name=="STAMPBOT_WEBHOOK_SECRET")].valueFrom.secretKeyRef.name
+          value: RELEASE-NAME-stampbot
+      - equal:
+          path: spec.containers[0].env[?(@.name=="STAMPBOT_WEBHOOK_SECRET")].valueFrom.secretKeyRef.key
+          value: STAMPBOT_WEBHOOK_SECRET
+
+  - it: reads the webhook secret from existingSecret when set
+    set:
+      github.existingSecret: my-external-secret
+    asserts:
+      - equal:
+          path: spec.containers[0].env[?(@.name=="STAMPBOT_WEBHOOK_SECRET")].valueFrom.secretKeyRef.name
+          value: my-external-secret
+
+  - it: posts a signed ping to the webhook endpoint
+    asserts:
+      - matchRegex:
+          path: spec.containers[0].args[0]
+          pattern: "/webhook"
+      - matchRegex:
+          path: spec.containers[0].args[0]
+          pattern: "X-Hub-Signature-256"

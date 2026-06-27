@@ -7,7 +7,9 @@ This directory contains values files for Helm chart integration tests. Each file
 1. CI discovers all `*-values.yaml` files in this directory
 2. Each file becomes a test case (e.g., `default-values.yaml` → test case `default`)
 3. Test cases run in parallel, each in its own kind cluster
-4. The chart is installed with the values file and verified for health
+4. The chart is installed with the values file, the pod is waited on for
+   readiness, and the release is verified with `helm test` (the chart-shipped
+   `test-connection` and `test-webhook` hooks)
 
 ## Adding a New Test Case
 

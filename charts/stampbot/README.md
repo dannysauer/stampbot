@@ -194,6 +194,24 @@ kubectl port-forward svc/stampbot 8000:80 --namespace stampbot
 curl http://127.0.0.1:8000/health
 ```
 
+### Verifying the deployment with `helm test`
+
+The chart ships post-install test hooks. After installing, run:
+
+```bash
+helm test stampbot --namespace stampbot --logs
+```
+
+This launches two short-lived Pods that exercise the running release from
+inside the cluster:
+
+- **`test-connection`** — checks `/health`, `/ready`, `/metrics`, and `/` are
+  reachable and healthy.
+- **`test-webhook`** — verifies the `/webhook` signature path end to end: a
+  correctly HMAC-signed `ping` is accepted (200) and a tampered signature is
+  rejected (401). It reads the same webhook secret the deployment uses, and
+  skips automatically if the release is not configured yet (setup mode).
+
 For IRSA:
 
 ```bash

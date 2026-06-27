@@ -1296,17 +1296,19 @@ jobs:
             -n stampbot-test \
             --timeout=60s
 
-      - name: Test health endpoint
+      - name: Run helm tests
         run: |
-          kubectl port-forward svc/stampbot 8080:80 -n stampbot-test &
-          sleep 5
-          curl -sf http://localhost:8080/health || exit 1
+          # Chart-shipped helm test hooks: endpoint reachability + readiness
+          # (test-connection) and the signed/tampered webhook path (test-webhook).
+          helm test stampbot -n stampbot-test --logs --timeout 120s
 
       - name: Show logs on failure
         if: failure()
         run: |
           kubectl describe pods -n stampbot-test
-          kubectl logs -l app.kubernetes.io/name=stampbot -n stampbot-test --tail=100
+          # Captures the deployment and the helm test hook pods (both carry
+          # app.kubernetes.io/name=stampbot).
+          kubectl logs -l app.kubernetes.io/name=stampbot -n stampbot-test --tail=100 --prefix
 
       - name: Cleanup
         if: always()

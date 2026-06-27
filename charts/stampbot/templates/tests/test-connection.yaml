@@ -1,0 +1,77 @@
+# Copyright 2026 Danny Sauer
+# SPDX-License-Identifier: Apache-2.0
+#
+# Helm test hook: verifies the deployed Service answers on its core read
+# endpoints from inside the cluster. Run with: helm test <release>
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "stampbot.fullname" . }}-test-connection"
+  labels:
+    {{- include "stampbot.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  restartPolicy: Never
+  securityContext:
+    {{- toYaml .Values.podSecurityContext | nindent 4 }}
+  containers:
+  - name: test-connection
+    image: "{{ include "stampbot.image" . }}"
+    imagePullPolicy: {{ .Values.image.pullPolicy }}
+    securityContext:
+      {{- toYaml .Values.securityContext | nindent 6 }}
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
+    command: ["python3", "-c"]
+    args:
+    - |
+      import sys
+      import urllib.error
+      import urllib.request
+
+      base = "http://{{ include "stampbot.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}"
+
+      def get(path):
+          try:
+              with urllib.request.urlopen(base + path, timeout=10) as resp:
+                  return resp.status, resp.read().decode("utf-8", "replace")
+          except urllib.error.HTTPError as exc:
+              return exc.code, exc.read().decode("utf-8", "replace")
+
+      failures = []
+
+      status, body = get("/health")
+      if status != 200 or "healthy" not in body:
+          failures.append(("/health", status, body))
+
+      # /ready is 200 when the pod can serve its purpose (configured, or setup
+      # mode enabled). A healthy install should report ready immediately.
+      status, body = get("/ready")
+      if status != 200:
+          failures.append(("/ready", status, body))
+
+      status, body = get("/metrics")
+      if status != 200 or "# HELP" not in body:
+          failures.append(("/metrics", status, body))
+
+      # Root is 200 when configured, or 307 -> /setup in setup mode.
+      status, body = get("/")
+      if status not in (200, 307):
+          failures.append(("/", status, body))
+
+      for path, status, body in failures:
+          print(f"FAIL {path}: status={status} body={body[:200]!r}", file=sys.stderr)
+      if failures:
+          sys.exit(1)
+      print(f"connection checks passed against {base}")
