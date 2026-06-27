@@ -1,0 +1,29 @@
+# Copyright 2026 Danny Sauer
+# SPDX-License-Identifier: Apache-2.0
+#
+# CI test values: NetworkPolicy enabled
+# Verifies the NetworkPolicy renders and installs and does not prevent the pod
+# from becoming Ready. kind's default CNI (kindnet) does not enforce
+# NetworkPolicy, so enforcement itself is not exercised here — this guards
+# against a malformed policy or selector that would break install/readiness.
+
+replicaCount: 1
+
+# Use locally built image in kind cluster
+image:
+  repository: stampbot
+  tag: ci-test
+  pullPolicy: Never
+
+autoscaling:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: false
+
+# Use existing secret (created by CI)
+github:
+  existingSecret: stampbot-github
+
+networkPolicy:
+  enabled: true

@@ -1,0 +1,31 @@
+# Copyright 2026 Danny Sauer
+# SPDX-License-Identifier: Apache-2.0
+#
+# CI test values: ServiceMonitor enabled
+# Requires the Prometheus Operator ServiceMonitor CRD, which the matching
+# servicemonitor-setup.sh installs before `helm install`. The operator itself is
+# not needed for the pod to become Ready — this validates that the chart's
+# ServiceMonitor renders and applies cleanly against the real CRD schema.
+
+replicaCount: 1
+
+# Use locally built image in kind cluster
+image:
+  repository: stampbot
+  tag: ci-test
+  pullPolicy: Never
+
+autoscaling:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: false
+
+# Use existing secret (created by CI)
+github:
+  existingSecret: stampbot-github
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
