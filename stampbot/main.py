@@ -12,7 +12,12 @@ from typing import Any
 
 import structlog.contextvars
 from fastapi import FastAPI, Header, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+)
 
 from stampbot.config import is_configured, settings
 from stampbot.github_client import _sanitize_error
@@ -226,12 +231,38 @@ async def root() -> Response:
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    """Health check endpoint.
+    """Liveness check endpoint.
+
+    A shallow signal that the process is up and able to serve requests; it does
+    not check configuration. Used by the Kubernetes liveness probe, so it must
+    stay cheap and return 200 whenever the app is running. Use /ready for a
+    readiness signal that reflects whether Stampbot can actually serve webhooks.
 
     Returns:
         Dictionary with health status.
     """
     return {"status": "healthy"}
+
+
+@app.get("/ready")
+async def ready() -> Response:
+    """Readiness check endpoint.
+
+    Reports whether Stampbot is ready to serve webhooks. Unlike /health (a
+    shallow liveness signal), this returns 503 until the GitHub App credentials
+    are configured, so the Kubernetes readiness probe holds traffic away from an
+    unconfigured pod that would only answer /webhook with 503.
+
+    Returns:
+        JSON response with a per-check breakdown: 200 when every check passes,
+        503 otherwise.
+    """
+    checks = {"configured": is_configured()}
+    is_ready = all(checks.values())
+    return JSONResponse(
+        status_code=200 if is_ready else 503,
+        content={"status": "ready" if is_ready else "not ready", "checks": checks},
+    )
 
 
 @app.get("/metrics")

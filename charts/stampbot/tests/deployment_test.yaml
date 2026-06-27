@@ -89,7 +89,10 @@ tests:
           value: http
       - equal:
           path: spec.template.spec.containers[0].readinessProbe.httpGet.path
-          value: /health
+          value: /ready
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.port
+          value: http
 
   - it: should expose correct ports
     template: deployment.yaml

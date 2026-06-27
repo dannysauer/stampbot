@@ -76,7 +76,7 @@ GitHub Webhook -> POST /webhook -> WebhookHandler.handle_event()
 ```
 
 **Core modules in `stampbot/`:**
-- `main.py` - FastAPI app, endpoints (/webhook, /health, /metrics)
+- `main.py` - FastAPI app, endpoints (/webhook, /health liveness, /ready readiness, /metrics)
 - `webhook_handler.py` - Event routing, label/chatops processing
 - `github_client.py` - GitHub API with app authentication (JWT)
 - `config.py` - Dynaconf-based configuration (env vars, settings.toml, per-repo stampbot.toml)
@@ -399,8 +399,14 @@ curl http://localhost:8000/metrics
 
 ### Check Health
 
+`/health` is the liveness signal (always 200 while the process is up). `/ready`
+is the readiness signal — it returns 503 with `{"status": "not ready", ...}`
+until GitHub App credentials are configured, and 200 once they are. The chart's
+liveness probe targets `/health` and the readiness probe targets `/ready`.
+
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:8000/health   # liveness
+curl http://localhost:8000/ready    # readiness (503 until configured)
 ```
 
 ## Common Issues
