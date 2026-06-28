@@ -28,9 +28,17 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       should_release: ${{ steps.version.outputs.should_release }}
     steps:
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.AUTOMATION_ID }}
+          private-key: ${{ secrets.AUTOMATION_SECRET }}
+
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Determine version
         id: version
@@ -98,8 +106,8 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "${{ steps.app-token.outputs.app-slug }}[bot]"
+          git config user.email "${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
           git tag -a "v$VERSION" -m "Release v$VERSION"
           git push origin "v$VERSION"
 
@@ -115,6 +123,13 @@ jobs:
     outputs:
       release_asset_hashes: ${{ steps.provenance-subjects.outputs.hashes }}
     steps:
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.AUTOMATION_ID }}
+          private-key: ${{ secrets.AUTOMATION_SECRET }}
+
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
@@ -273,7 +288,7 @@ jobs:
             stampbot-${{ needs.determine-version.outputs.version }}.vex.json
             stampbot-${{ needs.determine-version.outputs.version }}.vex.json.sigstore.json
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 
   app-release-provenance:
     name: Generate App Release SLSA Provenance
@@ -298,6 +313,11 @@ jobs:
     uses: ./.github/workflows/chart-release.yml
     with:
       app_version: ${{ needs.determine-version.outputs.version }}
+    # Pass the app private key through so chart-release.yml can mint its app
+    # token when invoked here; custom secrets are not inherited by reusable
+    # workflows otherwise (vars like AUTOMATION_ID are available automatically).
+    secrets:
+      AUTOMATION_SECRET: ${{ secrets.AUTOMATION_SECRET }}
     permissions:
       actions: read
       contents: write

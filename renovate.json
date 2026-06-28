@@ -18,6 +18,11 @@
       "automerge": true
     },
     {
+      "description": "Add Stampbot's approval label so minor and patch updates are auto-approved (autoapprove is in Stampbot's approval_labels)",
+      "matchUpdateTypes": ["minor", "patch"],
+      "addLabels": ["autoapprove"]
+    },
+    {
       "description": "Ignore requirements.txt - auto-generated from pyproject.toml by poetry-export",
       "matchManagers": ["pip_requirements"],
       "matchFileNames": ["requirements.txt"],
