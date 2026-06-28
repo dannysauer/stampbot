@@ -18,6 +18,10 @@ on:
         description: 'App version to set as appVersion'
         required: false
         type: string
+    secrets:
+      AUTOMATION_SECRET:
+        description: 'Automation GitHub App private key (PEM)'
+        required: false
 
 permissions:
   contents: read

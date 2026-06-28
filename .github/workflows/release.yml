@@ -313,10 +313,11 @@ jobs:
     uses: ./.github/workflows/chart-release.yml
     with:
       app_version: ${{ needs.determine-version.outputs.version }}
-    # Pass AUTOMATION_SECRET through so chart-release.yml can mint its app token
-    # when invoked here; custom secrets are not inherited by reusable workflows
-    # otherwise (vars like AUTOMATION_ID are available automatically).
-    secrets: inherit
+    # Pass the app private key through so chart-release.yml can mint its app
+    # token when invoked here; custom secrets are not inherited by reusable
+    # workflows otherwise (vars like AUTOMATION_ID are available automatically).
+    secrets:
+      AUTOMATION_SECRET: ${{ secrets.AUTOMATION_SECRET }}
     permissions:
       actions: read
       contents: write
