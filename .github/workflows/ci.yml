@@ -619,6 +619,13 @@ jobs:
       issues: write
       pull-requests: write
     steps:
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.AUTOMATION_ID }}
+          private-key: ${{ secrets.AUTOMATION_SECRET }}
+
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: main
@@ -770,8 +777,13 @@ jobs:
       - name: Analyze and remediate vulnerabilities
         if: steps.parse.outputs.has_vulns == 'true'
         env:
+          # GITHUB_TOKEN drives the GitHub Models AI call (models:read) and the
+          # security-issue creation; app installation tokens lack models:read.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # APP_TOKEN opens the VEX PR as the automation app so its CI runs --
+          # PRs opened with GITHUB_TOKEN are suppressed by Actions loop detection.
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
           VULN_DATA: ${{ steps.parse.outputs.vuln_data }}
         run: |
           set -euo pipefail
@@ -1021,7 +1033,7 @@ jobs:
           git commit -m "chore(security): update VEX statements from scheduled scan"
           git push origin "$BULK_BRANCH"
 
-          NEW_PR_URL=$(gh pr create \
+          NEW_PR_URL=$(GH_TOKEN="$APP_TOKEN" gh pr create \
             --title "chore(security): update VEX statements from scheduled scan" \
             --body "## Summary
           - Update VEX statements for all not-affected vulnerabilities found by the scheduled scan
