@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
   "author": "Danny Sauer <github@dannysauer.com>",
-  "timestamp": "2026-06-25T12:12:04Z",
-  "version": 36,
+  "timestamp": "2026-07-02T12:03:09Z",
+  "version": 39,
   "statements": [
     {
       "vulnerability": {
@@ -514,6 +514,51 @@
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
       "impact_statement": "The application does not process untrusted cryptographic input, does not parse CMS, PKCS#7, S/MIME, or PKCS#12 files, and only uses cryptography for JWT signing and outbound HTTPS connections to trusted endpoints (GitHub API). The vulnerability in the statically linked OpenSSL version is not exploitable in this context because adversaries cannot influence the cryptographic operations or the data being processed."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-41992",
+        "name": "CVE-2026-41992",
+        "description": "GNU gzip contains a global buffer overflow vulnerability in the LZH de ..."
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/gzip"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process user-uploaded files or handle untrusted input that could exploit the vulnerability in gzip. The vulnerability requires specific crafted input to trigger the buffer overflow, which is not possible in the context of this application as it only processes GitHub webhook events and makes outbound HTTPS connections to trusted endpoints."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-54369",
+        "name": "CVE-2026-54369",
+        "description": "acl: Symlink traversal privilege escalation via libacl functions"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libacl1"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process user-uploaded files, does not handle untrusted input, and does not use the affected libacl pathname-based functions for any operations. Additionally, the application's containerized environment and limited scope of operations (GitHub API interactions and webhook processing) ensure that adversaries cannot exploit the symlink traversal vulnerability to manipulate ACLs or escalate privileges."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-54371",
+        "name": "CVE-2026-54371",
+        "description": "attr: Symlink Traversal Privilege Escalation via getfattr and setfattr"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libattr1"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not invoke or rely on the getfattr or setfattr utilities, nor does it process or traverse attacker-controlled file paths. Additionally, the application operates in a containerized environment with no indication that privileged processes interact with attacker-controlled paths. Therefore, the vulnerability is not exploitable in this context."
     }
   ]
 }
