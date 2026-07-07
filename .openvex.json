@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
   "author": "Danny Sauer <github@dannysauer.com>",
-  "timestamp": "2026-06-25T12:12:04Z",
-  "version": 36,
+  "timestamp": "2026-07-07T12:22:12Z",
+  "version": 38,
   "statements": [
     {
       "vulnerability": {
@@ -514,6 +514,36 @@
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
       "impact_statement": "The application does not process untrusted cryptographic input, does not parse CMS, PKCS#7, S/MIME, or PKCS#12 files, and only uses cryptography for JWT signing and outbound HTTPS connections to trusted endpoints (GitHub API). The vulnerability in the statically linked OpenSSL version is not exploitable in this context because adversaries cannot influence the cryptographic operations or the data being processed."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-41992",
+        "name": "CVE-2026-41992",
+        "description": "GNU gzip contains a global buffer overflow vulnerability in the LZH de ..."
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/gzip"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process user-uploaded files or accept untrusted input that could exploit the vulnerability in the gzip package. Additionally, the application does not use gzip for decompression of LZW or LZH files, and its functionality is limited to handling GitHub webhook events and making outbound HTTPS connections. Therefore, the vulnerability is not exploitable in this context."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-54369",
+        "name": "CVE-2026-54369",
+        "description": "acl: Symlink traversal privilege escalation via libacl functions"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libacl1"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process or interact with file paths controlled by adversaries, nor does it use the affected libacl pathname-based functions. The vulnerability requires an attacker to control components of a pathname processed by privileged callers, which is not applicable to the application's functionality or security-relevant context."
     }
   ]
 }
