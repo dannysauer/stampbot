@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
   "author": "Danny Sauer <github@dannysauer.com>",
-  "timestamp": "2026-06-25T12:12:04Z",
-  "version": 36,
+  "timestamp": "2026-07-08T11:42:24Z",
+  "version": 39,
   "statements": [
     {
       "vulnerability": {
@@ -514,6 +514,75 @@
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
       "impact_statement": "The application does not process untrusted cryptographic input, does not parse CMS, PKCS#7, S/MIME, or PKCS#12 files, and only uses cryptography for JWT signing and outbound HTTPS connections to trusted endpoints (GitHub API). The vulnerability in the statically linked OpenSSL version is not exploitable in this context because adversaries cannot influence the cryptographic operations or the data being processed."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-41992",
+        "name": "CVE-2026-41992",
+        "description": "GNU gzip contains a global buffer overflow vulnerability in the LZH de ..."
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/gzip"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process user-uploaded files or untrusted input, and it does not use gzip for decompression of files. The vulnerability requires an attacker to control the input files processed by gzip in a specific sequence to exploit the issue. Since the application only interacts with trusted sources (GitHub API and a trusted OTLP collector) and does not handle file decompression, the vulnerability is not exploitable in this context."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-53615",
+        "name": "CVE-2026-53615",
+        "description": "[Integer Overflow or Wraparound in libblkid/src/partitions/dos.c]"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/bsdutils"
+        },
+        {
+          "@id": "pkg:deb/debian/libblkid1"
+        },
+        {
+          "@id": "pkg:deb/debian/liblastlog2-2"
+        },
+        {
+          "@id": "pkg:deb/debian/libmount1"
+        },
+        {
+          "@id": "pkg:deb/debian/libsmartcols1"
+        },
+        {
+          "@id": "pkg:deb/debian/libuuid1"
+        },
+        {
+          "@id": "pkg:deb/debian/login"
+        },
+        {
+          "@id": "pkg:deb/debian/mount"
+        },
+        {
+          "@id": "pkg:deb/debian/util-linux"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The vulnerability in libblkid/src/partitions/dos.c involves an integer overflow or wraparound, which is not exploitable in the context of this application. Stampbot does not process or interact with disk partitions, untrusted files, or any input that could trigger the vulnerable code path. Additionally, the application operates in a containerized environment and only interacts with the GitHub API and a trusted OTLP trace collector, further isolating it from potential exploitation of this vulnerability."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-54369",
+        "name": "CVE-2026-54369",
+        "description": "acl: Symlink traversal privilege escalation via libacl functions"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libacl1"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The application does not process user-uploaded files, does not handle untrusted input related to file paths, and operates in a controlled environment where adversaries cannot influence pathname components processed by libacl functions. Therefore, the symlink traversal vulnerability in libacl does not pose a risk to the application's functionality or security."
     }
   ]
 }
