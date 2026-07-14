@@ -28,7 +28,7 @@ fills that gap. Keep people and teams in `CODEOWNERS`. Delegate named paths to S
 Extra CODEOWNERS policy, then require the separate `Extra CODEOWNERS / approval` check.
 
 Before you replace GitHub's native code-owner rule, read the companion App's
-[current safety boundary](https://github.com/stampbot/extra-codeowners#the-current-production-blocker).
+[current safety boundary](https://extra-codeowners.readthedocs.io/en/latest/reference/checks/#eventual-consistency).
 
 ## Features
 
