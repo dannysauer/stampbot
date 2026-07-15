@@ -34,8 +34,13 @@ the surface. Setup HTML responses use `Cache-Control: no-store`, prohibit
 framing, and suppress referrer data so the callback URL is not forwarded when
 the operator follows its installation link.
 
-The current application constant reports version `0.1.0` in the root response,
-OpenAPI document, metric, and tracing resource.
+Published images receive the release workflow's computed version at build time.
+Stampbot resolves that value once and uses it in the root response, OpenAPI
+document, `stampbot_info` metric, and OpenTelemetry `service.version` resource
+attribute. A source installation falls back to its installed package metadata;
+an unversioned source-container build reports `0.0.0+unknown` rather than
+claiming to be a published release. Local `make docker-build` builds default to
+`0.0.0+local`; set `APP_VERSION` to give one a more specific identifier.
 
 ## Webhook request
 

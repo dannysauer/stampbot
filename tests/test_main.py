@@ -62,11 +62,24 @@ def test_lifespan_startup_unconfigured_setup_disabled():
 
 def test_root_endpoint(test_client: TestClient):
     """Test root endpoint returns basic info."""
+    from stampbot.version import APP_VERSION
+
     response = test_client.get("/")
     assert response.status_code == 200
     data = response.json()
     assert data["app"] == "stampbot"
+    assert data["version"] == APP_VERSION
     assert data["status"] == "running"
+
+
+def test_openapi_reports_app_version(test_client: TestClient):
+    """Test OpenAPI metadata uses the resolved application version."""
+    from stampbot.version import APP_VERSION
+
+    response = test_client.get("/openapi.json")
+
+    assert response.status_code == 200
+    assert response.json()["info"]["version"] == APP_VERSION
 
 
 def test_health_endpoint(test_client: TestClient):
@@ -127,9 +140,12 @@ def test_ready_endpoint_unconfigured_setup_disabled(test_client: TestClient):
 
 def test_metrics_endpoint(test_client: TestClient):
     """Test Prometheus metrics endpoint."""
+    from stampbot.version import APP_VERSION
+
     response = test_client.get("/metrics")
     assert response.status_code == 200
     assert "text/plain" in response.headers["content-type"]
+    assert f'stampbot_info{{version="{APP_VERSION}"}} 1.0' in response.text
 
 
 def test_request_with_content_length(test_client: TestClient):

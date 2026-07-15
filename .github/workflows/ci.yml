@@ -496,6 +496,8 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            STAMPBOT_VERSION=0.0.0+git.${{ github.sha }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
           platforms: linux/amd64
@@ -567,6 +569,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            STAMPBOT_VERSION=0.0.0+git.${{ github.sha }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
           platforms: linux/amd64
@@ -1261,7 +1265,9 @@ jobs:
 
       - name: Build and load image into kind
         run: |
-          docker build -t stampbot:ci-test .
+          docker build \
+            --build-arg STAMPBOT_VERSION=0.0.0+git.${{ github.sha }} \
+            -t stampbot:ci-test .
           kind load docker-image stampbot:ci-test --name stampbot-${{ matrix.test-case }}
 
       - name: Create test namespace
@@ -1404,7 +1410,9 @@ jobs:
 
       - name: Build and load image into kind
         run: |
-          docker build -t stampbot:ci-test .
+          docker build \
+            --build-arg STAMPBOT_VERSION=0.0.0+git.${{ github.sha }} \
+            -t stampbot:ci-test .
           kind load docker-image stampbot:ci-test --name stampbot-upgrade
 
       - name: Create test namespace

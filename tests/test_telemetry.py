@@ -117,6 +117,8 @@ def test_instrument_fastapi_when_disabled():
 
 def test_configure_telemetry_success():
     """Test configure_telemetry returns provider when properly configured."""
+    from stampbot.version import APP_VERSION
+
     with (
         patch("stampbot.telemetry.settings") as mock_settings,
         patch("stampbot.telemetry.Resource") as mock_resource,
@@ -137,7 +139,9 @@ def test_configure_telemetry_success():
         result = configure_telemetry()
 
         assert result == mock_provider
-        mock_resource.create.assert_called_once()
+        mock_resource.create.assert_called_once_with(
+            {"service.name": "test-service", "service.version": APP_VERSION}
+        )
         mock_provider_cls.assert_called_once()
         mock_exporter.assert_called_once()
         mock_processor.assert_called_once()

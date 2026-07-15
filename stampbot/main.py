@@ -43,6 +43,7 @@ from stampbot.metrics import (
     webhook_signature_validations_total,
 )
 from stampbot.telemetry import configure_telemetry, instrument_fastapi
+from stampbot.version import APP_VERSION
 from stampbot.webhook_handler import webhook_handler
 
 # Configure logging
@@ -51,8 +52,6 @@ logger = get_logger(__name__)
 
 # Configure OpenTelemetry
 configure_telemetry()
-
-APP_VERSION = "0.1.0"
 
 # Security limits
 MAX_WEBHOOK_BODY_SIZE = 1024 * 1024  # 1MB - GitHub webhooks are typically much smaller
@@ -326,9 +325,8 @@ async def root() -> Response:
     if not configured and _setup_is_available(configured=False):
         return RedirectResponse(url="/setup", status_code=307)
 
-    return Response(
-        content='{"app": "stampbot", "version": "' + APP_VERSION + '", "status": "running"}',
-        media_type="application/json",
+    return JSONResponse(
+        content={"app": "stampbot", "version": APP_VERSION, "status": "running"},
     )
 
 

@@ -3,6 +3,7 @@
 # Variables
 IMAGE_NAME ?= stampbot
 IMAGE_TAG ?= latest
+APP_VERSION ?= 0.0.0+local
 REGISTRY ?= docker.io
 CHART_VERSION ?= 0.1.0
 VENV := .venv
@@ -120,6 +121,7 @@ docker-build: ## Build Docker image with caching
 		--cache-from type=$(BUILDX_CACHE_TYPE),ref=$(REGISTRY)/$(IMAGE_NAME):buildcache \
 		--cache-to type=$(BUILDX_CACHE_TYPE),ref=$(REGISTRY)/$(IMAGE_NAME):buildcache,mode=max \
 		--build-arg BUILDKIT_INLINE_CACHE=1 \
+		--build-arg STAMPBOT_VERSION=$(APP_VERSION) \
 		-t $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG) \
 		-t $(REGISTRY)/$(IMAGE_NAME):latest \
 		--load \
@@ -135,6 +137,7 @@ docker-build-pr: ## Build Docker image for PR with PR number tag
 		--cache-from type=$(BUILDX_CACHE_TYPE),ref=$(REGISTRY)/$(IMAGE_NAME):buildcache \
 		--cache-to type=$(BUILDX_CACHE_TYPE),ref=$(REGISTRY)/$(IMAGE_NAME):buildcache,mode=max \
 		--build-arg BUILDKIT_INLINE_CACHE=1 \
+		--build-arg STAMPBOT_VERSION=$(APP_VERSION) \
 		-t $(REGISTRY)/$(IMAGE_NAME):pr-$(PR_NUMBER) \
 		--load \
 		.

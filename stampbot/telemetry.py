@@ -17,6 +17,7 @@ from opentelemetry.trace import Span, Status, StatusCode
 
 from stampbot.config import settings
 from stampbot.logger import get_logger
+from stampbot.version import APP_VERSION
 
 logger = get_logger(__name__)
 
@@ -40,7 +41,7 @@ def configure_telemetry() -> TracerProvider | None:
         resource = Resource.create(
             {
                 "service.name": settings.otel_service_name,
-                "service.version": "0.1.0",
+                "service.version": APP_VERSION,
             }
         )
 

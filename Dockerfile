@@ -19,6 +19,12 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Production stage
 FROM python:3.14-slim@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1
 
+# The release workflow injects its computed version once for every runtime
+# surface. Unversioned local builds deliberately fall back to package metadata
+# or 0.0.0+unknown instead of claiming to be a published release.
+ARG STAMPBOT_VERSION
+ENV STAMPBOT_VERSION=${STAMPBOT_VERSION}
+
 # Apply current Debian security updates, then create the non-root user
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends && \
