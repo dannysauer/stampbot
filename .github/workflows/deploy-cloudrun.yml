@@ -1,8 +1,6 @@
 name: Deploy to Cloud Run
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       image_tag:
@@ -55,10 +53,6 @@ jobs:
         run: |
           if [ -n "${{ inputs.image_tag }}" ]; then
             echo "tag=${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" = "release" ]; then
-            # Extract version from release tag (remove 'v' prefix)
-            TAG="${{ github.event.release.tag_name }}"
-            echo "tag=${TAG#v}" >> $GITHUB_OUTPUT
           else
             # Fetch latest release tag (excluding chart releases)
             LATEST=$(gh api repos/${{ github.repository }}/releases --jq '[.[] | select(.tag_name | startswith("v"))][0].tag_name')
