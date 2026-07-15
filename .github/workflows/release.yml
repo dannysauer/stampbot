@@ -7,11 +7,18 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release (e.g., v1.0.0). Leave empty to auto-calculate.'
+        description: 'Existing app tag to retry (must point at default-branch HEAD). Leave empty to auto-calculate.'
         required: false
         type: string
 
 permissions: read-all
+
+concurrency:
+  # GitHub keeps at most one running and one pending member of a concurrency
+  # group. A burst of pushes therefore coalesces behind the active publisher,
+  # and the surviving run calculates from every commit after the latest tag.
+  group: stampbot-app-release-${{ github.repository }}
+  cancel-in-progress: false
 
 env:
   GHCR_REGISTRY: ghcr.io
@@ -27,7 +34,19 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       should_release: ${{ steps.version.outputs.should_release }}
+      should_release_chart: ${{ steps.version.outputs.should_release_chart }}
     steps:
+      - name: Validate release ref
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          EXPECTED_REF="refs/heads/${DEFAULT_BRANCH}"
+          if [ "$GITHUB_REF" != "$EXPECTED_REF" ]; then
+            echo "::error::Manual releases must run from $EXPECTED_REF"
+            exit 1
+          fi
+
       - name: Generate app token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -45,61 +64,28 @@ jobs:
         env:
           INPUT_TAG: ${{ inputs.tag }}
         run: |
-          # If tag provided via workflow_dispatch, use it
-          if [ -n "$INPUT_TAG" ]; then
-            # Verify tag exists
-            if ! git rev-parse "$INPUT_TAG" >/dev/null 2>&1; then
-              echo "::error::Tag $INPUT_TAG does not exist"
+          python .github/scripts/release_plan.py \
+            --requested-tag "$INPUT_TAG" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Validate retry release state
+        if: inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RETRY_TAG: ${{ inputs.tag }}
+        run: |
+          if RELEASE_DRAFT=$(gh api \
+            "repos/$GITHUB_REPOSITORY/releases/tags/$RETRY_TAG" \
+            --jq '.draft' 2>&1); then
+            if [ "$RELEASE_DRAFT" != "true" ]; then
+              echo "::error::Release $RETRY_TAG is already published and cannot be retried"
               exit 1
             fi
-            echo "version=${INPUT_TAG#v}" >> $GITHUB_OUTPUT
-            echo "should_release=true" >> $GITHUB_OUTPUT
-            echo "Using provided tag: $INPUT_TAG"
-            exit 0
+          elif [[ "$RELEASE_DRAFT" != *"(HTTP 404)"* ]]; then
+            echo "::error::Unable to verify release state for $RETRY_TAG"
+            echo "$RELEASE_DRAFT"
+            exit 1
           fi
-
-          # Auto-calculate version from commits
-          LATEST_TAG=$(git tag -l 'v*.*.*' --sort=-v:refname | head -n1)
-          if [ -z "$LATEST_TAG" ]; then
-            LATEST_TAG="v0.0.0"
-            COMMIT_RANGE="HEAD"
-          else
-            COMMIT_RANGE="$LATEST_TAG..HEAD"
-          fi
-
-          echo "Latest tag: $LATEST_TAG"
-          echo "Analyzing commits: $COMMIT_RANGE"
-
-          # Check for releasable commits (feat or fix)
-          if ! git log "$COMMIT_RANGE" --pretty=format:"%s" 2>/dev/null | grep -qE "^(feat|fix)(\(.+\))?(!)?:"; then
-            echo "No feat or fix commits since $LATEST_TAG - skipping release"
-            echo "should_release=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          # Determine bump type
-          BUMP_TYPE="patch"
-          if git log "$COMMIT_RANGE" --pretty=format:"%s%n%b" | grep -qE "(^[a-z]+(\(.+\))?!:|BREAKING CHANGE:)"; then
-            BUMP_TYPE="major"
-          elif git log "$COMMIT_RANGE" --pretty=format:"%s" | grep -qE "^feat(\(.+\))?:"; then
-            BUMP_TYPE="minor"
-          fi
-
-          echo "Bump type: $BUMP_TYPE"
-
-          # Calculate new version
-          VERSION="${LATEST_TAG#v}"
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
-
-          case "$BUMP_TYPE" in
-            major) NEW_VERSION="$((MAJOR + 1)).0.0" ;;
-            minor) NEW_VERSION="$MAJOR.$((MINOR + 1)).0" ;;
-            patch) NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))" ;;
-          esac
-
-          echo "New version: v$NEW_VERSION"
-          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "should_release=true" >> $GITHUB_OUTPUT
 
       - name: Create and push tag
         if: steps.version.outputs.should_release == 'true' && inputs.tag == ''
@@ -122,6 +108,8 @@ jobs:
       id-token: write  # For keyless signing with cosign/Sigstore
     outputs:
       release_asset_hashes: ${{ steps.provenance-subjects.outputs.hashes }}
+      release_id: ${{ steps.create-release.outputs.id }}
+      release_upload_url: ${{ steps.create-release.outputs.upload_url }}
     steps:
       - name: Generate app token
         id: app-token
@@ -197,7 +185,7 @@ jobs:
           cosign attest --predicate sbom.spdx.json \
             --type spdxjson \
             --yes \
-            ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE }}@${DIGEST}
+            "${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE }}@${DIGEST}"
 
       - name: Attest VEX to image
         env:
@@ -207,7 +195,7 @@ jobs:
           cosign attest --predicate .openvex.json \
             --type openvex \
             --yes \
-            ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE }}@${DIGEST}
+            "${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE }}@${DIGEST}"
 
       - name: Copy VEX document for release
         env:
@@ -240,7 +228,7 @@ jobs:
           if [ -z "$LATEST_TAG" ]; then
             COMMIT_RANGE="HEAD"
           else
-            COMMIT_RANGE="${LATEST_TAG}..v${VERSION}"
+            COMMIT_RANGE="refs/tags/${LATEST_TAG}..refs/tags/v${VERSION}"
           fi
 
           echo "Generating changelog for range: $COMMIT_RANGE"
@@ -279,6 +267,7 @@ jobs:
           cat app-changelog.md
 
       - name: Create draft GitHub Release
+        id: create-release
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           tag_name: v${{ needs.determine-version.outputs.version }}
@@ -300,24 +289,27 @@ jobs:
     if: needs.determine-version.outputs.should_release == 'true'
     permissions:
       actions: read  # For reusable workflow path detection
-      contents: write  # For release asset upload
+      contents: read
       id-token: write  # For keyless SLSA provenance signing
     # SLSA generator workflows must use a full semantic tag for slsa-verifier compatibility.
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
       base64-subjects: ${{ needs.build-and-publish-image.outputs.release_asset_hashes }}
       provenance-name: stampbot-${{ needs.determine-version.outputs.version }}.intoto.jsonl
-      upload-assets: true
-      upload-tag-name: v${{ needs.determine-version.outputs.version }}
-      draft-release: "true"
+      # A first-party job uploads this known Actions artifact to the exact
+      # numeric draft created above. The generator must never discover a
+      # release by tag because repositories with more than 100 releases can
+      # otherwise split assets across same-tag drafts.
+      upload-assets: false
 
   publish-app-release:
     name: Publish App Release
-    needs: [determine-version, app-release-provenance]
+    needs: [determine-version, build-and-publish-image, app-release-provenance]
     if: needs.determine-version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      actions: read
+      contents: write
     steps:
       - name: Generate app token
         id: app-token
@@ -326,19 +318,46 @@ jobs:
           app-id: ${{ vars.AUTOMATION_ID }}
           private-key: ${{ secrets.AUTOMATION_SECRET }}
 
-      - name: Publish GitHub release
+      - name: Checkout release finalizer
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Download the known provenance artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: stampbot-${{ needs.determine-version.outputs.version }}.intoto.jsonl
+          path: release-provenance
+
+      - name: Verify assets and publish the exact release ID
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          TAG: v${{ needs.determine-version.outputs.version }}
+          RELEASE_ID: ${{ needs.build-and-publish-image.outputs.release_id }}
+          RELEASE_UPLOAD_URL: ${{ needs.build-and-publish-image.outputs.release_upload_url }}
+          VERSION: ${{ needs.determine-version.outputs.version }}
         run: |
           set -euo pipefail
-          gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
-          test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq '.draft')" = "false"
+          python .github/scripts/finalize_release.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --release-id "$RELEASE_ID" \
+            --upload-url "$RELEASE_UPLOAD_URL" \
+            --tag "v${VERSION}" \
+            --provenance "release-provenance/stampbot-${VERSION}.intoto.jsonl" \
+            --expected-asset sbom.spdx.json \
+            --expected-asset sbom.spdx.json.sigstore.json \
+            --expected-asset "stampbot-${VERSION}.vex.json" \
+            --expected-asset "stampbot-${VERSION}.vex.json.sigstore.json" \
+            --expected-asset "stampbot-${VERSION}.intoto.jsonl"
 
   release-chart:
     name: Release Helm Chart
-    needs: [determine-version, build-and-publish-image, publish-app-release]
-    if: needs.determine-version.outputs.should_release == 'true'
+    needs: [determine-version, publish-app-release]
+    if: >-
+      always() &&
+      needs.determine-version.result == 'success' &&
+      needs.determine-version.outputs.should_release_chart == 'true' &&
+      (needs.determine-version.outputs.should_release != 'true' ||
+       needs.publish-app-release.result == 'success')
     uses: ./.github/workflows/chart-release.yml
     with:
       app_version: ${{ needs.determine-version.outputs.version }}

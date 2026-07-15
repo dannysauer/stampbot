@@ -73,6 +73,12 @@ repos:
         pass_filenames: false
         files: ^stampbot/
         types: [python]
+      - id: actionlint
+        name: actionlint
+        entry: actionlint
+        language: system
+        files: ^\.github/workflows/.*\.ya?ml$
+        types: [yaml]
 
   # Renovate config validation
   - repo: https://github.com/renovatebot/pre-commit-hooks
@@ -99,4 +105,4 @@ repos:
 
 # Skip hooks on specific files
 ci:
-  skip: [helmlint, helm-kubeconform, commitlint, renovate-config-validator, mypy, poetry-export]  # Skip in CI (handled by workflows, too large, or requires local tools)
+  skip: [actionlint, helmlint, helm-kubeconform, commitlint, renovate-config-validator, mypy, poetry-export]  # Skip in CI (handled by workflows, too large, or requires local tools)

@@ -53,10 +53,13 @@ jobs:
         run: poetry install --only main,dev
 
       - name: Run ruff format
-        run: poetry run ruff format --check stampbot/ tests/
+        run: poetry run ruff format --check stampbot/ tests/ .github/scripts/
 
       - name: Run ruff check
-        run: poetry run ruff check stampbot/ tests/
+        run: poetry run ruff check stampbot/ tests/ .github/scripts/
+
+      - name: Lint GitHub Actions workflows
+        run: actionlint
 
       - name: Run mypy
         run: poetry run mypy stampbot/
@@ -1229,16 +1232,20 @@ jobs:
       - name: Discover test cases
         id: discover
         run: |
-          # Find all *-values.yaml files and extract test case names
-          if ls charts/stampbot/ci/*-values.yaml >/dev/null 2>&1; then
-            TEST_CASES=$(ls charts/stampbot/ci/*-values.yaml | \
-              xargs -I {} basename {} -values.yaml | \
-              jq -R -s -c 'split("\n") | map(select(length > 0))')
+          # Find all *-values.yaml files and extract test case names.
+          shopt -s nullglob
+          TEST_FILES=(charts/stampbot/ci/*-values.yaml)
+          if (( ${#TEST_FILES[@]} > 0 )); then
+            TEST_CASES=$(
+              for path in "${TEST_FILES[@]}"; do
+                basename "$path" -values.yaml
+              done | jq -R -s -c 'split("\n") | map(select(length > 0))'
+            )
           else
             echo "::warning::No test cases found in charts/stampbot/ci/"
             TEST_CASES='["default"]'
           fi
-          echo "test-cases=$TEST_CASES" >> $GITHUB_OUTPUT
+          echo "test-cases=$TEST_CASES" >> "$GITHUB_OUTPUT"
           echo "Discovered test cases: $TEST_CASES"
 
   helm-install-test:

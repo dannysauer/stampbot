@@ -34,10 +34,10 @@ jobs:
         id: changes
         run: |
           if git diff --quiet docs/external/google-python-style-guide.md; then
-            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "No changes detected in Google Python Style Guide"
           else
-            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "Changes detected in Google Python Style Guide"
           fi
 

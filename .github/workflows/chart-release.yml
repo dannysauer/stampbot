@@ -1,15 +1,14 @@
 name: Chart Release
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'charts/**'
   workflow_dispatch:
     inputs:
       app_version:
         description: 'App version to set as appVersion (optional, defaults to latest v* tag)'
+        required: false
+        type: string
+      retry_tag:
+        description: 'Existing chart tag to retry (must point at default-branch HEAD)'
         required: false
         type: string
   workflow_call:
@@ -25,6 +24,12 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  # This group is intentionally distinct from the app publisher. It also
+  # serializes manual dispatches with calls from release.yml.
+  group: stampbot-chart-release-${{ github.repository }}
+  cancel-in-progress: false
 
 env:
   CHART_DIR: charts/stampbot
@@ -44,7 +49,19 @@ jobs:
       skip: ${{ steps.check.outputs.skip }}
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
+      release_id: ${{ steps.create-release.outputs.id }}
+      release_upload_url: ${{ steps.create-release.outputs.upload_url }}
     steps:
+      - name: Validate release ref
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          EXPECTED_REF="refs/heads/${DEFAULT_BRANCH}"
+          if [ "$GITHUB_REF" != "$EXPECTED_REF" ]; then
+            echo "::error::Manual chart releases must run from $EXPECTED_REF"
+            exit 1
+          fi
+
       - name: Generate app token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -68,17 +85,51 @@ jobs:
 
       - name: Calculate next chart version
         id: version
+        env:
+          RETRY_TAG: ${{ inputs.retry_tag }}
         run: |
+          set -euo pipefail
+
+          if [ -n "$RETRY_TAG" ]; then
+            if ! [[ "$RETRY_TAG" =~ ^chart-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "::error::Chart retry tag must use strict chart-vX.Y.Z semantic versioning"
+              exit 1
+            fi
+            if ! git rev-parse --verify --quiet "refs/tags/$RETRY_TAG" >/dev/null; then
+              echo "::error::Chart retry tag $RETRY_TAG does not exist"
+              exit 1
+            fi
+
+            TAG_COMMIT=$(git rev-parse "refs/tags/$RETRY_TAG^{commit}")
+            HEAD_COMMIT=$(git rev-parse HEAD)
+            if [ "$TAG_COMMIT" != "$HEAD_COMMIT" ]; then
+              echo "::error::Chart retry tag $RETRY_TAG does not point to the checked-out commit"
+              exit 1
+            fi
+
+            NEW_VERSION="${RETRY_TAG#chart-v}"
+            echo "Retrying chart version: $NEW_VERSION"
+            echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+            echo "tag=$RETRY_TAG" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           # Get the latest chart tag
-          LATEST_CHART_TAG=$(git tag -l 'chart-v*' --sort=-v:refname | head -n1)
+          LATEST_CHART_TAG=$(git tag -l 'chart-v*' --sort=-v:refname \
+            | grep -E '^chart-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+            | head -n1 || true)
 
           if [ -z "$LATEST_CHART_TAG" ]; then
             echo "No previous chart tag found, starting at 0.1.0"
             CURRENT_VERSION="0.0.0"
             COMMIT_RANGE="HEAD"
           else
+            if ! git merge-base --is-ancestor "refs/tags/$LATEST_CHART_TAG" HEAD; then
+              echo "::error::Latest chart tag $LATEST_CHART_TAG is not an ancestor of HEAD"
+              exit 1
+            fi
             CURRENT_VERSION="${LATEST_CHART_TAG#chart-v}"
-            COMMIT_RANGE="${LATEST_CHART_TAG}..HEAD"
+            COMMIT_RANGE="refs/tags/${LATEST_CHART_TAG}..HEAD"
           fi
 
           echo "Current version: $CURRENT_VERSION"
@@ -116,34 +167,104 @@ jobs:
           esac
 
           echo "New version: $NEW_VERSION"
-          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "tag=chart-v$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=chart-v$NEW_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Get app version
         id: app_version
+        env:
+          INPUT_APP_VERSION: ${{ inputs.app_version }}
         run: |
-          if [ -n "${{ inputs.app_version }}" ]; then
-            APP_VERSION="${{ inputs.app_version }}"
+          set -euo pipefail
+
+          if [ -n "$INPUT_APP_VERSION" ]; then
+            APP_VERSION="$INPUT_APP_VERSION"
+            if ! [[ "$APP_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "::error::App version must be a strict numeric semantic version"
+              exit 1
+            fi
+            APP_TAG="v$APP_VERSION"
+            if ! git rev-parse --verify --quiet "refs/tags/$APP_TAG" >/dev/null; then
+              echo "::error::App version tag $APP_TAG does not exist"
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "refs/tags/$APP_TAG" HEAD; then
+              echo "::error::App version tag $APP_TAG is not an ancestor of HEAD"
+              exit 1
+            fi
           else
             # Get latest app version tag
-            APP_VERSION=$(git tag -l 'v*' --sort=-v:refname | head -n1 | sed 's/^v//')
-            if [ -z "$APP_VERSION" ]; then
+            LATEST_APP_TAG=$(git tag -l 'v*' --sort=-v:refname \
+              | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+              | head -n1 || true)
+            if [ -z "$LATEST_APP_TAG" ]; then
               echo "::warning::No app version tag (v*) found. Using 0.1.0 as initial appVersion."
               APP_VERSION="0.1.0"
+            else
+              if ! git merge-base --is-ancestor "refs/tags/$LATEST_APP_TAG" HEAD; then
+                echo "::error::Latest app tag $LATEST_APP_TAG is not an ancestor of HEAD"
+                exit 1
+              fi
+              APP_VERSION="${LATEST_APP_TAG#v}"
             fi
           fi
+          if ! [[ "$APP_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::App version must be a strict numeric semantic version"
+            exit 1
+          fi
           echo "App version: $APP_VERSION"
-          echo "app_version=$APP_VERSION" >> $GITHUB_OUTPUT
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Validate application release
+        env:
+          APP_TAG: v${{ steps.app_version.outputs.app_version }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          if ! RELEASE_DRAFT=$(gh api \
+            "repos/$GITHUB_REPOSITORY/releases/tags/$APP_TAG" \
+            --jq '.draft' 2>&1); then
+            echo "::error::Published application release $APP_TAG was not found"
+            echo "$RELEASE_DRAFT"
+            exit 1
+          fi
+          if [ "$RELEASE_DRAFT" != "false" ]; then
+            echo "::error::Application release $APP_TAG is not published"
+            exit 1
+          fi
+
+      - name: Validate retry release state
+        if: inputs.retry_tag != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RETRY_TAG: ${{ inputs.retry_tag }}
+        run: |
+          if RELEASE_DRAFT=$(gh api \
+            "repos/$GITHUB_REPOSITORY/releases/tags/$RETRY_TAG" \
+            --jq '.draft' 2>&1); then
+            if [ "$RELEASE_DRAFT" != "true" ]; then
+              echo "::error::Chart release $RETRY_TAG is already published and cannot be retried"
+              exit 1
+            fi
+          elif [[ "$RELEASE_DRAFT" != *"(HTTP 404)"* ]]; then
+            echo "::error::Unable to verify release state for $RETRY_TAG"
+            echo "$RELEASE_DRAFT"
+            exit 1
+          fi
 
       - name: Check if release needed
         id: check
+        env:
+          RETRY_TAG: ${{ inputs.retry_tag }}
         run: |
           TAG="${{ steps.version.outputs.tag }}"
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
+          if [ -n "$RETRY_TAG" ]; then
+            echo "Retry requested for existing tag $TAG"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
             echo "Tag $TAG already exists, skipping release"
-            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> "$GITHUB_OUTPUT"
           else
-            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Update Chart.yaml versions
@@ -169,7 +290,7 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         run: |
           helm package "${{ env.CHART_DIR }}" --destination .
-          ls -la *.tgz
+          ls -la -- ./*.tgz
 
       - name: Sign chart package
         if: steps.check.outputs.skip != 'true'
@@ -201,7 +322,7 @@ jobs:
           helm push "stampbot-${CHART_VERSION}.tgz" "oci://${{ env.CHART_REPO }}"
 
       - name: Create Git tag
-        if: steps.check.outputs.skip != 'true'
+        if: steps.check.outputs.skip != 'true' && inputs.retry_tag == ''
         run: |
           TAG="${{ steps.version.outputs.tag }}"
           git config user.name "${{ steps.app-token.outputs.app-slug }}[bot]"
@@ -220,63 +341,67 @@ jobs:
           if [ -z "$LATEST_CHART_TAG" ] || [ "$LATEST_CHART_TAG" = "${{ steps.version.outputs.tag }}" ]; then
             COMMIT_RANGE="HEAD"
           else
-            COMMIT_RANGE="${LATEST_CHART_TAG}..HEAD"
+            COMMIT_RANGE="refs/tags/${LATEST_CHART_TAG}..HEAD"
           fi
 
-          # Start with container version info
-          echo "## Container Version" > changelog.md
-          echo "" >> changelog.md
-          echo "This chart deploys **stampbot v${APP_VERSION}**" >> changelog.md
-          echo "" >> changelog.md
-          echo "- Container image: \`ghcr.io/${{ github.repository }}:${APP_VERSION}\`" >> changelog.md
-          echo "- [View container release](https://github.com/${{ github.repository }}/releases/tag/v${APP_VERSION})" >> changelog.md
-          echo "" >> changelog.md
+          # Write the changelog through one redirection so a partial command cannot
+          # accidentally append to a stale file from an earlier step.
+          {
+            echo "## Container Version"
+            echo ""
+            echo "This chart deploys **stampbot v${APP_VERSION}**"
+            echo ""
+            echo "- Container image: \`ghcr.io/${{ github.repository }}:${APP_VERSION}\`"
+            echo "- [View container release](https://github.com/${{ github.repository }}/releases/tag/v${APP_VERSION})"
+            echo ""
 
-          # Include the app changelog from its GitHub Release
-          APP_CHANGELOG=$(gh release view "v${APP_VERSION}" --json body --jq '.body' 2>/dev/null || true)
-          if [ -n "$APP_CHANGELOG" ]; then
-            echo "## App Changelog" >> changelog.md
-            echo "" >> changelog.md
-            echo "$APP_CHANGELOG" >> changelog.md
-            echo "" >> changelog.md
-          fi
-
-          echo "## Chart Changes" >> changelog.md
-          echo "" >> changelog.md
-
-          # Group commits by type
-          FOUND_COMMITS=false
-          for type in feat fix docs chore refactor test ci; do
-            COMMITS=$(git log "$COMMIT_RANGE" --pretty=format:"- %s" --grep="^${type}:" --grep="^${type}(" -E 2>/dev/null || true)
-            if [ -n "$COMMITS" ]; then
-              FOUND_COMMITS=true
-              case $type in
-                feat) echo "### 🚀 Features" >> changelog.md ;;
-                fix) echo "### 🐛 Bug Fixes" >> changelog.md ;;
-                docs) echo "### 📚 Documentation" >> changelog.md ;;
-                chore) echo "### 🔧 Maintenance" >> changelog.md ;;
-                refactor) echo "### ♻️ Refactoring" >> changelog.md ;;
-                test) echo "### 🧪 Tests" >> changelog.md ;;
-                ci) echo "### 🏗️ CI/CD" >> changelog.md ;;
-              esac
-              echo "$COMMITS" >> changelog.md
-              echo "" >> changelog.md
+            # Include the app changelog from its GitHub Release
+            APP_CHANGELOG=$(gh release view "v${APP_VERSION}" --json body --jq '.body' 2>/dev/null || true)
+            if [ -n "$APP_CHANGELOG" ]; then
+              echo "## App Changelog"
+              echo ""
+              echo "$APP_CHANGELOG"
+              echo ""
             fi
-          done
 
-          if [ "$FOUND_COMMITS" = false ]; then
-            echo "- Chart updated for stampbot v${APP_VERSION}" >> changelog.md
-            echo "" >> changelog.md
-          fi
+            echo "## Chart Changes"
+            echo ""
 
-          echo "" >> changelog.md
-          if [ -n "$LATEST_CHART_TAG" ] && [ "$LATEST_CHART_TAG" != "${{ steps.version.outputs.tag }}" ]; then
-            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${LATEST_CHART_TAG}...${{ steps.version.outputs.tag }}" >> changelog.md
-          fi
+            # Group commits by type
+            FOUND_COMMITS=false
+            for type in feat fix docs chore refactor test ci; do
+              COMMITS=$(git log "$COMMIT_RANGE" --pretty=format:"- %s" --grep="^${type}:" --grep="^${type}(" -E 2>/dev/null || true)
+              if [ -n "$COMMITS" ]; then
+                FOUND_COMMITS=true
+                case $type in
+                  feat) echo "### 🚀 Features" ;;
+                  fix) echo "### 🐛 Bug Fixes" ;;
+                  docs) echo "### 📚 Documentation" ;;
+                  chore) echo "### 🔧 Maintenance" ;;
+                  refactor) echo "### ♻️ Refactoring" ;;
+                  test) echo "### 🧪 Tests" ;;
+                  ci) echo "### 🏗️ CI/CD" ;;
+                esac
+                echo "$COMMITS"
+                echo ""
+              fi
+            done
+
+            if [ "$FOUND_COMMITS" = false ]; then
+              echo "- Chart updated for stampbot v${APP_VERSION}"
+              echo ""
+            fi
+
+            echo ""
+            if [ -n "$LATEST_CHART_TAG" ] && [ "$LATEST_CHART_TAG" != "${{ steps.version.outputs.tag }}" ]; then
+              echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${LATEST_CHART_TAG}...${{ steps.version.outputs.tag }}"
+            fi
+          } > changelog.md
 
           cat changelog.md
 
       - name: Create draft GitHub Release
+        id: create-release
         if: steps.check.outputs.skip != 'true'
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
@@ -297,16 +422,16 @@ jobs:
     if: needs.release-chart.outputs.skip != 'true'
     permissions:
       actions: read  # For reusable workflow path detection
-      contents: write  # For release asset upload
+      contents: read
       id-token: write  # For keyless SLSA provenance signing
     # SLSA generator workflows must use a full semantic tag for slsa-verifier compatibility.
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
       base64-subjects: ${{ needs.release-chart.outputs.release_asset_hashes }}
       provenance-name: stampbot-chart-${{ needs.release-chart.outputs.version }}.intoto.jsonl
-      upload-assets: true
-      upload-tag-name: ${{ needs.release-chart.outputs.tag }}
-      draft-release: "true"
+      # Finalization below attaches this known artifact to the captured
+      # numeric draft. The generator must not search for a draft by tag.
+      upload-assets: false
 
   publish-chart-release:
     name: Publish Chart Release
@@ -314,7 +439,8 @@ jobs:
     if: needs.release-chart.outputs.skip != 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      actions: read
+      contents: write
     steps:
       - name: Generate app token
         id: app-token
@@ -323,11 +449,32 @@ jobs:
           app-id: ${{ vars.AUTOMATION_ID }}
           private-key: ${{ secrets.AUTOMATION_SECRET }}
 
-      - name: Publish GitHub release
+      - name: Checkout release finalizer
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Download the known provenance artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: stampbot-chart-${{ needs.release-chart.outputs.version }}.intoto.jsonl
+          path: release-provenance
+
+      - name: Verify assets and publish the exact release ID
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RELEASE_ID: ${{ needs.release-chart.outputs.release_id }}
+          RELEASE_UPLOAD_URL: ${{ needs.release-chart.outputs.release_upload_url }}
           TAG: ${{ needs.release-chart.outputs.tag }}
+          VERSION: ${{ needs.release-chart.outputs.version }}
         run: |
           set -euo pipefail
-          gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
-          test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq '.draft')" = "false"
+          python .github/scripts/finalize_release.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --release-id "$RELEASE_ID" \
+            --upload-url "$RELEASE_UPLOAD_URL" \
+            --tag "$TAG" \
+            --provenance "release-provenance/stampbot-chart-${VERSION}.intoto.jsonl" \
+            --expected-asset "stampbot-${VERSION}.tgz" \
+            --expected-asset "stampbot-${VERSION}.tgz.sigstore.json" \
+            --expected-asset "stampbot-chart-${VERSION}.intoto.jsonl"
