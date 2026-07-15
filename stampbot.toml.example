@@ -32,7 +32,8 @@ unapprove_commands = ["unapprove", "unstamp"]
 # PR must have at least one of these labels to be eligible for auto-approval
 # required_labels = ["autoapprove"]
 
-# PR title must match at least one of these regex patterns to be eligible
+# PR title must match at least one Python-compatible regex pattern to be eligible.
+# Maximum 20 patterns and 256 characters per pattern; each match has a 10 ms limit.
 # required_title_patterns = ["^feat:", "^fix:"]
 
 # PR author (GitHub login) must be in this list to be eligible

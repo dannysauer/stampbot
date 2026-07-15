@@ -74,6 +74,11 @@ Missing pull request, repository, or installation fields produce a handler-level
 Removing one configured approval label dismisses the review even when another
 configured approval label remains. A later matching event can approve again.
 
+Title filtering accepts at most 20 Python-compatible patterns of 256 characters
+each and evaluates no more than 256 title characters. Each pattern has a 10 ms
+matching limit. Eligibility evaluation runs outside the asyncio event loop; a
+matching timeout or engine error fails closed without creating an approval.
+
 ## ChatOps
 
 Stampbot lowercases and trims a comment before searching for

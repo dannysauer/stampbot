@@ -7,7 +7,16 @@ from __future__ import annotations
 
 from typing import Any
 
+import regex  # type: ignore[import-untyped]
 from dynaconf import Dynaconf  # type: ignore[import-untyped]
+
+# GitHub currently limits pull request titles to 256 characters. Keep a local
+# bound because webhook JSON is still untrusted input. Repository patterns are
+# bounded separately so a policy cannot multiply matching work without limit.
+MAX_PR_TITLE_LENGTH = 256
+MAX_TITLE_PATTERN_COUNT = 20
+MAX_TITLE_PATTERN_LENGTH = 256
+TITLE_PATTERN_TIMEOUT_SECONDS = 0.01
 
 # Default values for repo configuration
 # These can be overridden in settings.toml or per-repo stampbot.toml
@@ -118,10 +127,49 @@ class RepoConfig:
         self.approve_commands = approve_commands
         self.unapprove_commands = unapprove_commands
         self.required_labels = required_labels or []
-        self.required_title_patterns = required_title_patterns or []
+        title_patterns = required_title_patterns if required_title_patterns is not None else []
+        self._compiled_title_patterns = self._compile_title_patterns(title_patterns)
+        self.required_title_patterns = list(title_patterns)
         self.allowed_users = allowed_users or []
         self.allowed_teams = allowed_teams or []
         self.config_error = config_error
+
+    @staticmethod
+    def _compile_title_patterns(patterns: list[str]) -> list[Any]:
+        """Validate and compile bounded pull request title patterns.
+
+        Args:
+            patterns: Configured title patterns.
+
+        Returns:
+            Patterns compiled in Python ``re`` compatibility mode.
+
+        Raises:
+            ValueError: If the pattern list, an item, or a pattern is invalid.
+        """
+        if not isinstance(patterns, list):
+            raise ValueError("required_title_patterns must be a list of strings")
+        if len(patterns) > MAX_TITLE_PATTERN_COUNT:
+            raise ValueError(
+                "required_title_patterns contains too many patterns "
+                f"(maximum: {MAX_TITLE_PATTERN_COUNT})"
+            )
+
+        compiled_patterns = []
+        for pattern in patterns:
+            if not isinstance(pattern, str):
+                raise ValueError("required_title_patterns must contain only strings")
+            if len(pattern) > MAX_TITLE_PATTERN_LENGTH:
+                raise ValueError(
+                    "required_title_patterns contains a pattern longer than "
+                    f"{MAX_TITLE_PATTERN_LENGTH} characters"
+                )
+            try:
+                compiled_patterns.append(regex.compile(pattern, regex.VERSION0))
+            except (regex.error, OverflowError) as e:
+                raise ValueError(f"Invalid regex pattern '{pattern}': {e}") from e
+
+        return compiled_patterns
 
     def with_config_error(self, message: str) -> RepoConfig:
         """Attach a config error to the repo config.
@@ -156,8 +204,6 @@ class RepoConfig:
         Returns:
             Tuple of (is_eligible, reason_if_not_eligible)
         """
-        import re
-
         # Check required labels filter
         if self.required_labels:
             if not any(label in self.required_labels for label in pr_labels):
@@ -167,8 +213,33 @@ class RepoConfig:
                 )
 
         # Check required title patterns filter
-        if self.required_title_patterns:
-            if not any(re.search(pattern, pr_title) for pattern in self.required_title_patterns):
+        if self._compiled_title_patterns:
+            if not isinstance(pr_title, str):
+                return False, "PR title is not valid text"
+            if len(pr_title) > MAX_PR_TITLE_LENGTH:
+                return (
+                    False,
+                    f"PR title exceeds the {MAX_PR_TITLE_LENGTH}-character safety limit",
+                )
+
+            for pattern in self._compiled_title_patterns:
+                try:
+                    if pattern.search(
+                        pr_title,
+                        timeout=TITLE_PATTERN_TIMEOUT_SECONDS,
+                        concurrent=True,
+                    ):
+                        break
+                except TimeoutError:
+                    timeout_ms = int(TITLE_PATTERN_TIMEOUT_SECONDS * 1000)
+                    return (
+                        False,
+                        "PR title pattern evaluation could not complete within "
+                        f"the {timeout_ms} ms safety limit",
+                    )
+                except regex.error:
+                    return False, "PR title pattern evaluation failed safely"
+            else:
                 return False, "PR title does not match any required pattern"
 
         # Check allowed users/teams filter (if either is configured)
@@ -260,8 +331,6 @@ class RepoConfig:
         # Merge: repo settings override defaults
         merged = {**defaults, **repo_settings}
 
-        import re
-
         required_permission = merged.get("chatops_required_permission", "maintain")
         if required_permission not in REPO_PERMISSION_LEVELS:
             raise ValueError(
@@ -270,13 +339,7 @@ class RepoConfig:
                 f"Valid values: {', '.join(REPO_PERMISSION_LEVELS)}"
             )
 
-        # Validate regex patterns
         title_patterns = merged.get("required_title_patterns", [])
-        for pattern in title_patterns:
-            try:
-                re.compile(pattern)
-            except re.error as e:
-                raise ValueError(f"Invalid regex pattern '{pattern}': {e}") from e
 
         return cls(
             approval_labels=merged.get("approval_labels", []),

@@ -113,7 +113,10 @@ these components.
 ## Trust boundaries
 
 The webhook body is untrusted until HMAC-SHA256 verification succeeds.
-Stampbot compares signatures in constant time and caps the body at 1 MiB.
+Stampbot compares signatures in constant time and caps the body at 1 MiB. A
+valid signature proves GitHub sent the payload, not that repository contributors
+are trusted: pull request titles remain attacker-controlled. Title matching
+bounds inputs and execution time and runs outside the asyncio event loop.
 
 Repository policy is trusted at the same level as the target repository's
 default branch. Anyone who can change that file can change when Stampbot

@@ -120,8 +120,8 @@ PY
 ```
 
 If GitHub can't read a policy file, Stampbot uses its service defaults. If it
-reads invalid TOML, an invalid permission, or an invalid regular expression,
-Stampbot stops automation for that event.
+reads invalid TOML, an invalid permission, or an invalid or out-of-bounds title
+pattern list, Stampbot stops automation for that event.
 
 ## Diagnose label approval
 
@@ -133,6 +133,7 @@ Stampbot stops automation for that event.
 | A new commit doesn't receive approval | `reapprove` defaults to `false`. Enable it only when a new head should inherit the policy decision. |
 | Repeated events don't add another review | This is expected when an active Stampbot approval already covers the current head. |
 | `synchronize` still does nothing with `reapprove = true` | Stampbot needs a previous App review and a configured approval label on the pull request. |
+| The response mentions a title-pattern safety limit or evaluation failure | A pattern exceeded its 10 ms match budget or the engine failed. Reproduce with the policy validator and a sanitized title, then simplify or split the pattern. Stampbot intentionally doesn't approve that event. |
 
 Eligibility filters apply to label-driven approval. They don't limit an
 authorized ChatOps approval.

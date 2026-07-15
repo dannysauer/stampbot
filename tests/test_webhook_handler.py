@@ -1,6 +1,7 @@
 """Tests for webhook handler."""
 
 import asyncio
+import threading
 import time
 from unittest.mock import patch
 
@@ -341,6 +342,53 @@ async def test_pr_not_eligible_title_pattern_no_match(webhook_handler, mock_gith
     assert result["status"] == "ignored"
     assert "not eligible" in result["message"].lower()
     mock_github_client.approve_pr.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pathological_pr_title_pattern_is_bounded(webhook_handler, mock_github_client):
+    """Test a pathological title pattern fails closed within a bounded time."""
+    from stampbot.config import MAX_PR_TITLE_LENGTH
+
+    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload["pull_request"]["title"] = "a" * (MAX_PR_TITLE_LENGTH - 1) + "!"
+    mock_github_client.get_repo_file.return_value = 'required_title_patterns = ["(a|aa)+$"]'
+
+    result = await asyncio.wait_for(
+        webhook_handler.handle_event("pull_request", payload), timeout=1.0
+    )
+
+    assert result["status"] == "ignored"
+    assert "safety limit" in result["message"].lower()
+    mock_github_client.approve_pr.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pr_eligibility_does_not_block_event_loop(
+    webhook_handler, mock_github_client, monkeypatch
+):
+    """Test title eligibility work runs outside the asyncio event loop."""
+    from stampbot.config import RepoConfig
+
+    payload = load_fixture("pr_opened_with_autoapprove_label")
+    eligibility_started = threading.Event()
+
+    def slow_eligibility(*_args, **_kwargs):
+        eligibility_started.set()
+        time.sleep(0.3)
+        return False, "test rejection"
+
+    monkeypatch.setattr(RepoConfig, "is_pr_eligible", slow_eligibility)
+    task = asyncio.create_task(webhook_handler.handle_event("pull_request", payload))
+
+    start = time.monotonic()
+    started = await asyncio.wait_for(asyncio.to_thread(eligibility_started.wait, 0.5), timeout=0.6)
+    assert started is True
+    await asyncio.wait_for(asyncio.sleep(0.01), timeout=0.05)
+    assert time.monotonic() - start < 0.15
+
+    result = await task
+    assert result["status"] == "ignored"
+    assert "test rejection" in result["message"]
 
 
 @pytest.mark.asyncio

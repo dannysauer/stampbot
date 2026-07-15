@@ -3,8 +3,17 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+import regex
 
-from stampbot.config import RepoConfig, get_setting, is_configured
+from stampbot.config import (
+    MAX_PR_TITLE_LENGTH,
+    MAX_TITLE_PATTERN_COUNT,
+    MAX_TITLE_PATTERN_LENGTH,
+    TITLE_PATTERN_TIMEOUT_SECONDS,
+    RepoConfig,
+    get_setting,
+    is_configured,
+)
 
 
 def test_repo_config_from_toml():
@@ -200,6 +209,45 @@ required_title_patterns = ["[invalid"]
         RepoConfig.from_toml(toml_content)
 
 
+@pytest.mark.parametrize(
+    ("toml_content", "message"),
+    [
+        ('required_title_patterns = "^fix:"', "must be a list of strings"),
+        ("required_title_patterns = [1]", "must contain only strings"),
+    ],
+)
+def test_repo_config_rejects_invalid_title_pattern_types(toml_content, message):
+    """Test title pattern configuration requires a list of strings."""
+    with pytest.raises(ValueError, match=message):
+        RepoConfig.from_toml(toml_content)
+
+
+def test_repo_config_rejects_too_many_title_patterns():
+    """Test title pattern count is bounded."""
+    patterns = ", ".join('"^fix:"' for _ in range(MAX_TITLE_PATTERN_COUNT + 1))
+
+    with pytest.raises(ValueError, match="too many patterns"):
+        RepoConfig.from_toml(f"required_title_patterns = [{patterns}]")
+
+
+def test_repo_config_rejects_long_title_pattern():
+    """Test individual title pattern length is bounded."""
+    pattern = "a" * (MAX_TITLE_PATTERN_LENGTH + 1)
+
+    with pytest.raises(ValueError, match="pattern longer than"):
+        RepoConfig.from_toml(f'required_title_patterns = ["{pattern}"]')
+
+
+def test_repo_config_accepts_title_pattern_boundaries():
+    """Test pattern count and length limits are inclusive."""
+    patterns = ["a" * MAX_TITLE_PATTERN_LENGTH]
+    patterns.extend("^fix:" for _ in range(MAX_TITLE_PATTERN_COUNT - 1))
+
+    config = RepoConfig.from_toml(f"required_title_patterns = {patterns!r}")
+
+    assert len(config.required_title_patterns) == MAX_TITLE_PATTERN_COUNT
+
+
 def test_is_pr_eligible_no_filters():
     """Test is_pr_eligible returns True when no filters configured."""
     config = RepoConfig.default()
@@ -258,6 +306,62 @@ def test_is_pr_eligible_title_pattern_second_matches():
     is_eligible, reason = config.is_pr_eligible([], "[bot] Update deps", "someuser")
     assert is_eligible is True
     assert reason is None
+
+
+def test_is_pr_eligible_preserves_scoped_inline_flag_semantics():
+    """Test a scoped flag cannot make the rest of a title pattern case-insensitive."""
+    config = RepoConfig.from_toml('required_title_patterns = ["(?i:fix): [A-Z]+"]')
+
+    is_eligible, reason = config.is_pr_eligible([], "FIX: lowercase", "someuser")
+
+    assert is_eligible is False
+    assert reason == "PR title does not match any required pattern"
+
+
+def test_is_pr_eligible_rejects_overlong_title_before_matching():
+    """Test webhook title input is bounded before regex evaluation."""
+    config = RepoConfig.from_toml('required_title_patterns = [".*"]')
+    config._compiled_title_patterns[0] = MagicMock()
+
+    is_eligible, reason = config.is_pr_eligible([], "a" * (MAX_PR_TITLE_LENGTH + 1), "someuser")
+
+    assert is_eligible is False
+    assert f"{MAX_PR_TITLE_LENGTH}-character safety limit" in reason
+    config._compiled_title_patterns[0].search.assert_not_called()
+
+
+def test_is_pr_eligible_rejects_non_text_title():
+    """Test malformed webhook title input fails closed."""
+    config = RepoConfig.from_toml('required_title_patterns = [".*"]')
+
+    is_eligible, reason = config.is_pr_eligible([], None, "someuser")  # type: ignore[arg-type]
+
+    assert is_eligible is False
+    assert reason == "PR title is not valid text"
+
+
+def test_is_pr_eligible_pathological_title_pattern_times_out():
+    """Test catastrophic backtracking is stopped by the match timeout."""
+    config = RepoConfig.from_toml('required_title_patterns = ["(a|aa)+$"]')
+
+    is_eligible, reason = config.is_pr_eligible(
+        [], "a" * (MAX_PR_TITLE_LENGTH - 1) + "!", "someuser"
+    )
+
+    assert is_eligible is False
+    assert f"{int(TITLE_PATTERN_TIMEOUT_SECONDS * 1000)} ms safety limit" in reason
+
+
+def test_is_pr_eligible_regex_engine_failure_is_closed():
+    """Test a regex engine failure cannot approve a pull request."""
+    config = RepoConfig.from_toml('required_title_patterns = ["^fix:"]')
+    config._compiled_title_patterns[0] = MagicMock()
+    config._compiled_title_patterns[0].search.side_effect = regex.error("engine failure")
+
+    is_eligible, reason = config.is_pr_eligible([], "fix: dependency", "someuser")
+
+    assert is_eligible is False
+    assert reason == "PR title pattern evaluation failed safely"
 
 
 def test_is_pr_eligible_both_filters_pass():

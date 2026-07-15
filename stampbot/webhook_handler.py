@@ -264,8 +264,12 @@ class WebhookHandler:
                         )
 
                     # Check if PR passes eligibility filters
-                    is_eligible, reason = repo_config.is_pr_eligible(
-                        labels, pr_title, pr_author, author_team_slugs
+                    is_eligible, reason = await run_in_threadpool(
+                        repo_config.is_pr_eligible,
+                        labels,
+                        pr_title,
+                        pr_author,
+                        author_team_slugs,
                     )
                     if not is_eligible:
                         logger.info(

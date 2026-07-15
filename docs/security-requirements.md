@@ -31,6 +31,9 @@ secure.
 - Reapproval after a new commit must remain an explicit repository choice.
 - Invalid TOML, permission values, and regular expressions must stop automation
   for that event.
+- Pull request title matching must bound title length, pattern count, pattern
+  length, and per-pattern execution time. Matching must stay off the asyncio
+  event loop, and a timeout or engine failure must not create an approval.
 - A repository-policy read failure may use service defaults only while that
   behavior is documented and observable.
 

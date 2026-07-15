@@ -86,16 +86,25 @@ organization file.
 | `approve_commands` | list of strings | `["approve", "stamp"]` | Words that create approval after `@stampbot`. |
 | `unapprove_commands` | list of strings | `["unapprove", "unstamp"]` | Words that dismiss active Stampbot approvals. |
 | `required_labels` | list of strings | `[]` | At least one listed label must be present for label-driven approval. |
-| `required_title_patterns` | list of regex strings | `[]` | At least one regular expression must match the pull request title. |
+| `required_title_patterns` | list of regex strings | `[]` | At least one Python-compatible regular expression must match the pull request title. Maximum 20 patterns, each at most 256 characters. |
 | `allowed_users` | list of GitHub logins | `[]` | Directly allowed pull request authors. |
 | `allowed_teams` | list of team slugs | `[]` | Organization teams whose members may pass the author filter. Use `team-slug` or `org/team-slug`. |
 
 Empty filter lists disable that filter. `allowed_users` and `allowed_teams` form
 one author filter: a direct user match or a team match is enough.
 
-The parser validates TOML syntax, the permission enum, and each title regular
-expression. It doesn't currently reject unknown keys or every wrong TOML type.
-Use the documented types; stricter validation may arrive later.
+The parser validates TOML syntax, the permission enum, and title-pattern type,
+count, length, and syntax. It doesn't currently reject unknown keys or every
+wrong TOML type. Use the documented types; stricter validation may arrive
+later.
+
+Title patterns use Python `re`-compatible behavior. Stampbot evaluates them in
+configuration order with a 10 ms limit for each pattern, against a title of at
+most 256 characters. Matching runs in a worker thread so it cannot stall the
+asyncio event loop. The first match passes the title filter. If a pattern times
+out or the matching engine fails before a match, Stampbot rejects approval for
+that event and reports the safety-limit reason. Rewrite an expensive pattern or
+split it into simpler alternatives instead of relying on more evaluation time.
 
 Command parsing reads one `\w+` word after `@stampbot`. Use letters, digits, or
 underscores in custom commands.
@@ -131,7 +140,9 @@ missing file.
 If Stampbot reads the file but can't parse or validate it, automation stops for
 that event. On a newly opened pull request, Stampbot leaves a review comment
 with the validation error. Other pull request actions and ChatOps events return
-an error result without changing a review.
+an error result without changing a review. A title-pattern timeout occurs while
+evaluating an otherwise valid policy; it makes that pull request ineligible and
+doesn't create an approval.
 
 ## GitHub App permissions
 
