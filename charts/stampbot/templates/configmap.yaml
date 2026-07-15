@@ -10,6 +10,7 @@ data:
   {{- if .Values.config.otelEnabled }}
   OTEL_ENDPOINT: {{ .Values.config.otelEndpoint | quote }}
   OTEL_SERVICE_NAME: {{ .Values.config.otelServiceName | quote }}
+  OTEL_INSECURE: {{ .Values.config.otelInsecure | quote }}
   {{- end }}
   STAMPBOT_SETUP_ENABLED: {{ .Values.setup.enabled | quote }}
   STAMPBOT_SETUP_ALLOW_CONFIGURED: {{ .Values.setup.allowConfigured | quote }}

@@ -130,6 +130,7 @@ def test_configure_telemetry_success():
         mock_settings.otel_enabled = True
         mock_settings.otel_endpoint = "http://localhost:4317"
         mock_settings.otel_service_name = "test-service"
+        mock_settings.get.return_value = False
 
         mock_provider = Mock()
         mock_provider_cls.return_value = mock_provider
@@ -143,9 +144,90 @@ def test_configure_telemetry_success():
             {"service.name": "test-service", "service.version": APP_VERSION}
         )
         mock_provider_cls.assert_called_once()
-        mock_exporter.assert_called_once()
+        mock_exporter.assert_called_once_with(
+            endpoint="http://localhost:4317",
+            insecure=False,
+        )
         mock_processor.assert_called_once()
         mock_trace.set_tracer_provider.assert_called_once_with(mock_provider)
+
+
+def test_configure_telemetry_plaintext_requires_opt_in():
+    """Test plaintext OTLP is used only when explicitly enabled."""
+    with (
+        patch("stampbot.telemetry.settings") as mock_settings,
+        patch("stampbot.telemetry.Resource"),
+        patch("stampbot.telemetry.TracerProvider") as mock_provider_cls,
+        patch("stampbot.telemetry.OTLPSpanExporter") as mock_exporter,
+        patch("stampbot.telemetry.BatchSpanProcessor"),
+        patch("stampbot.telemetry.trace"),
+    ):
+        mock_settings.otel_enabled = True
+        mock_settings.otel_endpoint = "http://otel-collector:4317"
+        mock_settings.otel_service_name = "test-service"
+        mock_settings.get.return_value = True
+        mock_provider_cls.return_value = Mock()
+
+        from stampbot.telemetry import configure_telemetry
+
+        configure_telemetry()
+
+        mock_exporter.assert_called_once_with(
+            endpoint="http://otel-collector:4317",
+            insecure=True,
+        )
+
+
+def test_configure_telemetry_rejects_non_boolean_plaintext_setting():
+    """Test a malformed insecure setting cannot disable TLS."""
+    with (
+        patch("stampbot.telemetry.settings") as mock_settings,
+        patch("stampbot.telemetry.Resource"),
+        patch("stampbot.telemetry.TracerProvider") as mock_provider_cls,
+        patch("stampbot.telemetry.OTLPSpanExporter") as mock_exporter,
+        patch("stampbot.telemetry.BatchSpanProcessor"),
+        patch("stampbot.telemetry.trace"),
+    ):
+        mock_settings.otel_enabled = True
+        mock_settings.otel_endpoint = "http://otel-collector:4317"
+        mock_settings.otel_service_name = "test-service"
+        mock_settings.get.return_value = "true"
+        mock_provider_cls.return_value = Mock()
+
+        from stampbot.telemetry import configure_telemetry
+
+        configure_telemetry()
+
+        mock_exporter.assert_called_once_with(
+            endpoint="http://otel-collector:4317",
+            insecure=False,
+        )
+
+
+def test_configure_telemetry_https_endpoint_cannot_be_downgraded():
+    """Test an HTTPS endpoint keeps TLS when plaintext is requested."""
+    with (
+        patch("stampbot.telemetry.settings") as mock_settings,
+        patch("stampbot.telemetry.Resource"),
+        patch("stampbot.telemetry.TracerProvider") as mock_provider_cls,
+        patch("stampbot.telemetry.OTLPSpanExporter") as mock_exporter,
+        patch("stampbot.telemetry.BatchSpanProcessor"),
+        patch("stampbot.telemetry.trace"),
+    ):
+        mock_settings.otel_enabled = True
+        mock_settings.otel_endpoint = "https://otel-collector:4317"
+        mock_settings.otel_service_name = "test-service"
+        mock_settings.get.return_value = True
+        mock_provider_cls.return_value = Mock()
+
+        from stampbot.telemetry import configure_telemetry
+
+        configure_telemetry()
+
+        mock_exporter.assert_called_once_with(
+            endpoint="https://otel-collector:4317",
+            insecure=False,
+        )
 
 
 def test_configure_telemetry_exception():

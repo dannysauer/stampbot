@@ -31,6 +31,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "stampbot.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
@@ -65,6 +66,12 @@ spec:
           value: {{ .Values.config.otelEndpoint }}
         - name: STAMPBOT_OTEL_SERVICE_NAME
           value: {{ .Values.config.otelServiceName }}
+        - name: STAMPBOT_OTEL_INSECURE
+          value: {{ .Values.config.otelInsecure | quote }}
+        {{- if .Values.config.otelCertificate.secretName }}
+        - name: OTEL_EXPORTER_OTLP_CERTIFICATE
+          value: /var/run/stampbot/otel/ca.crt
+        {{- end }}
         {{- end }}
         - name: STAMPBOT_APP_ID
           valueFrom:
@@ -102,9 +109,23 @@ spec:
         volumeMounts:
         - name: tmp
           mountPath: /tmp
+        {{- if and .Values.config.otelEnabled .Values.config.otelCertificate.secretName }}
+        - name: otel-ca
+          mountPath: /var/run/stampbot/otel
+          readOnly: true
+        {{- end }}
       volumes:
       - name: tmp
-        emptyDir: {}
+        emptyDir:
+          sizeLimit: {{ .Values.tmp.sizeLimit | quote }}
+      {{- if and .Values.config.otelEnabled .Values.config.otelCertificate.secretName }}
+      - name: otel-ca
+        secret:
+          secretName: {{ .Values.config.otelCertificate.secretName | quote }}
+          items:
+          - key: {{ .Values.config.otelCertificate.secretKey | quote }}
+            path: ca.crt
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

@@ -23,6 +23,9 @@ tests:
       - equal:
           path: spec.restartPolicy
           value: Never
+      - equal:
+          path: spec.automountServiceAccountToken
+          value: false
 
   - it: targets the in-cluster service URL and core endpoints
     asserts:

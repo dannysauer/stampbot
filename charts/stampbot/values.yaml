@@ -57,6 +57,8 @@ fullnameOverride: ""
 serviceAccount:
   # serviceAccount.create -- Create a ServiceAccount for Stampbot.
   create: true
+  # serviceAccount.automountServiceAccountToken -- Mount the Kubernetes API token in Stampbot Pods.
+  automountServiceAccountToken: false
   # serviceAccount.annotations -- Annotations added to the ServiceAccount.
   annotations: {}
   # serviceAccount.name -- Existing or explicit ServiceAccount name.
@@ -86,6 +88,11 @@ securityContext:
     drop:
       - ALL
   readOnlyRootFilesystem: true
+
+# tmp -- Writable temporary storage for the read-only container filesystem.
+tmp:
+  # tmp.sizeLimit -- Maximum size of the Pod's /tmp emptyDir volume.
+  sizeLimit: 64Mi
 
 # service -- Kubernetes Service settings.
 service:
@@ -206,6 +213,14 @@ config:
   otelEndpoint: ""
   # config.otelServiceName -- STAMPBOT_OTEL_SERVICE_NAME.
   otelServiceName: stampbot
+  # config.otelInsecure -- STAMPBOT_OTEL_INSECURE. Plaintext OTLP is opt-in.
+  otelInsecure: false
+  # config.otelCertificate -- Optional CA certificate from an existing Secret.
+  otelCertificate:
+    # config.otelCertificate.secretName -- Secret that contains the collector CA certificate.
+    secretName: "" # pragma: allowlist secret
+    # config.otelCertificate.secretKey -- Key in the Secret that contains a PEM CA certificate.
+    secretKey: ca.crt # pragma: allowlist secret
 
 # setup -- GitHub App setup-flow settings.
 setup:
@@ -266,12 +281,12 @@ externalSecrets:
         key: stampbot/github-credentials
         property: webhook_secret
 
-# opentelemetry -- Reserved values. Use config.otelEnabled, config.otelEndpoint, and config.otelServiceName.
+# opentelemetry -- Reserved values. Use the config.otel* values instead.
 opentelemetry:
   # opentelemetry.enabled -- Reserved; current templates do not read this value.
   enabled: false
   # opentelemetry.endpoint -- Reserved; current templates do not read this value.
-  endpoint: "http://otel-collector:4317"
+  endpoint: "https://otel-collector:4317"
   # opentelemetry.serviceName -- Reserved; current templates do not read this value.
   serviceName: stampbot
 
@@ -282,7 +297,7 @@ podDisruptionBudget:
   # podDisruptionBudget.minAvailable -- Minimum available Stampbot Pods.
   minAvailable: 1
 
-# networkPolicy -- NetworkPolicy settings. Replace the example rules for your cluster.
+# networkPolicy -- NetworkPolicy settings. Defaults fit common ingress, monitoring, DNS, and collector labels.
 networkPolicy:
   # networkPolicy.enabled -- Create a NetworkPolicy.
   enabled: false
@@ -293,20 +308,63 @@ networkPolicy:
   # networkPolicy.ingress -- Raw networking.k8s.io/v1 ingress rules.
   ingress:
     - from:
-      - namespaceSelector: {}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: stampbot
+      ports:
+        - protocol: TCP
+          port: 8000
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8000
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 8000
   # networkPolicy.egress -- Raw networking.k8s.io/v1 egress rules.
   egress:
     - to:
-      - namespaceSelector: {}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: stampbot
+      ports:
+        - protocol: TCP
+          port: 8000
     - to:
-      - podSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: TCP
+          port: 53
+        - protocol: UDP
+          port: 53
     - ports:
-      - protocol: TCP
-        port: 443
-      - protocol: TCP
-        port: 53
-      - protocol: UDP
-        port: 53
+        - protocol: TCP
+          port: 443
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opentelemetry-collector
+      ports:
+        - protocol: TCP
+          port: 4317
 
 # grafanaDashboard -- Bundled Grafana dashboard ConfigMap settings.
 # @schema

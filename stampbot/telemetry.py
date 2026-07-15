@@ -6,6 +6,7 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
+from urllib.parse import urlparse
 
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
@@ -48,10 +49,15 @@ def configure_telemetry() -> TracerProvider | None:
         # Create tracer provider
         provider = TracerProvider(resource=resource)
 
-        # Create OTLP exporter
+        # TLS is the default. Plaintext export requires an explicit opt-in.
+        otel_insecure_requested = settings.get("otel_insecure", False) is True
+        endpoint_uses_https = urlparse(settings.otel_endpoint).scheme == "https"
+        if otel_insecure_requested and endpoint_uses_https:
+            logger.warning("Ignoring plaintext OTLP setting for an HTTPS endpoint")
+        otel_insecure = otel_insecure_requested and not endpoint_uses_https
         otlp_exporter = OTLPSpanExporter(
             endpoint=settings.otel_endpoint,
-            insecure=True,  # Use TLS in production
+            insecure=otel_insecure,
         )
 
         # Add span processor
@@ -61,9 +67,13 @@ def configure_telemetry() -> TracerProvider | None:
         trace.set_tracer_provider(provider)
 
         logger.info(
-            "OpenTelemetry configured with endpoint: %s",
+            "OpenTelemetry configured with endpoint: %s (%s)",
             settings.otel_endpoint,
-            extra={"otel_endpoint": settings.otel_endpoint},
+            "plaintext" if otel_insecure else "TLS",
+            extra={
+                "otel_endpoint": settings.otel_endpoint,
+                "otel_transport": "plaintext" if otel_insecure else "TLS",
+            },
         )
 
         return provider

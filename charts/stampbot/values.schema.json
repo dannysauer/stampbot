@@ -48,6 +48,9 @@
         "create": {
           "type": "boolean"
         },
+        "automountServiceAccountToken": {
+          "type": "boolean"
+        },
         "annotations": {
           "type": "object"
         },
@@ -67,6 +70,16 @@
     },
     "securityContext": {
       "type": "object"
+    },
+    "tmp": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sizeLimit": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     },
     "service": {
       "type": "object",
@@ -253,6 +266,22 @@
         "otelServiceName": {
           "type": "string",
           "minLength": 1
+        },
+        "otelInsecure": {
+          "type": "boolean"
+        },
+        "otelCertificate": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "secretName": {
+              "type": "string"
+            },
+            "secretKey": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
         }
       }
     },
@@ -505,6 +534,35 @@
             "properties": {
               "enabled": {
                 "const": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "config": {
+            "required": ["otelInsecure"],
+            "properties": {
+              "otelInsecure": {
+                "const": true
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "config": {
+            "properties": {
+              "otelCertificate": {
+                "properties": {
+                  "secretName": {
+                    "maxLength": 0
+                  }
+                }
               }
             }
           }

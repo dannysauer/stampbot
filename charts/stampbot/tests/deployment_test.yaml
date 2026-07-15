@@ -24,6 +24,9 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].image
           value: "ghcr.io/dannysauer/stampbot:0.0.0-placeholder"
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
 
   - it: should set correct replica count when autoscaling disabled
     template: deployment.yaml
@@ -34,6 +37,15 @@ tests:
       - equal:
           path: spec.replicas
           value: 3
+
+  - it: should allow an explicit workload service account token mount
+    template: deployment.yaml
+    set:
+      serviceAccount.automountServiceAccountToken: true
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: true
 
   - it: should not set replicas when autoscaling enabled
     template: deployment.yaml
@@ -180,6 +192,53 @@ tests:
           content:
             name: STAMPBOT_OTEL_ENDPOINT
             value: "http://otel:4317"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: STAMPBOT_OTEL_INSECURE
+            value: "false"
+
+  - it: should opt in to plaintext OTLP explicitly
+    template: deployment.yaml
+    set:
+      config.otelEnabled: true
+      config.otelEndpoint: "http://otel:4317"
+      config.otelInsecure: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: STAMPBOT_OTEL_INSECURE
+            value: "true"
+
+  - it: should mount a private OTLP CA from an existing secret
+    template: deployment.yaml
+    set:
+      config.otelEnabled: true
+      config.otelEndpoint: "https://otel:4317"
+      config.otelCertificate.secretName: "otel-ca" # pragma: allowlist secret
+      config.otelCertificate.secretKey: "collector-ca.pem" # pragma: allowlist secret
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_EXPORTER_OTLP_CERTIFICATE
+            value: /var/run/stampbot/otel/ca.crt
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: otel-ca
+            mountPath: /var/run/stampbot/otel
+            readOnly: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: otel-ca
+            secret:
+              secretName: otel-ca # pragma: allowlist secret
+              items:
+                - key: collector-ca.pem
+                  path: ca.crt
 
   - it: should include prometheus scrape annotations
     template: deployment.yaml
@@ -218,12 +277,22 @@ tests:
           path: spec.template.spec.volumes
           content:
             name: tmp
-            emptyDir: {}
+            emptyDir:
+              sizeLimit: 64Mi
       - contains:
           path: spec.template.spec.containers[0].volumeMounts
           content:
             name: tmp
             mountPath: /tmp
+
+  - it: should configure the tmp volume size limit
+    template: deployment.yaml
+    set:
+      tmp.sizeLimit: 128Mi
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[?(@.name=="tmp")].emptyDir.sizeLimit
+          value: 128Mi
 
   - it: should apply node selector when specified
     template: deployment.yaml

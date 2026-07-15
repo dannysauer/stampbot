@@ -32,12 +32,15 @@ tests:
           path: data.OTEL_ENDPOINT
       - isNull:
           path: data.OTEL_SERVICE_NAME
+      - isNull:
+          path: data.OTEL_INSECURE
 
   - it: should set OTEL config when enabled
     set:
       config.otelEnabled: true
       config.otelEndpoint: "http://otel:4317"
       config.otelServiceName: "my-stampbot"
+      config.otelInsecure: true
     asserts:
       - equal:
           path: data.OTEL_ENABLED
@@ -48,6 +51,9 @@ tests:
       - equal:
           path: data.OTEL_SERVICE_NAME
           value: "my-stampbot"
+      - equal:
+          path: data.OTEL_INSECURE
+          value: "true"
 
   - it: should set setup disabled by default
     asserts:

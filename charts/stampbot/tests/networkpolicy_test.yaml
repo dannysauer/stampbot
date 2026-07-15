@@ -33,12 +33,77 @@ tests:
           path: spec.policyTypes
           content: Egress
 
-  - it: should allow egress to DNS and GitHub API
+  - it: should restrict ingress to named workload sources
     set:
       networkPolicy.enabled: true
     asserts:
-      - exists:
+      - equal:
+          path: spec.ingress
+          value:
+            - from:
+                - podSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: stampbot
+              ports:
+                - protocol: TCP
+                  port: 8000
+            - from:
+                - namespaceSelector:
+                    matchLabels:
+                      kubernetes.io/metadata.name: ingress-nginx
+                  podSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: ingress-nginx
+              ports:
+                - protocol: TCP
+                  port: 8000
+            - from:
+                - namespaceSelector:
+                    matchLabels:
+                      kubernetes.io/metadata.name: monitoring
+                  podSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: prometheus
+              ports:
+                - protocol: TCP
+                  port: 8000
+
+  - it: should restrict egress to DNS, HTTPS, and the local OTLP collector
+    set:
+      networkPolicy.enabled: true
+    asserts:
+      - equal:
           path: spec.egress
+          value:
+            - to:
+                - podSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: stampbot
+              ports:
+                - protocol: TCP
+                  port: 8000
+            - to:
+                - namespaceSelector:
+                    matchLabels:
+                      kubernetes.io/metadata.name: kube-system
+                  podSelector:
+                    matchLabels:
+                      k8s-app: kube-dns
+              ports:
+                - protocol: TCP
+                  port: 53
+                - protocol: UDP
+                  port: 53
+            - ports:
+                - protocol: TCP
+                  port: 443
+            - to:
+                - podSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: opentelemetry-collector
+              ports:
+                - protocol: TCP
+                  port: 4317
 
   - it: should have correct pod selector
     set:

@@ -25,6 +25,7 @@ secret store in production.
 | `STAMPBOT_OTEL_ENABLED` | `otel_enabled` | boolean | `false` | No | Enables FastAPI and logging instrumentation. |
 | `STAMPBOT_OTEL_ENDPOINT` | `otel_endpoint` | string | unset | When tracing is enabled | OTLP gRPC endpoint. Without it, Stampbot logs a warning and doesn't export spans. |
 | `STAMPBOT_OTEL_SERVICE_NAME` | `otel_service_name` | string | `stampbot` | No | OpenTelemetry service name. |
+| `STAMPBOT_OTEL_INSECURE` | `otel_insecure` | boolean | `false` | No | Permits plaintext OTLP gRPC for a non-HTTPS endpoint when `true`. An HTTPS endpoint always uses TLS. |
 | `STAMPBOT_SETUP_ENABLED` | `setup_enabled` | boolean | `false` | No | Enables setup for an unconfigured instance. Setup closes automatically after credentials are present. |
 | `STAMPBOT_SETUP_ALLOW_CONFIGURED` | `setup_allow_configured` | boolean | `false` | No | Reopens setup on a configured instance. Use only for deliberate App reprovisioning, then turn it off again. |
 | `STAMPBOT_BASE_URL` | `base_url` | HTTPS URL | unset | When setup is enabled | Trusted public URL used to build manifest callback and webhook URLs. It is never inferred from request headers. Local HTTP is accepted only for `localhost` addresses. |
@@ -34,8 +35,11 @@ secret store in production.
 | `STAMPBOT_METRICS_ENABLED` | `metrics_enabled` | boolean | `true` | No | Reserved. The current app serves `/metrics` regardless of this value. |
 | `STAMPBOT_METRICS_PORT` | `metrics_port` | integer | `8000` | No | Reserved. Metrics currently use the main HTTP port. |
 
-The OTLP exporter currently opens an insecure gRPC connection. Use a trusted
-network path or add transport protection in front of it.
+The OTLP exporter uses TLS and the system certificate store by default. Set the
+standard OpenTelemetry variable `OTEL_EXPORTER_OTLP_CERTIFICATE` to a PEM CA
+certificate path when the collector uses a private certificate authority. Set
+`STAMPBOT_OTEL_INSECURE=true` only for a collector on an isolated development
+network.
 
 Stampbot considers itself configured only when App ID, private key, and webhook
 secret are all present. Without all three, `POST /webhook` returns `503`.

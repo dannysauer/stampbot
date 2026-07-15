@@ -17,6 +17,9 @@ tests:
       - equal:
           path: metadata.annotations["helm.sh/hook"]
           value: test
+      - equal:
+          path: spec.automountServiceAccountToken
+          value: false
 
   - it: reads the webhook secret from the generated secret by default
     asserts:

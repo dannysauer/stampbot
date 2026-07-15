@@ -17,12 +17,14 @@ flowchart LR
     secret["Secret or ExternalSecret target"]
     prometheus["Prometheus"]
     monitor["ServiceMonitor"]
+    collector["OTLP collector"]
 
     github -->|signed webhook| ingress
     ingress --> service
     service --> pods
     secret -->|App credentials| pods
     pods -->|installation token| api
+    pods -.->|TLS spans| collector
     prometheus -.-> monitor
     monitor -.-> service
 ```
@@ -310,7 +312,7 @@ serviceAccount:
 
 awsSecretsManager:
   enabled: true
-  roleArn: arn:aws:iam::123456789012:role/stampbot-secrets
+  roleArn: arn:aws:iam::000000000000:role/stampbot-secrets
 
 externalSecrets:
   enabled: true
@@ -321,6 +323,12 @@ externalSecrets:
 
 `awsSecretsManager.enabled=true` requires `roleArn` and fails rendering when it
 is empty.
+
+The chart keeps `serviceAccount.automountServiceAccountToken=false` in this
+mode. External Secrets Operator can request an identity token for a referenced
+ServiceAccount without mounting a Kubernetes API token in the Stampbot Pod.
+Set the value to `true` only when another container in that Pod needs the
+automatic Kubernetes API token mount.
 
 The current templates don't read `awsSecretsManager.secretName` or
 `awsSecretsManager.region`. Configure remote keys in `externalSecrets.data` and
@@ -336,6 +344,113 @@ kubectl rollout status deployment/stampbot --namespace stampbot
 ```
 
 Adjust the Secret name when the Helm release or fullname differs.
+
+## Export traces over TLS
+
+Stampbot uses TLS for OpenTelemetry Protocol (OTLP) gRPC export by default.
+Set the collector endpoint when you enable tracing:
+
+```yaml
+config:
+  otelEnabled: true
+  otelEndpoint: https://otel-collector:4317
+  otelServiceName: stampbot
+```
+
+The exporter trusts the container's system certificate store. If your
+collector uses a private certificate authority, put its PEM CA certificate in
+an existing Secret:
+
+```bash
+kubectl create secret generic stampbot-otel-ca \
+  --namespace stampbot \
+  --from-file=ca.crt=./collector-ca.pem
+```
+
+Reference that Secret in the release values:
+
+```yaml
+config:
+  otelEnabled: true
+  otelEndpoint: https://otel-collector:4317
+  otelCertificate:
+    secretName: stampbot-otel-ca
+    secretKey: ca.crt
+```
+
+The chart mounts the selected key as
+`/var/run/stampbot/otel/ca.crt` and sets the standard OpenTelemetry certificate
+variable to that path. Certificate data stays out of Helm values.
+
+The release doesn't own this Secret. After you replace its CA certificate,
+restart the Deployment so the exporter opens a new gRPC channel. Delete the
+Secret after uninstall only when no other workload uses it.
+
+For an isolated development network that has no TLS receiver, opt in to
+plaintext:
+
+```yaml
+config:
+  otelEnabled: true
+  otelEndpoint: http://otel-collector:4317
+  otelInsecure: true
+```
+
+Don't use plaintext export across a shared cluster or network. Spans can carry
+repository and pull request metadata. The chart rejects a release that combines
+`otelInsecure=true` with `otelCertificate.secretName`.
+
+## Enable the NetworkPolicy
+
+`networkPolicy.enabled` defaults to `false` because cluster labels differ. When
+you enable it, the supplied rules admit these paths:
+
+| Direction | Default peer | Ports |
+| --- | --- | --- |
+| Ingress | Stampbot-labeled Pods in the release namespace | TCP 8000 |
+| Ingress | `ingress-nginx` Pods in the `ingress-nginx` namespace | TCP 8000 |
+| Ingress | Prometheus Pods in the `monitoring` namespace | TCP 8000 |
+| Egress | Stampbot-labeled Pods in the release namespace | TCP 8000 |
+| Egress | `kube-dns` Pods in `kube-system` | TCP and UDP 53 |
+| Egress | Any destination | TCP 443 |
+| Egress | OpenTelemetry Collector Pods in the release namespace | TCP 4317 |
+
+The HTTPS rule lets Stampbot reach GitHub. Kubernetes NetworkPolicy can't match
+DNS names, so that rule permits every destination on TCP 443. Use a network
+plugin with DNS-aware policy if you need to restrict HTTPS to GitHub hosts.
+
+The default peers use the namespace label
+`kubernetes.io/metadata.name` and common application labels. Inspect your
+cluster before enabling the policy:
+
+```bash
+kubectl get namespace ingress-nginx monitoring kube-system --show-labels
+kubectl get pods --all-namespaces \
+  --show-labels \
+  --selector='app.kubernetes.io/name in (ingress-nginx,prometheus,opentelemetry-collector)'
+```
+
+A missing namespace or an empty selector result means the supplied peer rule
+doesn't fit that cluster.
+
+Replace `networkPolicy.ingress` or `networkPolicy.egress` in your values when
+the namespaces, labels, DNS path, collector port, or `service.targetPort`
+differ. Both fields accept raw `networking.k8s.io/v1` rules.
+
+From a source checkout, render the policy before upgrading:
+
+```bash
+helm template stampbot charts/stampbot \
+  --namespace stampbot \
+  --values values.yaml \
+  --set networkPolicy.enabled=true \
+  --show-only templates/networkpolicy.yaml
+```
+
+After rollout, run `helm test` and confirm that GitHub webhook deliveries and
+trace export succeed. If the policy blocks required traffic, set
+`networkPolicy.enabled=false` and upgrade the release while you correct the
+peer selectors.
 
 ## Validate a local chart
 
@@ -372,12 +487,14 @@ Docker, and kubeconform.
 | `nameOverride` | string | empty | Overrides the chart name portion. |
 | `fullnameOverride` | string | empty | Replaces the generated resource fullname. |
 | `serviceAccount.create` | boolean | `true` | Creates the workload ServiceAccount. |
+| `serviceAccount.automountServiceAccountToken` | boolean | `false` | Sets automatic Kubernetes API token mounting on the workload ServiceAccount and Pod. |
 | `serviceAccount.annotations` | map | `{}` | ServiceAccount annotations. |
 | `serviceAccount.name` | string | empty | Existing or explicit ServiceAccount name. |
 | `deploymentAnnotations` | map | `{}` | Deployment metadata annotations. |
 | `podAnnotations` | map | Prometheus scrape annotations | Pod-template annotations. |
 | `podSecurityContext` | map | non-root UID/GID and RuntimeDefault seccomp | Pod security context. |
 | `securityContext` | map | no privilege escalation, all capabilities dropped, read-only root | Container security context. |
+| `tmp.sizeLimit` | Kubernetes quantity | `64Mi` | Maximum size of the writable `/tmp` emptyDir volume. |
 | `resources` | map | `100m/128Mi` requests; `500m/512Mi` limits | Container requests and limits. |
 | `nodeSelector` | map | `{}` | Pod node selector. |
 | `tolerations` | list | `[]` | Pod tolerations. |
@@ -398,8 +515,8 @@ Docker, and kubeconform.
 | `ingress.tls` | list | `[]` | Ingress TLS entries. |
 | `networkPolicy.enabled` | boolean | `false` | Creates a NetworkPolicy. |
 | `networkPolicy.policyTypes` | list | `Ingress` and `Egress` | Policy types. |
-| `networkPolicy.ingress` | list | any namespace | Raw ingress rules. Replace the default before relying on isolation. |
-| `networkPolicy.egress` | list | namespace, pod, HTTPS, and DNS rules | Raw egress rules. Confirm they fit the cluster CNI and DNS path. |
+| `networkPolicy.ingress` | list | Stampbot, ingress-nginx, and Prometheus peers | Raw ingress rules on TCP 8000. Match them to cluster labels before enabling the policy. |
+| `networkPolicy.egress` | list | Stampbot, DNS, TCP 443, and a local OTLP collector | Raw egress rules. Match DNS and collector selectors to the cluster before enabling the policy. |
 
 ### App and credentials
 
@@ -409,6 +526,9 @@ Docker, and kubeconform.
 | `config.otelEnabled` | boolean | `false` | `STAMPBOT_OTEL_ENABLED`. |
 | `config.otelEndpoint` | string | empty | `STAMPBOT_OTEL_ENDPOINT` when tracing is enabled. |
 | `config.otelServiceName` | string | `stampbot` | `STAMPBOT_OTEL_SERVICE_NAME`. |
+| `config.otelInsecure` | boolean | `false` | `STAMPBOT_OTEL_INSECURE`; permits plaintext for a non-HTTPS endpoint when `true`. |
+| `config.otelCertificate.secretName` | string | empty | Existing Secret that contains a private collector CA certificate. |
+| `config.otelCertificate.secretKey` | string | `ca.crt` | Secret key that contains the PEM CA certificate. |
 | `setup.enabled` | boolean | `false` | Enables first-run `/setup`; it still closes after credentials exist. |
 | `setup.allowConfigured` | boolean | `false` | Reopens setup on a configured instance. Use only for deliberate reprovisioning. |
 | `setup.baseUrl` | string | empty | Trusted `STAMPBOT_BASE_URL`; required while setup is enabled. |
@@ -460,11 +580,13 @@ Docker, and kubeconform.
   unless deliberately reprovisioning the App.
 - Pin a verified chart version and image digest for controlled promotion.
 - Protect `/metrics` at the network boundary when it shouldn't be public.
-- Review the default NetworkPolicy rules before enabling them; defaults are
-  examples, not a cluster-specific least-privilege policy.
+- Check the NetworkPolicy peer labels before enabling it. The HTTPS egress rule
+  is port-limited, not hostname-limited.
+- Leave `serviceAccount.automountServiceAccountToken=false` unless another
+  component in the Pod needs Kubernetes API credentials.
 - The default container runs as UID 1000, drops every Linux capability, blocks
   privilege escalation, uses RuntimeDefault seccomp, and mounts a writable
-  `/tmp` while keeping the root filesystem read-only.
+  `/tmp` limited to `64Mi` while keeping the root filesystem read-only.
 
 See [Verify a Stampbot release](../../docs/release-verification.md) before
 promoting a new chart or image.
