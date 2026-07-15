@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
   "author": "Danny Sauer <github@dannysauer.com>",
-  "timestamp": "2026-07-10T12:19:56Z",
-  "version": 39,
+  "timestamp": "2026-07-15T11:22:38Z",
+  "version": 41,
   "statements": [
     {
       "vulnerability": {
@@ -32,7 +32,7 @@
         }
       ],
       "status": "under_investigation",
-      "justification": "No fix available in Debian base image yet. Monitoring for patched glibc release.",
+      "status_notes": "No fix available in Debian base image yet. Monitoring for patched glibc release.",
       "action_statement": "Update base image when Debian releases a patched glibc."
     },
     {
@@ -47,7 +47,7 @@
         }
       ],
       "status": "under_investigation",
-      "justification": "Transitive dependency with no direct control. Monitoring for upstream fix.",
+      "status_notes": "Transitive dependency with no direct control. Monitoring for upstream fix.",
       "action_statement": "Update when a patched version becomes available."
     },
     {
@@ -583,6 +583,36 @@
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
       "impact_statement": "The application does not process or interact with file paths controlled by adversaries, nor does it use the affected libacl functions for pathname-based ACL operations. The vulnerability requires an attacker to control a pathname component processed by the application, which is not applicable in this context given the application's limited scope of operations and trusted inputs."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-13221",
+        "name": "CVE-2026-13221",
+        "description": "Perl versions through 5.43.9 produce silently incorrect regular expres ..."
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The assessed Debian runtime image includes perl-base 5.40.1-6, but Stampbot's Python application and entrypoints do not invoke Perl or compile Perl regular expressions. Stampbot policy matching uses bounded Python re and regex patterns. The affected Perl_study_chunk path is therefore not in Stampbot's execution path."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-57432",
+        "name": "CVE-2026-57432",
+        "description": "Perl versions through 5.43.10 have an integer overflow in S_measure_st ..."
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The assessed Debian runtime image includes perl-base 5.40.1-6, but Stampbot's Python application and entrypoints do not invoke Perl or call Perl pack or unpack. The affected S_measure_struct path is therefore not in Stampbot's execution path."
     }
   ]
 }
