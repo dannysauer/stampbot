@@ -1,57 +1,95 @@
-# Stampbot Helm Chart
+# Stampbot Helm chart
 
-This chart deploys Stampbot, a GitHub App that approves or dismisses its own pull
-request reviews based on labels and ChatOps comments.
+This chart runs Stampbot on Kubernetes. It creates the workload, service,
+probes, and policy resources around a GitHub App that you already own.
 
-## Prerequisites
+## What the chart installs
 
-- Kubernetes 1.25 or newer.
-- Helm 3.12 or newer.
-- A GitHub App created from the Stampbot manifest or manual setup instructions.
-- A public HTTPS route to `POST /webhook` for GitHub webhooks.
-- A Kubernetes Secret, External Secrets Operator target, or inline values containing:
-  `STAMPBOT_APP_ID`, `STAMPBOT_PRIVATE_KEY`, and `STAMPBOT_WEBHOOK_SECRET`.
+The normal request and credential paths look like this:
 
-Optional features require their CRDs or controllers before installation:
+```mermaid
+flowchart LR
+    github["GitHub"]
+    ingress["Ingress or external route"]
+    service["Kubernetes Service"]
+    pods["Stampbot Pods"]
+    api["GitHub API"]
+    secret["Secret or ExternalSecret target"]
+    prometheus["Prometheus"]
+    monitor["ServiceMonitor"]
 
-| Feature | Required dependency |
+    github -->|signed webhook| ingress
+    ingress --> service
+    service --> pods
+    secret -->|App credentials| pods
+    pods -->|installation token| api
+    prometheus -.-> monitor
+    monitor -.-> service
+```
+
+GitHub reaches `/webhook` through your external route. Pods read App credentials
+from one Kubernetes Secret and call GitHub with installation tokens.
+ServiceMonitor is optional; `/metrics` remains on the main service either way.
+
+The chart may also create an Ingress, Horizontal Pod Autoscaler (HPA), Vertical
+Pod Autoscaler (VPA), PodDisruptionBudget, NetworkPolicy, Grafana dashboard
+ConfigMap, ExternalSecret, and ServiceMonitor.
+
+## Before you install
+
+You need:
+
+- Helm 3.12 or newer;
+- a Kubernetes cluster and `kubectl` access to the target namespace;
+- a GitHub App configured as described in
+  [Install Stampbot](../../INSTALLATION.md#create-the-github-app);
+- a public HTTPS route for GitHub webhooks; and
+- App ID, private key, and webhook secret values.
+
+The chart doesn't declare a `kubeVersion` range. It uses stable
+`apps/v1`, `autoscaling/v2`, `networking.k8s.io/v1`, and `policy/v1` APIs.
+Render and validate against the Kubernetes versions you operate.
+
+Optional features need their controllers or custom resource definitions (CRDs)
+before `helm install`:
+
+| Feature | Cluster dependency |
 | --- | --- |
-| `metrics.serviceMonitor.enabled` | Prometheus Operator `monitoring.coreos.com/v1` ServiceMonitor CRD |
-| `vpa.enabled` | Vertical Pod Autoscaler `autoscaling.k8s.io/v1` CRD |
-| `externalSecrets.enabled` | External Secrets Operator `external-secrets.io/v1beta1` CRD |
-| `autoscaling.customMetrics.enabled` | Kubernetes custom metrics API, such as Prometheus Adapter |
+| `metrics.serviceMonitor.enabled` | Prometheus Operator ServiceMonitor CRD |
+| `vpa.enabled` | Vertical Pod Autoscaler CRD and controller |
+| `externalSecrets.enabled` | External Secrets Operator |
+| `autoscaling.customMetrics.enabled` | A custom metrics API, such as Prometheus Adapter |
+| `ingress.enabled` | An ingress controller for the selected class |
 
-## Install
+Helm doesn't install or upgrade those CRDs.
 
-Create the namespace and GitHub App Secret first:
+## Install the chart
+
+Set a chart version you have verified:
 
 ```bash
+CHART_VERSION=0.13.3
 kubectl create namespace stampbot
+```
+
+Read the webhook secret without putting its value in shell history:
+
+```bash
+read -r -s -p "GitHub webhook secret: " STAMPBOT_WEBHOOK_SECRET
+printf '\n'
+
 kubectl create secret generic stampbot-github \
   --namespace stampbot \
   --from-literal=STAMPBOT_APP_ID=123456 \
   --from-file=STAMPBOT_PRIVATE_KEY=./private-key.pem \
-  --from-literal=STAMPBOT_WEBHOOK_SECRET=replace-with-random-secret
+  --from-literal=STAMPBOT_WEBHOOK_SECRET="${STAMPBOT_WEBHOOK_SECRET}"
+
+unset STAMPBOT_WEBHOOK_SECRET
 ```
 
-Install from the OCI chart registry:
+The Secret must contain those exact three keys.
 
-```bash
-helm install stampbot oci://ghcr.io/dannysauer/charts/stampbot \
-  --namespace stampbot \
-  --set github.existingSecret=stampbot-github
-```
-
-Install from a local checkout:
-
-```bash
-helm install stampbot charts/stampbot \
-  --namespace stampbot \
-  --set github.existingSecret=stampbot-github
-```
-
-For production, configure ingress and set `setup.enabled=false`. The chart default already
-disables setup mode.
+Create `values.yaml`:
 
 ```yaml
 github:
@@ -75,235 +113,355 @@ ingress:
         - stampbot.example.com
 ```
 
+Inspect the release metadata and defaults:
+
+```bash
+helm show chart oci://ghcr.io/dannysauer/charts/stampbot \
+  --version "${CHART_VERSION}"
+helm show values oci://ghcr.io/dannysauer/charts/stampbot \
+  --version "${CHART_VERSION}"
+```
+
+Install:
+
+```bash
+helm install stampbot oci://ghcr.io/dannysauer/charts/stampbot \
+  --version "${CHART_VERSION}" \
+  --namespace stampbot \
+  --values values.yaml \
+  --wait \
+  --timeout 5m
+```
+
+For a source checkout, replace the OCI URL with `charts/stampbot` and omit
+`--version`.
+
+## Verify the release
+
+Wait for Kubernetes and inspect the probes:
+
+```bash
+kubectl rollout status deployment/stampbot --namespace stampbot
+kubectl get pods --namespace stampbot
+kubectl port-forward service/stampbot 8000:80 --namespace stampbot
+```
+
+In another terminal:
+
+```bash
+curl -fsS http://127.0.0.1:8000/health
+curl -fsS http://127.0.0.1:8000/ready
+```
+
+Run the chart's post-install tests:
+
+```bash
+helm test stampbot --namespace stampbot --logs --timeout 2m
+```
+
+`test-connection` checks `/health`, `/ready`, `/metrics`, and `/` from inside
+the cluster. `test-webhook` sends a valid signed `ping` and then a tampered one.
+It skips the signed test when the release has no configured webhook secret.
+
+The tests prove in-cluster reachability. They don't prove that public DNS, TLS,
+or the GitHub App webhook points at this release.
+
 ## Upgrade
 
-```bash
-helm upgrade stampbot oci://ghcr.io/dannysauer/charts/stampbot \
-  --namespace stampbot \
-  --reuse-values
-```
+Read the target release notes and compare its values before changing the
+cluster. Keep your values in source control or another managed configuration
+store.
 
-Use immutable image tags or chart versions for controlled rollouts:
+Render the candidate with the same values:
 
 ```bash
-helm upgrade stampbot oci://ghcr.io/dannysauer/charts/stampbot \
+NEXT_CHART_VERSION=0.13.3
+helm template stampbot oci://ghcr.io/dannysauer/charts/stampbot \
+  --version "${NEXT_CHART_VERSION}" \
   --namespace stampbot \
-  --version 0.1.0 \
-  --set image.tag=0.1.0 \
-  --reuse-values
+  --values values.yaml
 ```
 
-## Roll Back
+Upgrade and wait:
+
+```bash
+helm upgrade stampbot oci://ghcr.io/dannysauer/charts/stampbot \
+  --version "${NEXT_CHART_VERSION}" \
+  --namespace stampbot \
+  --values values.yaml \
+  --wait \
+  --timeout 5m
+
+kubectl rollout status deployment/stampbot --namespace stampbot
+helm test stampbot --namespace stampbot --logs --timeout 2m
+```
+
+Avoid `--reuse-values` as your only configuration record. It can carry an old
+value into a chart that no longer documents it.
+
+## Roll back
+
+Inspect the release history before choosing a revision:
 
 ```bash
 helm history stampbot --namespace stampbot
-helm rollback stampbot 1 --namespace stampbot
+helm rollback stampbot PREVIOUS_REVISION \
+  --namespace stampbot \
+  --wait \
+  --timeout 5m
+
 kubectl rollout status deployment/stampbot --namespace stampbot
+helm test stampbot --namespace stampbot --logs --timeout 2m
 ```
 
-If a bad credential rotation caused the failure, restore the previous Secret value before
-rolling back pods.
+Replace `PREVIOUS_REVISION` with the last healthy revision. Helm can't restore
+an external secret, a removed CRD, or a changed GitHub App setting.
 
 ## Uninstall
 
 ```bash
 helm uninstall stampbot --namespace stampbot
+```
+
+An existing Secret isn't owned by the release, so Helm leaves it behind. Delete
+it only after you confirm that no other workload uses it:
+
+```bash
 kubectl delete secret stampbot-github --namespace stampbot
 ```
 
-The Secret removal command deletes manually created credentials. Do not run it if the same
-Secret is shared by another release.
+## Supply credentials
 
-## Secret Contracts
+The Deployment always reads these environment variables from one Secret:
 
-The deployment reads all GitHub App credentials from environment variables. Secrets must
-use these keys:
+| Secret key | Meaning |
+| --- | --- |
+| `STAMPBOT_APP_ID` | Numeric GitHub App ID |
+| `STAMPBOT_PRIVATE_KEY` | PEM private key content |
+| `STAMPBOT_WEBHOOK_SECRET` | GitHub webhook HMAC secret |
 
-| Key | Required | Description |
+Choose one source:
+
+| Mode | Values | Secret owner |
 | --- | --- | --- |
-| `STAMPBOT_APP_ID` | Yes | Numeric GitHub App ID. |
-| `STAMPBOT_PRIVATE_KEY` | Yes | PEM private key content or a path inside the container. For Kubernetes Secrets, use PEM content. |
-| `STAMPBOT_WEBHOOK_SECRET` | Yes | Shared secret configured on the GitHub App webhook. |
+| Existing Secret | `github.existingSecret` | You or another controller |
+| Inline values | `github.appId`, `github.privateKey`, `github.webhookSecret` | Helm release |
+| External Secrets Operator | `externalSecrets.enabled=true` | External Secrets Operator |
 
-Secret sourcing modes:
+Prefer an existing Secret or External Secrets Operator. Inline values may enter
+shell history, rendered output, CI logs, and Helm release storage.
 
-| Mode | Values | Behavior |
-| --- | --- | --- |
-| Existing Secret | `github.existingSecret` | Deployment reads the named Secret. The chart does not create credentials. |
-| Inline values | `github.appId`, `github.privateKey`, `github.webhookSecret` | Chart creates an Opaque Secret. Use only for local testing because values can leak through shell history and release metadata. |
-| External Secrets Operator | `externalSecrets.enabled=true` | Chart creates an ExternalSecret that writes `<release>-stampbot-external`. |
+### Use External Secrets Operator
 
-## EKS and IRSA
+The chart creates an `ExternalSecret`, not its `SecretStore` or
+`ClusterSecretStore`. Create that store first.
 
-Use one of these service account paths.
+Map the remote secret properties:
 
-For a pre-created service account from `eksctl`, disable chart service account creation:
-
-```bash
-eksctl create iamserviceaccount \
-  --cluster example-cluster \
-  --namespace stampbot \
-  --name stampbot \
-  --attach-policy-arn arn:aws:iam::123456789012:policy/stampbot-secrets-policy \
-  --approve
-
-helm upgrade --install stampbot charts/stampbot \
-  --namespace stampbot \
-  --set serviceAccount.create=false \
-  --set serviceAccount.name=stampbot \
-  --set externalSecrets.enabled=true \
-  --set externalSecrets.secretStore.name=aws-secrets-manager
+```yaml
+externalSecrets:
+  enabled: true
+  secretStore:
+    name: aws-secrets-manager
+    kind: SecretStore
+  refreshInterval: 1h
+  data:
+    - secretKey: STAMPBOT_APP_ID
+      remoteRef:
+        key: stampbot/github-credentials
+        property: app_id
+    - secretKey: STAMPBOT_PRIVATE_KEY
+      remoteRef:
+        key: stampbot/github-credentials
+        property: private_key
+    - secretKey: STAMPBOT_WEBHOOK_SECRET
+      remoteRef:
+        key: stampbot/github-credentials
+        property: webhook_secret
 ```
 
-For a Helm-created service account, provide the AWS role ARN:
+The generated Secret is named `RELEASE-stampbot-external` unless a name
+override changes the chart fullname.
 
-```bash
-helm upgrade --install stampbot charts/stampbot \
-  --namespace stampbot \
-  --set awsSecretsManager.enabled=true \
-  --set awsSecretsManager.roleArn=arn:aws:iam::123456789012:role/stampbot-secrets \
-  --set externalSecrets.enabled=true \
-  --set externalSecrets.secretStore.name=aws-secrets-manager
+### Use IRSA on Amazon EKS
+
+Use one service-account owner.
+
+If another tool creates the service account, tell Helm to use it:
+
+```yaml
+serviceAccount:
+  create: false
+  name: stampbot
+
+externalSecrets:
+  enabled: true
+  secretStore:
+    name: aws-secrets-manager
+    kind: SecretStore
 ```
 
-When `awsSecretsManager.enabled=true`, `awsSecretsManager.roleArn` is required. The chart
-fails rendering instead of emitting an empty `eks.amazonaws.com/role-arn` annotation.
+If Helm creates the service account, let it add the IAM role annotation:
 
-## Validation
+```yaml
+serviceAccount:
+  create: true
 
-The chart includes `values.schema.json`; Helm uses it during `helm lint`, `helm install`,
-and `helm upgrade`.
+awsSecretsManager:
+  enabled: true
+  roleArn: arn:aws:iam::123456789012:role/stampbot-secrets
 
-```bash
-helm lint charts/stampbot
-helm template stampbot charts/stampbot \
-  --set github.existingSecret=stampbot-github
-helm template stampbot charts/stampbot \
-  --set awsSecretsManager.enabled=true \
-  --set awsSecretsManager.roleArn=arn:aws:iam::123456789012:role/stampbot-secrets \
-  --set externalSecrets.enabled=true
+externalSecrets:
+  enabled: true
+  secretStore:
+    name: aws-secrets-manager
+    kind: SecretStore
 ```
 
-After installation:
+`awsSecretsManager.enabled=true` requires `roleArn` and fails rendering when it
+is empty.
 
-```bash
-kubectl get pods --namespace stampbot
-kubectl rollout status deployment/stampbot --namespace stampbot
-kubectl logs deployment/stampbot --namespace stampbot
-kubectl port-forward svc/stampbot 8000:80 --namespace stampbot
-curl http://127.0.0.1:8000/health
-```
+The current templates don't read `awsSecretsManager.secretName` or
+`awsSecretsManager.region`. Configure remote keys in `externalSecrets.data` and
+the AWS region in your SecretStore.
 
-### Verifying the deployment with `helm test`
-
-The chart ships post-install test hooks. After installing, run:
-
-```bash
-helm test stampbot --namespace stampbot --logs
-```
-
-This launches two short-lived Pods that exercise the running release from
-inside the cluster:
-
-- **`test-connection`** — checks `/health`, `/ready`, `/metrics`, and `/` are
-  reachable and healthy.
-- **`test-webhook`** — verifies the `/webhook` signature path end to end: a
-  correctly HMAC-signed `ping` is accepted (200) and a tampered signature is
-  rejected (401). It reads the same webhook secret the deployment uses, and
-  skips automatically if the release is not configured yet (setup mode).
-
-For IRSA:
+Verify the chain:
 
 ```bash
 kubectl get serviceaccount stampbot --namespace stampbot -o yaml
 kubectl get externalsecret --namespace stampbot
 kubectl get secret stampbot-external --namespace stampbot
+kubectl rollout status deployment/stampbot --namespace stampbot
 ```
 
-## Values
+Adjust the Secret name when the Helm release or fullname differs.
 
-| Value | Type | Default | Description |
+## Validate a local chart
+
+From the repository root:
+
+```bash
+helm lint charts/stampbot
+helm template stampbot charts/stampbot \
+  --set github.existingSecret=stampbot-github
+```
+
+The checked-in schema runs during lint, install, and upgrade. Repository CI also
+runs kubeconform, Helm unit tests, clean-install cases in kind, chart test hooks,
+and upgrades from recent chart lines.
+
+Use `make helm-test` for the repository's full local chart suite. It needs Helm,
+Docker, and kubeconform.
+
+## Values reference
+
+`values.schema.json` supplies type and constraint validation.
+`values.yaml` remains the source of defaults.
+
+### Image and workload
+
+| Value | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `replicaCount` | integer | `2` | Deployment replicas when HPA is disabled. |
-| `image.repository` | string | `ghcr.io/dannysauer/stampbot` | Container image repository. |
-| `image.pullPolicy` | enum | `IfNotPresent` | Kubernetes image pull policy. |
-| `image.tag` | string | chart `appVersion` | Container tag. |
-| `image.digest` | string | `""` | Optional `sha256:...` digest. When set, the chart renders `repository@digest` and ignores `image.tag`. |
-| `imagePullSecrets` | list | `[]` | Image pull Secrets. |
-| `nameOverride` | string | `""` | Override chart name. |
-| `fullnameOverride` | string | `""` | Override generated resource names. |
-| `serviceAccount.create` | boolean | `true` | Create a ServiceAccount. |
+| `replicaCount` | integer, minimum 1 | `2` | Deployment replicas when HPA is disabled. |
+| `image.repository` | string | `ghcr.io/dannysauer/stampbot` | Image repository. |
+| `image.pullPolicy` | enum | `IfNotPresent` | `Always`, `IfNotPresent`, or `Never`. |
+| `image.tag` | string | empty | Uses chart `appVersion` when empty. |
+| `image.digest` | string | empty | Optional `sha256:...` digest. It replaces the tag when set. |
+| `imagePullSecrets` | list | `[]` | Image-pull Secret references. |
+| `nameOverride` | string | empty | Overrides the chart name portion. |
+| `fullnameOverride` | string | empty | Replaces the generated resource fullname. |
+| `serviceAccount.create` | boolean | `true` | Creates the workload ServiceAccount. |
 | `serviceAccount.annotations` | map | `{}` | ServiceAccount annotations. |
-| `serviceAccount.name` | string | `""` | Existing or custom ServiceAccount name. |
+| `serviceAccount.name` | string | empty | Existing or explicit ServiceAccount name. |
 | `deploymentAnnotations` | map | `{}` | Deployment metadata annotations. |
-| `podAnnotations` | map | Prometheus scrape annotations | Pod template annotations. |
-| `podSecurityContext` | map | non-root defaults | Pod security context. |
-| `securityContext` | map | restricted defaults | Container security context. |
-| `service.type` | enum | `ClusterIP` | Kubernetes Service type. |
+| `podAnnotations` | map | Prometheus scrape annotations | Pod-template annotations. |
+| `podSecurityContext` | map | non-root UID/GID and RuntimeDefault seccomp | Pod security context. |
+| `securityContext` | map | no privilege escalation, all capabilities dropped, read-only root | Container security context. |
+| `resources` | map | `100m/128Mi` requests; `500m/512Mi` limits | Container requests and limits. |
+| `nodeSelector` | map | `{}` | Pod node selector. |
+| `tolerations` | list | `[]` | Pod tolerations. |
+| `affinity` | map | preferred hostname anti-affinity | Pod affinity rules. |
+
+### Service and network
+
+| Value | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `service.type` | enum | `ClusterIP` | `ClusterIP`, `NodePort`, `LoadBalancer`, or `ExternalName`. |
 | `service.port` | integer | `80` | Service port. |
-| `service.targetPort` | integer | `8000` | Application container port. |
+| `service.targetPort` | integer | `8000` | Container target port. |
 | `service.annotations` | map | `{}` | Service annotations. |
-| `metrics.enabled` | boolean | `true` | Expose `/metrics` on the service. |
-| `metrics.serviceMonitor.enabled` | boolean | `false` | Create a ServiceMonitor. |
+| `ingress.enabled` | boolean | `false` | Creates an Ingress. |
+| `ingress.className` | string | empty | Ingress class. |
+| `ingress.annotations` | map | `{}` | Ingress annotations. |
+| `ingress.hosts` | list | `stampbot.local` with `/` Prefix | Host and path rules. |
+| `ingress.tls` | list | `[]` | Ingress TLS entries. |
+| `networkPolicy.enabled` | boolean | `false` | Creates a NetworkPolicy. |
+| `networkPolicy.policyTypes` | list | `Ingress` and `Egress` | Policy types. |
+| `networkPolicy.ingress` | list | any namespace | Raw ingress rules. Replace the default before relying on isolation. |
+| `networkPolicy.egress` | list | namespace, pod, HTTPS, and DNS rules | Raw egress rules. Confirm they fit the cluster CNI and DNS path. |
+
+### App and credentials
+
+| Value | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `config.logLevel` | string | `INFO` | `STAMPBOT_LOG_LEVEL`. |
+| `config.otelEnabled` | boolean | `false` | `STAMPBOT_OTEL_ENABLED`. |
+| `config.otelEndpoint` | string | empty | `STAMPBOT_OTEL_ENDPOINT` when tracing is enabled. |
+| `config.otelServiceName` | string | `stampbot` | `STAMPBOT_OTEL_SERVICE_NAME`. |
+| `setup.enabled` | boolean | `false` | Enables `/setup`. Keep it off after provisioning. |
+| `setup.baseUrl` | string | empty | `STAMPBOT_BASE_URL`. |
+| `github.appId` | string or integer | empty | Inline App ID. |
+| `github.privateKey` | string | empty | Inline PEM private key. |
+| `github.webhookSecret` | string | empty | Inline webhook secret. |
+| `github.existingSecret` | string | empty | Existing Secret with all three required keys. |
+| `awsSecretsManager.enabled` | boolean | `false` | Adds the configured IRSA role to a Helm-created ServiceAccount. |
+| `awsSecretsManager.roleArn` | string | empty | Required IAM role ARN when AWS integration is enabled. |
+| `awsSecretsManager.secretName` | string | `stampbot/github-credentials` | Reserved; current templates don't read it. |
+| `awsSecretsManager.region` | string | `us-east-1` | Reserved; current templates don't read it. |
+| `externalSecrets.enabled` | boolean | `false` | Creates an ExternalSecret. |
+| `externalSecrets.secretStore.name` | string | `aws-secrets-manager` | SecretStore name. |
+| `externalSecrets.secretStore.kind` | enum | `SecretStore` | `SecretStore` or `ClusterSecretStore`. |
+| `externalSecrets.refreshInterval` | string | `1h` | ExternalSecret refresh interval. |
+| `externalSecrets.data` | list | three credential mappings | Target Secret keys and remote references. |
+| `opentelemetry.enabled` | boolean | `false` | Reserved; use `config.otelEnabled`. |
+| `opentelemetry.endpoint` | string | `http://otel-collector:4317` | Reserved; use `config.otelEndpoint`. |
+| `opentelemetry.serviceName` | string | `stampbot` | Reserved; use `config.otelServiceName`. |
+
+### Scaling and observability
+
+| Value | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `metrics.enabled` | boolean | `true` | Gates ServiceMonitor creation. It doesn't disable `/metrics`. |
+| `metrics.serviceMonitor.enabled` | boolean | `false` | Creates a ServiceMonitor when `metrics.enabled` is also true. |
 | `metrics.serviceMonitor.interval` | string | `30s` | Prometheus scrape interval. |
 | `metrics.serviceMonitor.scrapeTimeout` | string | `10s` | Prometheus scrape timeout. |
-| `ingress.enabled` | boolean | `false` | Create an Ingress. |
-| `ingress.className` | string | `""` | Ingress class name. |
-| `ingress.annotations` | map | `{}` | Ingress annotations. |
-| `ingress.hosts` | list | `stampbot.local` | Host and path routing rules. |
-| `ingress.tls` | list | `[]` | TLS entries. |
-| `resources` | map | CPU and memory defaults | Container requests and limits. |
-| `autoscaling.enabled` | boolean | `true` | Create an HPA. |
+| `autoscaling.enabled` | boolean | `true` | Creates an HPA and ignores `replicaCount`. |
 | `autoscaling.minReplicas` | integer | `2` | HPA minimum replicas. |
 | `autoscaling.maxReplicas` | integer | `10` | HPA maximum replicas. |
-| `autoscaling.targetCPUUtilizationPercentage` | integer | `80` | HPA CPU target. |
-| `autoscaling.customMetrics.enabled` | boolean | `false` | Add custom HPA metrics. |
-| `autoscaling.customMetrics.metrics` | list | request-count example | Raw HPA metric specs. |
-| `vpa.enabled` | boolean | `false` | Create a VerticalPodAutoscaler. |
-| `vpa.updateMode` | enum | `Auto` | VPA update mode: `Off`, `Initial`, `Recreate`, or `Auto`. |
-| `vpa.minAllowed` | map | `50m`, `64Mi` | Minimum VPA recommendations. |
-| `vpa.maxAllowed` | map | `1000m`, `1Gi` | Maximum VPA recommendations. |
-| `nodeSelector` | map | `{}` | Node selector. |
-| `tolerations` | list | `[]` | Pod tolerations. |
-| `affinity` | map | soft anti-affinity | Pod affinity rules. |
-| `config.logLevel` | string | `INFO` | Sets `STAMPBOT_LOG_LEVEL`. |
-| `config.otelEnabled` | boolean | `false` | Sets `STAMPBOT_OTEL_ENABLED`. |
-| `config.otelEndpoint` | string | `""` | Sets `STAMPBOT_OTEL_ENDPOINT` when OTel is enabled. |
-| `config.otelServiceName` | string | `stampbot` | Sets `STAMPBOT_OTEL_SERVICE_NAME` when OTel is enabled. |
-| `setup.enabled` | boolean | `false` | Enables `/setup`. Keep disabled after initial setup. |
-| `setup.baseUrl` | string | `""` | Sets `STAMPBOT_BASE_URL` for generated setup URLs. |
-| `github.appId` | string | `""` | Inline `STAMPBOT_APP_ID`. Prefer `github.existingSecret`. |
-| `github.privateKey` | string | `""` | Inline `STAMPBOT_PRIVATE_KEY`. Prefer `github.existingSecret`. |
-| `github.webhookSecret` | string | `""` | Inline `STAMPBOT_WEBHOOK_SECRET`. Prefer `github.existingSecret`. |
-| `github.existingSecret` | string | `""` | Secret containing all required `STAMPBOT_*` keys. |
-| `awsSecretsManager.enabled` | boolean | `false` | Add an IRSA role annotation to the ServiceAccount. |
-| `awsSecretsManager.secretName` | string | `stampbot/github-credentials` | Example AWS Secrets Manager secret name. |
-| `awsSecretsManager.region` | string | `us-east-1` | AWS region for examples and SecretStore references. |
-| `awsSecretsManager.roleArn` | string | `""` | Required IRSA role ARN when AWS integration is enabled. |
-| `externalSecrets.enabled` | boolean | `false` | Create an ExternalSecret. |
-| `externalSecrets.secretStore.name` | string | `aws-secrets-manager` | SecretStore or ClusterSecretStore name. |
-| `externalSecrets.secretStore.kind` | enum | `SecretStore` | Secret store kind. |
-| `externalSecrets.refreshInterval` | string | `1h` | ExternalSecret refresh interval. |
-| `externalSecrets.data` | list | three credential mappings | Secret key to remote reference mappings. |
-| `opentelemetry.enabled` | boolean | `false` | Reserved OTel values block; use `config.*` for current env injection. |
-| `opentelemetry.endpoint` | string | `http://otel-collector:4317` | Reserved endpoint value. |
-| `opentelemetry.serviceName` | string | `stampbot` | Reserved service name value. |
-| `podDisruptionBudget.enabled` | boolean | `true` | Create a PodDisruptionBudget. |
-| `podDisruptionBudget.minAvailable` | integer/string | `1` | Minimum available pods. |
-| `networkPolicy.enabled` | boolean | `false` | Create a NetworkPolicy. |
-| `networkPolicy.policyTypes` | list | `Ingress`, `Egress` | NetworkPolicy policy types. |
-| `networkPolicy.ingress` | list | namespace-selector example | Ingress policy rules. |
-| `networkPolicy.egress` | list | namespace, pod, HTTPS, DNS rules | Egress policy rules. |
-| `grafanaDashboard.enabled` | boolean | `false` | Create a Grafana dashboard ConfigMap. |
-| `grafanaDashboard.labels` | map | `grafana_dashboard: "1"` | Dashboard ConfigMap labels. |
+| `autoscaling.targetCPUUtilizationPercentage` | integer or null | `80` | CPU target. Set null to omit CPU metrics. |
+| `autoscaling.customMetrics.enabled` | boolean | `false` | Adds the raw custom metric list to the HPA. |
+| `autoscaling.customMetrics.metrics` | list | request-count example | Raw `autoscaling/v2` metric specifications. |
+| `vpa.enabled` | boolean | `false` | Creates a VPA. |
+| `vpa.updateMode` | enum | `Auto` | `Off`, `Initial`, `Recreate`, or `Auto`. |
+| `vpa.minAllowed` | map | `50m` CPU, `64Mi` memory | Minimum recommendation. |
+| `vpa.maxAllowed` | map | `1000m` CPU, `1Gi` memory | Maximum recommendation. |
+| `podDisruptionBudget.enabled` | boolean | `true` | Creates a PodDisruptionBudget. |
+| `podDisruptionBudget.minAvailable` | integer or string | `1` | Minimum available Pods. |
+| `grafanaDashboard.enabled` | boolean | `false` | Creates the bundled dashboard ConfigMap. |
+| `grafanaDashboard.labels` | map | `grafana_dashboard: "1"` | Dashboard discovery labels. |
 | `grafanaDashboard.annotations` | map | `{}` | Dashboard ConfigMap annotations. |
 
-## Security Notes
+## Security notes
 
-- Prefer `github.existingSecret` or `externalSecrets.enabled` for credentials.
-- Keep `setup.enabled=false` after the one-time GitHub App setup flow.
-- Expose only the routes GitHub and operators need. If `/metrics` is publicly reachable,
-  protect it at your ingress, load balancer, or service mesh.
-- The default pod and container security contexts run as non-root, drop Linux capabilities,
-  use the runtime default seccomp profile, and mount a writable `/tmp` only.
-- Configure NetworkPolicy egress so Stampbot can reach GitHub API and DNS.
+- Prefer `github.existingSecret` or External Secrets Operator.
+- Keep `setup.enabled=false` after setup.
+- Pin a verified chart version and image digest for controlled promotion.
+- Protect `/metrics` at the network boundary when it shouldn't be public.
+- Review the default NetworkPolicy rules before enabling them; defaults are
+  examples, not a cluster-specific least-privilege policy.
+- The default container runs as UID 1000, drops every Linux capability, blocks
+  privilege escalation, uses RuntimeDefault seccomp, and mounts a writable
+  `/tmp` while keeping the root filesystem read-only.
+
+See [Verify a Stampbot release](../../docs/release-verification.md) before
+promoting a new chart or image.

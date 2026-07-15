@@ -1,39 +1,40 @@
 # Governance
 
-Stampbot is maintained as a small personal open source project.
+Stampbot is a small open source project with one maintainer.
 
 ## Maintainer
 
-The current maintainer is Danny Sauer (`@dannysauer`). The maintainer is responsible for:
+Danny Sauer ([@dannysauer](https://github.com/dannysauer)) maintains the
+project. The maintainer:
 
-- reviewing and merging pull requests
-- triaging bugs, enhancement requests, and vulnerability reports
-- maintaining release automation, dependencies, and deployment documentation
-- deciding project scope and compatibility policy
+- reviews and merges changes;
+- triages bugs, proposals, and private vulnerability reports;
+- owns release and repository access;
+- maintains automation and dependencies; and
+- decides scope and compatibility.
 
-## Decision Making
+## How decisions are made
 
-Project decisions are made in public GitHub Issues and pull requests when possible. The
-maintainer decides whether a change is in scope, whether its implementation is acceptable,
-and whether it is ready to merge.
+Use a GitHub issue or pull request for decisions that can be public. State the
+problem, affected readers, compatibility cost, and security impact.
 
-Security-sensitive decisions may be discussed privately through GitHub Security Advisories
-until disclosure is appropriate.
+The maintainer decides whether a proposal fits Stampbot and whether its
+implementation is ready. Security work may stay in a private advisory until
+disclosure is safe.
 
-## Access Control
+## Access and continuity
 
-Repository and release access is limited to the maintainer and automation explicitly
-configured in this repository. GitHub branch rules, required checks, CodeQL, secret
-scanning, dependency monitoring, release signing, and Scorecard run as repository controls.
+Repository and release access is limited to the maintainer and the automation
+declared in this repository. Branch rules, required checks, secret scanning,
+dependency monitoring, and release controls reduce accidental changes; they
+don't create a second human maintainer.
 
-## Continuity
+There is no guaranteed multi-person continuity today. The Apache-2.0 license
+lets users fork and maintain Stampbot if the upstream project becomes
+unavailable.
 
-Stampbot is currently a single-maintainer project. The project is published under the
-Apache-2.0 license, so users may fork and maintain their own copy if the upstream project
-becomes unavailable. Formal multi-person access continuity is not currently guaranteed.
+## Change this model
 
-## Changing Governance
-
-Governance changes should be proposed in a GitHub Issue or pull request. Changes that add
-maintainers or broaden release access should document the new responsibilities and access
-controls before access is granted.
+Propose governance changes in an issue or pull request. A proposal that adds a
+maintainer or release principal must name the responsibility, access being
+granted, recovery path, and audit controls before access changes.

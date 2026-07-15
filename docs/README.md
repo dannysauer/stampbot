@@ -1,19 +1,35 @@
-# Stampbot Documentation
+# Stampbot documentation
 
-These docs are written for GitHub readers. Backstage and TechDocs are intentionally out
-of scope for this repository.
+Start with the task in front of you. These pages are written for GitHub and don't
+depend on a separate documentation site.
 
-| Page | Type | Use it when |
+## Set up and deploy
+
+| Task | Page | Type |
 | --- | --- | --- |
-| [Configuration Reference](configuration.md) | Reference | You need exact app settings, `stampbot.toml` keys, GitHub App permissions, defaults, and failure behavior. |
-| [Operations and Troubleshooting](operations.md) | Runbook | A webhook, approval, ChatOps command, deployment, metric, or GitHub permission is failing. |
-| [Interface Reference](reference.md) | Reference | You need HTTP routes, webhook inputs, outputs, metrics, and external interfaces. |
-| [Cloud Run Deployment](deploy-gcp-cloudrun.md) | How-to | You deploy Stampbot to Google Cloud Run with GitHub Actions. |
-| [Architecture](architecture.md) | Explanation | You need the request flow, component boundaries, trust boundaries, and outputs. |
-| [Security Requirements](security-requirements.md) | Explanation | You need the security properties Stampbot is expected to preserve. |
-| [Release Verification](release-verification.md) | How-to/reference | You verify release assets, SBOMs, VEX, SLSA provenance, chart packages, or container attestations. |
-| [Google Python Style Guide](external/google-python-style-guide.md) | External reference | Vendored style-guide copy synchronized by workflow; not Stampbot product documentation. |
+| Create the GitHub App and choose a runtime | [Install Stampbot](../INSTALLATION.md) | How-to |
+| Install or upgrade on Kubernetes | [Stampbot Helm chart](../charts/stampbot/README.md) | How-to and reference |
+| Deploy with GitHub Actions to Google Cloud Run | [Deploy to Cloud Run](deploy-gcp-cloudrun.md) | How-to |
+| Verify release assets and images | [Verify a release](release-verification.md) | How-to |
 
-For installation paths, start with the root [README](../README.md) or
-[INSTALLATION.md](../INSTALLATION.md). For the Helm chart as an installable package, see
-[charts/stampbot/README.md](../charts/stampbot/README.md).
+## Configure and operate
+
+| Task | Page | Type |
+| --- | --- | --- |
+| Set app options or repository approval policy | [Configuration reference](configuration.md) | Reference |
+| Look up routes, webhook behavior, commands, or metrics | [Interface reference](reference.md) | Reference |
+| Diagnose a failed webhook, approval, or deployment | [Operations runbook](operations.md) | How-to |
+
+## Understand the system
+
+| Question | Page | Type |
+| --- | --- | --- |
+| How does a webhook become an approval? | [Architecture](architecture.md) | Explanation |
+| Which security properties must changes preserve? | [Security requirements](security-requirements.md) | Normative explanation |
+
+The [Google Python Style Guide](external/google-python-style-guide.md) is a
+vendored external reference. An automated workflow keeps it synchronized; it
+isn't Stampbot product documentation.
+
+For contribution, governance, roadmap, and vulnerability-reporting policies,
+return to the [repository README](../README.md#find-the-right-document).

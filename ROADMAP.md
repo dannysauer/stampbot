@@ -1,34 +1,38 @@
 # Roadmap
 
-This roadmap documents current project direction. It is not a promise to deliver every
-item, but it gives contributors a shared view of likely priorities.
+This roadmap records direction, not a delivery promise. Issues and pull
+requests remain the place for concrete work.
 
-## Current Priorities
+## Current direction
 
-- Keep Stampbot reliable for label-based and ChatOps pull request approvals.
-- Maintain a secure supply chain through pinned dependencies, automated dependency
-  updates, CodeQL, container scanning, SBOMs, VEX, release signing, SLSA provenance, and
-  OpenSSF Scorecard.
-- Keep the Helm chart and container deployment paths working for Kubernetes users.
-- Improve documentation for installation, operations, security posture, and contribution
-  expectations.
+- Keep label and ChatOps approval behavior predictable across GitHub changes.
+- Keep the container and Helm deployment paths tested.
+- Make policy failures visible without exposing credentials or private data.
+- Keep dependencies, actions, and base images pinned and updated.
+- Keep release verification honest about the artifacts each release publishes.
 
-## Near-Term Work
+## Work worth doing next
 
-- Continue pursuing the OpenSSF Best Practices Silver badge where the criteria accurately
-  fit a single-maintainer project.
-- Verify the first releases that include SLSA provenance and update release verification
-  instructions if needed.
-- Keep mutation and fuzzing checks useful without making the CI feedback loop
-  unnecessarily slow.
+- Publish and verify image identity and SLSA provenance end to end.
+- Continue the OpenSSF Best Practices Silver work where its criteria fit a
+  single-maintainer project.
+- Tune mutation and fuzzing jobs so they find useful defects without hiding
+  normal pull request feedback.
+- Tighten repository-policy validation without silently breaking existing
+  `stampbot.toml` files.
 
-## Out of Scope
+## Boundaries
 
-- Stampbot does not merge pull requests.
-- Stampbot does not grant repository permissions or bypass GitHub branch protection.
-- Stampbot does not replace human code review for projects that require it.
+Stampbot doesn't aim to:
 
-## Proposing Changes
+- merge pull requests;
+- grant repository access;
+- bypass GitHub branch protection;
+- act as a native `CODEOWNERS` identity; or
+- replace human review where a project requires human judgment.
 
-Use GitHub Issues for roadmap proposals. Include the problem, expected user impact, and any
-security or compatibility considerations.
+## Propose a change
+
+Open a [GitHub issue](https://github.com/dannysauer/stampbot/issues). Describe
+the problem, who has it, the behavior you expect, and any compatibility or
+security cost.

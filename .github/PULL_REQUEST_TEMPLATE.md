@@ -1,30 +1,30 @@
 ## Summary
 
-<!-- Briefly describe the change. -->
+<!-- Explain the behavior change and why it belongs in Stampbot. -->
 
-## Type of Change
+## Change type
 
-- [ ] `feat`: New feature
-- [ ] `fix`: Bug fix
-- [ ] `docs`: Documentation
-- [ ] `refactor`: Code refactoring
-- [ ] `test`: Tests
-- [ ] `chore`: Maintenance
+- [ ] `feat`: new behavior
+- [ ] `fix`: bug fix
+- [ ] `docs`: documentation
+- [ ] `refactor`: code structure
+- [ ] `test`: tests
+- [ ] `chore`: maintenance
 
-## Impact Review
+## Impact
 
-- [ ] Documentation updated or not needed
-- [ ] GitHub App permissions/events unchanged or documented
-- [ ] `stampbot.toml` behavior unchanged or documented
-- [ ] Helm chart values/templates unchanged or documented
-- [ ] Deployment behavior unchanged or documented
-- [ ] Security and secret-handling impact reviewed
-- [ ] Metrics/logging/operations impact reviewed
+- [ ] Tests cover changed behavior, or the summary explains why they aren't needed
+- [ ] Public documentation matches the implementation
+- [ ] GitHub App permissions and events are unchanged or documented
+- [ ] `stampbot.toml` behavior is unchanged or documented
+- [ ] Helm values and templates are unchanged or documented
+- [ ] Deployment and rollback behavior is unchanged or documented
+- [ ] Secret handling, logs, metrics, and operator impact were reviewed
 
-## Test Plan
+## Checks
 
-<!-- Commands run, webhook/manual checks, chart renders, or why testing is not applicable. -->
+<!-- List exact commands and results. Name any check you couldn't run. -->
 
-## Related Issues
+## Related issues
 
-Closes #<!-- issue number if applicable -->
+<!-- Use "Closes #123" when merge should close an issue. -->
