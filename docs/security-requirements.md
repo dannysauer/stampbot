@@ -49,8 +49,9 @@ secure.
   configured instance requires a separate explicit control.
 - Setup HTML must not be cached or framed, and the credential callback must not
   send its URL as a referrer.
-- Public deployments must protect `/metrics` outside the app when its contents
-  shouldn't be public.
+- The public HTTP listener must not serve `/metrics`.
+- Metrics must stay disabled unless a separate listener is bound to loopback or
+  a private monitoring network.
 - A reverse proxy header may supply `client_ip` only when the operator trusts
   the proxy that writes it.
 

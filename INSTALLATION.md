@@ -178,6 +178,33 @@ Verify the process from another terminal:
 curl -fsS http://127.0.0.1:8000/ready
 ```
 
+### Expose container metrics to the local host
+
+The container leaves metrics disabled. If a Prometheus process on the Docker
+host needs them, stop the container and add these values to `.env`:
+
+```dotenv
+STAMPBOT_METRICS_ENABLED=true
+STAMPBOT_METRICS_HOST=0.0.0.0
+STAMPBOT_METRICS_PORT=9090
+```
+
+The listener must use `0.0.0.0` inside the container for Docker port forwarding
+to reach it. Keep the host-side publish address on loopback because the metrics
+listener doesn't authenticate clients.
+
+Add `--publish 127.0.0.1:9090:9090` to the earlier `docker run` command,
+before `--env-file`.
+
+Verify the dedicated listener from the Docker host:
+
+```bash
+curl -fsS http://127.0.0.1:9090/metrics
+```
+
+Remove the three variables and the `9090` publish when you no longer scrape
+metrics.
+
 To roll back, stop this container and run a previously verified version with
 the same environment and secret mount. Changing the image doesn't restore a
 rotated key or webhook secret.
@@ -240,8 +267,9 @@ kubectl rollout status deployment/stampbot --namespace stampbot
 helm test stampbot --namespace stampbot --logs
 ```
 
-The tests call `/health`, `/ready`, `/metrics`, and `/` from inside the
-cluster. They also send one valid and one tampered signed `ping` payload.
+The tests call `/health`, `/ready`, and `/` from inside the cluster. When
+`metrics.enabled=true`, they also check `/metrics` through its internal Service.
+The webhook test sends one valid and one tampered signed `ping` payload.
 
 For External Secrets Operator, Amazon EKS IAM Roles for Service Accounts,
 autoscaling, monitoring, NetworkPolicy, and every value, use the

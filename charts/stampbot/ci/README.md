@@ -64,7 +64,7 @@ resource validates and applies; it doesn't prove that Prometheus scrapes it.
 | `ingress` | The Ingress renders and applies. | An ingress controller, DNS, or TLS. |
 | `autoscaling` | The HPA installs and points at the Deployment. | Scaling, because kind has no metrics server. |
 | `networkpolicy` | The NetworkPolicy renders without blocking readiness in this cluster. | Enforcement, because kindnet doesn't enforce NetworkPolicy. |
-| `servicemonitor` | The ServiceMonitor validates against its real CRD. | End-to-end scraping. |
+| `servicemonitor` | The metrics listener and internal Service install. The ServiceMonitor validates against its real CRD. | End-to-end Prometheus discovery and scraping. |
 
 External Secrets isn't a clean-install case. Without an operator and a real
 backend, the generated Secret never appears and the Pod can't become ready.

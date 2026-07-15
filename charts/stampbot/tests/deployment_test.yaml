@@ -115,6 +115,49 @@ tests:
             name: http
             containerPort: 8000
             protocol: TCP
+      - notContains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: metrics
+            containerPort: 9090
+            protocol: TCP
+
+  - it: should start the dedicated metrics listener when enabled
+    template: deployment.yaml
+    set:
+      metrics.enabled: true
+      metrics.port: 9100
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: metrics
+            containerPort: 9100
+            protocol: TCP
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: STAMPBOT_METRICS_ENABLED
+            value: "true"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: STAMPBOT_METRICS_HOST
+            value: "0.0.0.0"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: STAMPBOT_METRICS_PORT
+            value: "9100"
+
+  - it: should disable the metrics listener by default
+    template: deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: STAMPBOT_METRICS_ENABLED
+            value: "false"
 
   - it: should set resource limits and requests
     template: deployment.yaml
@@ -240,15 +283,13 @@ tests:
                 - key: collector-ca.pem
                   path: ca.crt
 
-  - it: should include prometheus scrape annotations
+  - it: should not advertise a public-port Prometheus scrape by default
     template: deployment.yaml
     asserts:
-      - equal:
+      - notExists:
           path: spec.template.metadata.annotations["prometheus.io/scrape"]
-          value: "true"
-      - equal:
+      - notExists:
           path: spec.template.metadata.annotations["prometheus.io/port"]
-          value: "8000"
 
   - it: should apply deployment annotations when specified
     template: deployment.yaml

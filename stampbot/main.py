@@ -16,7 +16,6 @@ from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import (
     HTMLResponse,
     JSONResponse,
-    PlainTextResponse,
     RedirectResponse,
 )
 from starlette.routing import Match
@@ -32,13 +31,14 @@ from stampbot.manifest import (
 )
 from stampbot.metrics import (
     errors_total,
-    get_metrics,
     http_request_duration_seconds,
     http_request_size_bytes,
     http_requests_in_progress,
     http_requests_total,
     http_response_size_bytes,
     set_app_info,
+    start_metrics_server,
+    stop_metrics_server,
     webhook_processing_duration_seconds,
     webhook_signature_validations_total,
 )
@@ -127,6 +127,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     Yields:
         None after startup, resumes for shutdown.
     """
+    metrics_runtime: tuple[Any, Any] | None = None
+
     # Startup
     logger.info(
         f"Starting {settings.app_name} on {settings.host}:{settings.port}",
@@ -148,9 +150,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     else:
         logger.info("GitHub App credentials configured successfully")
 
-    yield
-    # Shutdown
-    logger.info("Shutting down stampbot")
+    if settings.metrics_enabled:
+        metrics_host = str(settings.metrics_host)
+        metrics_port = int(settings.metrics_port)
+        if not metrics_host.strip():
+            raise RuntimeError("metrics_host must not be empty")
+        if not 1 <= metrics_port <= 65535:
+            raise RuntimeError("metrics_port must be between 1 and 65535")
+        if metrics_port == int(settings.port):
+            raise RuntimeError("metrics_port must differ from the public HTTP port")
+        metrics_runtime = start_metrics_server(metrics_host, metrics_port)
+        logger.info(
+            "Prometheus metrics listener started",
+            extra={"host": metrics_host, "port": metrics_port},
+        )
+
+    try:
+        yield
+    finally:
+        if metrics_runtime is not None:
+            stop_metrics_server(*metrics_runtime)
+        # Shutdown
+        logger.info("Shutting down stampbot")
 
 
 # Create FastAPI app
@@ -373,19 +394,6 @@ async def ready() -> Response:
     return JSONResponse(
         status_code=200 if is_ready else 503,
         content={"status": "ready" if is_ready else "not ready", "checks": checks},
-    )
-
-
-@app.get("/metrics")
-async def metrics() -> Response:
-    """Prometheus metrics endpoint.
-
-    Returns:
-        Plain text response with Prometheus metrics.
-    """
-    return PlainTextResponse(
-        content=get_metrics().decode("utf-8"),
-        media_type="text/plain",
     )
 
 

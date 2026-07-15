@@ -102,7 +102,7 @@ need a stricter fallback should set conservative service defaults and monitor
 | `stampbot/webhook_handler.py` | Event routing, policy decisions, ChatOps parsing, and approval lifecycle |
 | `stampbot/github_client.py` | App authentication, installation clients, retries, and GitHub API calls |
 | `stampbot/config.py` | Service settings, repository defaults, TOML parsing, and policy validation |
-| `stampbot/metrics.py` | Prometheus metric definitions |
+| `stampbot/metrics.py` | Prometheus metric definitions and the dedicated listener lifecycle |
 | `stampbot/telemetry.py` | Optional OpenTelemetry export and span helpers |
 | `charts/stampbot/` | Kubernetes packaging and runtime policy |
 
@@ -130,8 +130,9 @@ the least permissions listed in the [configuration reference](configuration.md#g
 `/setup` returns generated credentials during the manifest flow. It is disabled
 by default, uses only the configured trusted base URL, and closes automatically
 after credentials are present. Reopening it requires a second explicit flag.
-`/metrics` has no application-level authentication, so protect it at the
-ingress or service boundary when the service is public.
+Metrics use a disabled-by-default listener on a separate port. That listener
+has no application-level authentication, so bind it only to loopback or a
+private monitoring network. The public HTTP listener never serves `/metrics`.
 
 ## Deliberate boundaries
 

@@ -1,18 +1,20 @@
 # Interface reference
 
-Stampbot exposes one HTTP service and writes results through the GitHub API.
-This page describes those interfaces as implemented.
+Stampbot exposes a main HTTP service and an optional metrics listener. It writes
+results through the GitHub API. This page describes those interfaces as
+implemented.
 
 ## HTTP endpoints
 
-The default bind address is `0.0.0.0:8000`.
+The main service binds to `0.0.0.0:8000` by default. The optional metrics
+listener uses a separate address and port.
 
 | Method and path | Input | Success response | Other responses |
 | --- | --- | --- | --- |
 | `GET /` | None | `307` to `/setup` when setup is enabled and credentials are missing. Otherwise, JSON with `app`, `version`, and `status`. | None expected. |
 | `GET /health` | None | `200 {"status":"healthy"}`. This is liveness only. | None expected. |
 | `GET /ready` | None | `200` when credentials are complete or setup mode is enabled. The JSON includes `configured` and `setup_enabled` checks. | `503` when credentials are incomplete and setup is disabled. |
-| `GET /metrics` | None | `200` with Prometheus text. | None expected. |
+| `GET /metrics` on the metrics listener | None | `200` with Prometheus text when metrics are enabled. | The listener doesn't exist when metrics are disabled. |
 | `POST /webhook` | Signed GitHub webhook JSON | `200` with handler `status` and `message`. A handler-level error may still use HTTP `200`. | `400`, `401`, `413`, `503`, or `500`. |
 | `GET /setup` | None | `200` setup page when setup is explicitly enabled, the trusted base URL is valid, and the configured-state gate permits it. | `403` when disabled or automatically closed; `503` when `STAMPBOT_BASE_URL` is missing or invalid. |
 | `GET /setup/callback` | GitHub manifest `code` query value | `200` page containing the new App credentials while setup is available. | `403`, `422` for a missing code, or `500` when exchange fails. |
@@ -123,8 +125,16 @@ request.
 
 ## Prometheus metrics
 
-`GET /metrics` is always registered on the main service. The current
-`metrics_enabled` and `metrics_port` settings don't change it.
+The main service doesn't register `/metrics`. Set `metrics_enabled=true` to
+start the dedicated metrics listener. Its default address is
+`127.0.0.1:9090`. The `metrics_host` and `metrics_port` settings select another
+address.
+
+The metrics listener doesn't authenticate requests. Keep it on loopback or a
+private monitoring network. In the Helm chart, `metrics.enabled=true` creates a
+separate ClusterIP Service and `metrics.serviceMonitor.enabled=true` points a
+ServiceMonitor at that Service. The chart's Ingress continues to use only the
+main HTTP Service.
 
 | Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |

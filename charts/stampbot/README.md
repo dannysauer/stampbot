@@ -18,6 +18,7 @@ flowchart LR
     prometheus["Prometheus"]
     monitor["ServiceMonitor"]
     collector["OTLP collector"]
+    metricsService["Internal metrics Service"]
 
     github -->|signed webhook| ingress
     ingress --> service
@@ -25,13 +26,17 @@ flowchart LR
     secret -->|App credentials| pods
     pods -->|installation token| api
     pods -.->|TLS spans| collector
-    prometheus -.-> monitor
-    monitor -.-> service
+    prometheus -.->|watches| monitor
+    monitor -.->|selects| metricsService
+    prometheus -->|scrapes /metrics| metricsService
+    metricsService -->|port 9090| pods
 ```
 
 GitHub reaches `/webhook` through your external route. Pods read App credentials
 from one Kubernetes Secret and call GitHub with installation tokens.
-ServiceMonitor is optional; `/metrics` remains on the main service either way.
+Metrics are disabled by default. When enabled, they use another container port
+and a separate ClusterIP Service. The Ingress still routes only to the main
+Service.
 
 The chart may also create an Ingress, Horizontal Pod Autoscaler (HPA), Vertical
 Pod Autoscaler (VPA), PodDisruptionBudget, NetworkPolicy, Grafana dashboard
@@ -162,14 +167,66 @@ Run the chart's post-install tests:
 helm test stampbot --namespace stampbot --logs --timeout 2m
 ```
 
-`test-connection` checks `/health`, `/ready`, `/metrics`, and `/` from inside
-the cluster. `test-webhook` sends a valid signed `ping` and then a tampered one.
-It skips the signed test when the release has no configured webhook secret.
+`test-connection` checks `/health`, `/ready`, and `/` from inside the cluster.
+When metrics are enabled, it checks `/metrics` through the internal metrics
+Service. `test-webhook` sends a valid signed `ping` and then a tampered one. It
+skips the signed test when the release has no configured webhook secret.
 
 The tests prove in-cluster reachability. They don't prove that public DNS, TLS,
 or the GitHub App webhook points at this release.
 
+## Enable Prometheus metrics
+
+Install the Prometheus Operator ServiceMonitor custom resource definition
+(CRD) before you enable `metrics.serviceMonitor.enabled`. Then add these values:
+
+```yaml
+metrics:
+  enabled: true
+  port: 9090
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+```
+
+The Deployment binds the metrics listener to `0.0.0.0` inside the Pod. A
+separate ClusterIP Service exposes only that port inside the cluster, and the
+ServiceMonitor selects that Service. The chart Ingress can't route to it.
+
+If a NetworkPolicy selects the Stampbot Pods, allow the Prometheus namespace to
+reach the configured metrics port. Keep the rule as narrow as your monitoring
+labels permit.
+
+Verify the rendered objects and the endpoint:
+
+```bash
+helm template stampbot charts/stampbot --values values.yaml
+kubectl get service stampbot-metrics --namespace stampbot
+kubectl get servicemonitor stampbot --namespace stampbot
+kubectl port-forward service/stampbot-metrics 9090:9090 --namespace stampbot
+```
+
+In another terminal:
+
+```bash
+curl -fsS http://127.0.0.1:9090/metrics
+```
+
+Stop the port-forward when the check finishes. If you don't use Prometheus
+Operator, leave the ServiceMonitor off and configure your scraper against the
+metrics Service instead.
+
+To remove this surface, set `metrics.enabled=false` and upgrade the release.
+The next rollout stops the listener and removes both monitoring objects. Plan
+for a gap in dashboards and alerts before you do that.
+
 ## Upgrade
+
+If the current release scrapes `/metrics` through the main Service, migrate that
+target first. Set `metrics.enabled=true`, and point a manual scraper at the
+generated metrics Service, such as `stampbot-metrics`, on `metrics.port`. A
+chart-managed ServiceMonitor switches to that Service during the upgrade.
 
 Read the target release notes and compare its values before changing the
 cluster. Keep your values in source control or another managed configuration
@@ -491,7 +548,7 @@ Docker, and kubeconform.
 | `serviceAccount.annotations` | map | `{}` | ServiceAccount annotations. |
 | `serviceAccount.name` | string | empty | Existing or explicit ServiceAccount name. |
 | `deploymentAnnotations` | map | `{}` | Deployment metadata annotations. |
-| `podAnnotations` | map | Prometheus scrape annotations | Pod-template annotations. |
+| `podAnnotations` | map | `{}` | Pod-template annotations. |
 | `podSecurityContext` | map | non-root UID/GID and RuntimeDefault seccomp | Pod security context. |
 | `securityContext` | map | no privilege escalation, all capabilities dropped, read-only root | Container security context. |
 | `tmp.sizeLimit` | Kubernetes quantity | `64Mi` | Maximum size of the writable `/tmp` emptyDir volume. |
@@ -515,7 +572,7 @@ Docker, and kubeconform.
 | `ingress.tls` | list | `[]` | Ingress TLS entries. |
 | `networkPolicy.enabled` | boolean | `false` | Creates a NetworkPolicy. |
 | `networkPolicy.policyTypes` | list | `Ingress` and `Egress` | Policy types. |
-| `networkPolicy.ingress` | list | Stampbot, ingress-nginx, and Prometheus peers | Raw ingress rules on TCP 8000. Match them to cluster labels before enabling the policy. |
+| `networkPolicy.ingress` | list | Stampbot, ingress-nginx, and Prometheus peers | Raw ingress rules on the HTTP and default metrics ports. Match them to cluster labels before enabling the policy. |
 | `networkPolicy.egress` | list | Stampbot, DNS, TCP 443, and a local OTLP collector | Raw egress rules. Match DNS and collector selectors to the cluster before enabling the policy. |
 
 ### App and credentials
@@ -553,8 +610,10 @@ Docker, and kubeconform.
 
 | Value | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `metrics.enabled` | boolean | `true` | Gates ServiceMonitor creation. It doesn't disable `/metrics`. |
-| `metrics.serviceMonitor.enabled` | boolean | `false` | Creates a ServiceMonitor when `metrics.enabled` is also true. |
+| `metrics.enabled` | boolean | `false` | Starts the separate metrics listener and creates its ClusterIP Service. |
+| `metrics.port` | integer, 1–65535 except 8000 | `9090` | Metrics listener and internal Service port. |
+| `metrics.service.annotations` | map | `{}` | Metrics Service annotations. |
+| `metrics.serviceMonitor.enabled` | boolean | `false` | Creates a ServiceMonitor when metrics are enabled. |
 | `metrics.serviceMonitor.interval` | string | `30s` | Prometheus scrape interval. |
 | `metrics.serviceMonitor.scrapeTimeout` | string | `10s` | Prometheus scrape timeout. |
 | `autoscaling.enabled` | boolean | `true` | Creates an HPA and ignores `replicaCount`. |
@@ -579,7 +638,8 @@ Docker, and kubeconform.
 - Keep `setup.enabled=false` after setup and leave `setup.allowConfigured=false`
   unless deliberately reprovisioning the App.
 - Pin a verified chart version and image digest for controlled promotion.
-- Protect `/metrics` at the network boundary when it shouldn't be public.
+- Keep metrics disabled unless the internal Service is limited to trusted
+  monitoring clients. The chart Ingress never targets that Service.
 - Check the NetworkPolicy peer labels before enabling it. The HTTPS egress rule
   is port-limited, not hostname-limited.
 - Leave `serviceAccount.automountServiceAccountToken=false` unless another

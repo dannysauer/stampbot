@@ -6,8 +6,10 @@ from unittest.mock import MagicMock, call
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from prometheus_client import generate_latest
 
 from stampbot.main import UNMATCHED_ENDPOINT, _metric_endpoint_label, metrics_middleware
+from stampbot.metrics import registry
 
 HTTP_METRIC_NAMES = (
     "http_requests_total",
@@ -105,15 +107,14 @@ def test_unknown_paths_share_one_bounded_label(
 
 
 def test_exported_metrics_never_contain_an_unknown_raw_path(test_client: TestClient) -> None:
-    """The public metrics payload exposes only the bounded fallback for a 404."""
+    """The metrics registry exports only the bounded fallback for a 404."""
     raw_path = "/unknown/security-regression-canary-8f3810"
 
     assert test_client.get(raw_path).status_code == 404
-    metrics_response = test_client.get("/metrics")
+    metrics_payload = generate_latest(registry).decode("utf-8")
 
-    assert metrics_response.status_code == 200
-    assert 'endpoint="unmatched"' in metrics_response.text
-    assert raw_path not in metrics_response.text
+    assert 'endpoint="unmatched"' in metrics_payload
+    assert raw_path not in metrics_payload
 
 
 def test_dynamic_path_uses_route_template(

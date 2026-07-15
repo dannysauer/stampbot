@@ -8,9 +8,10 @@ metadata:
 spec:
   selector:
     matchLabels:
+      app.kubernetes.io/component: metrics
       {{- include "stampbot.selectorLabels" . | nindent 6 }}
   endpoints:
-  - port: http
+  - port: metrics
     path: /metrics
     interval: {{ .Values.metrics.serviceMonitor.interval }}
     scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout }}

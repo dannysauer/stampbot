@@ -22,9 +22,12 @@ otel_service_name = "stampbot"
 otel_insecure = false
 # otel_endpoint = ""  # Set via env var or .secrets.toml
 
-# Metrics
-metrics_enabled = true
-metrics_port = 8000
+# Metrics use a separate listener so the public webhook port never serves them.
+# Enable this listener explicitly and choose a non-loopback host only when the
+# surrounding network limits who can connect.
+metrics_enabled = false
+metrics_host = "127.0.0.1"
+metrics_port = 9090
 
 # Setup mode settings
 setup_enabled = false

@@ -43,14 +43,14 @@ tests:
           path: spec.endpoints[0].scrapeTimeout
           value: 5s
 
-  - it: should target HTTP port
+  - it: should target the dedicated metrics port
     set:
       metrics.enabled: true
       metrics.serviceMonitor.enabled: true
     asserts:
       - equal:
           path: spec.endpoints[0].port
-          value: http
+          value: metrics
 
   - it: should have correct selector labels
     set:
@@ -63,3 +63,6 @@ tests:
       - equal:
           path: spec.selector.matchLabels["app.kubernetes.io/instance"]
           value: RELEASE-NAME
+      - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/component"]
+          value: metrics

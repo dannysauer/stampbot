@@ -3,7 +3,17 @@
 
 """Prometheus metrics for stampbot."""
 
-from prometheus_client import REGISTRY, Counter, Gauge, Histogram, Info, generate_latest
+from threading import Thread
+from wsgiref.simple_server import WSGIServer
+
+from prometheus_client import (
+    REGISTRY,
+    Counter,
+    Gauge,
+    Histogram,
+    Info,
+    start_http_server,
+)
 
 # Use the default registry for compatibility with multiprocess mode
 registry = REGISTRY
@@ -168,13 +178,30 @@ errors_total = Counter(
 )
 
 
-def get_metrics() -> bytes:
-    """Get metrics in Prometheus format.
+def start_metrics_server(host: str, port: int) -> tuple[WSGIServer, Thread]:
+    """Start the dedicated Prometheus HTTP listener.
+
+    Args:
+        host: Address on which the metrics listener binds.
+        port: TCP port on which the metrics listener binds.
 
     Returns:
-        Prometheus metrics as UTF-8 encoded bytes.
+        The HTTP server and its daemon thread.
     """
-    return generate_latest(registry)
+    server, thread = start_http_server(port=port, addr=host, registry=registry)
+    return server, thread
+
+
+def stop_metrics_server(server: WSGIServer, thread: Thread) -> None:
+    """Stop the dedicated Prometheus HTTP listener.
+
+    Args:
+        server: HTTP server returned by :func:`start_metrics_server`.
+        thread: Server thread returned by :func:`start_metrics_server`.
+    """
+    server.shutdown()
+    server.server_close()
+    thread.join(timeout=5)
 
 
 def set_app_info(version: str) -> None:

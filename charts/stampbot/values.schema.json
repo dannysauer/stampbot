@@ -111,6 +111,23 @@
         "enabled": {
           "type": "boolean"
         },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "not": {
+            "const": 8000
+          }
+        },
+        "service": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "annotations": {
+              "type": "object"
+            }
+          }
+        },
         "serviceMonitor": {
           "type": "object",
           "additionalProperties": false,

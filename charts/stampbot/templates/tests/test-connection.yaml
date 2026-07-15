@@ -1,7 +1,7 @@
 # Copyright 2026 Danny Sauer
 # SPDX-License-Identifier: Apache-2.0
 #
-# Helm test hook: verifies the deployed Service answers on its core read
+# Helm test hook: verifies the deployed Services answer on their enabled read
 # endpoints from inside the cluster. Run with: helm test <release>
 apiVersion: v1
 kind: Pod
@@ -42,32 +42,37 @@ spec:
       import urllib.request
 
       base = "http://{{ include "stampbot.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}"
+      {{- if .Values.metrics.enabled }}
+      metrics_base = "http://{{ include "stampbot.fullname" . }}-metrics.{{ .Release.Namespace }}.svc:{{ .Values.metrics.port }}"
+      {{- end }}
 
-      def get(path):
+      def get(base_url, path):
           try:
-              with urllib.request.urlopen(base + path, timeout=10) as resp:
+              with urllib.request.urlopen(base_url + path, timeout=10) as resp:
                   return resp.status, resp.read().decode("utf-8", "replace")
           except urllib.error.HTTPError as exc:
               return exc.code, exc.read().decode("utf-8", "replace")
 
       failures = []
 
-      status, body = get("/health")
+      status, body = get(base, "/health")
       if status != 200 or "healthy" not in body:
           failures.append(("/health", status, body))
 
       # /ready is 200 when the pod can serve its purpose (configured, or setup
       # mode enabled). A healthy install should report ready immediately.
-      status, body = get("/ready")
+      status, body = get(base, "/ready")
       if status != 200:
           failures.append(("/ready", status, body))
 
-      status, body = get("/metrics")
+      {{- if .Values.metrics.enabled }}
+      status, body = get(metrics_base, "/metrics")
       if status != 200 or "# HELP" not in body:
           failures.append(("/metrics", status, body))
+      {{- end }}
 
       # Root is 200 when configured, or 307 -> /setup in setup mode.
-      status, body = get("/")
+      status, body = get(base, "/")
       if status not in (200, 307):
           failures.append(("/", status, body))
 

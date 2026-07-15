@@ -4,7 +4,9 @@ import asyncio
 import hashlib
 import hmac
 import json
-from unittest.mock import patch
+import socket
+import urllib.request
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -33,6 +35,7 @@ def test_lifespan_startup_unconfigured():
         mock_settings.host = "0.0.0.0"
         mock_settings.port = 8000
         mock_settings.log_level = "INFO"
+        mock_settings.metrics_enabled = False
 
         with TestClient(app) as client:
             response = client.get("/health")
@@ -51,6 +54,7 @@ def test_lifespan_startup_unconfigured_setup_disabled():
         mock_settings.host = "0.0.0.0"
         mock_settings.port = 8000
         mock_settings.log_level = "INFO"
+        mock_settings.metrics_enabled = False
         mock_settings.get.side_effect = lambda key, default=None: {
             "setup_enabled": False,
             "setup_allow_configured": False,
@@ -138,14 +142,109 @@ def test_ready_endpoint_unconfigured_setup_disabled(test_client: TestClient):
     assert data["checks"] == {"configured": False, "setup_enabled": False}
 
 
-def test_metrics_endpoint(test_client: TestClient):
-    """Test Prometheus metrics endpoint."""
-    from stampbot.version import APP_VERSION
-
+def test_metrics_endpoint_is_not_on_public_app(test_client: TestClient):
+    """Test that the public listener never serves Prometheus metrics."""
     response = test_client.get("/metrics")
-    assert response.status_code == 200
-    assert "text/plain" in response.headers["content-type"]
-    assert f'stampbot_info{{version="{APP_VERSION}"}} 1.0' in response.text
+    assert response.status_code == 404
+
+
+def test_metrics_server_uses_dedicated_listener():
+    """Test that the metrics server exports Prometheus text on its own port."""
+    from stampbot.metrics import start_metrics_server, stop_metrics_server
+
+    with socket.socket() as socket_for_port:
+        socket_for_port.bind(("127.0.0.1", 0))
+        port = socket_for_port.getsockname()[1]
+
+    server, thread = start_metrics_server("127.0.0.1", port)
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/metrics", timeout=2) as response:
+            body = response.read().decode("utf-8")
+            assert response.status == 200
+            assert response.headers["content-type"].startswith("text/plain")
+            assert "# HELP stampbot_info" in body
+    finally:
+        stop_metrics_server(server, thread)
+
+
+def test_lifespan_starts_and_stops_metrics_listener():
+    """Test that metrics_enabled controls the dedicated listener lifecycle."""
+    from stampbot.main import app
+
+    server = MagicMock()
+    thread = MagicMock()
+    with (
+        patch("stampbot.main.is_configured", return_value=True),
+        patch("stampbot.main.settings") as mock_settings,
+        patch("stampbot.main.start_metrics_server", return_value=(server, thread)) as start,
+        patch("stampbot.main.stop_metrics_server") as stop,
+    ):
+        mock_settings.app_name = "stampbot"
+        mock_settings.host = "0.0.0.0"
+        mock_settings.port = 8000
+        mock_settings.log_level = "INFO"
+        mock_settings.metrics_enabled = True
+        mock_settings.metrics_host = "127.0.0.1"
+        mock_settings.metrics_port = 9090
+
+        with TestClient(app):
+            start.assert_called_once_with("127.0.0.1", 9090)
+
+        stop.assert_called_once_with(server, thread)
+
+
+def test_lifespan_rejects_metrics_on_public_port():
+    """Test that the metrics listener cannot reuse the public HTTP port."""
+    from stampbot.main import app
+
+    with (
+        patch("stampbot.main.is_configured", return_value=True),
+        patch("stampbot.main.settings") as mock_settings,
+    ):
+        mock_settings.app_name = "stampbot"
+        mock_settings.host = "0.0.0.0"
+        mock_settings.port = 8000
+        mock_settings.log_level = "INFO"
+        mock_settings.metrics_enabled = True
+        mock_settings.metrics_host = "127.0.0.1"
+        mock_settings.metrics_port = 8000
+
+        with pytest.raises(RuntimeError, match="must differ"):
+            with TestClient(app):
+                pass
+
+
+@pytest.mark.parametrize(
+    ("metrics_host", "metrics_port", "message"),
+    [
+        ("", 9090, "metrics_host must not be empty"),
+        ("127.0.0.1", 0, "metrics_port must be between 1 and 65535"),
+        ("127.0.0.1", 65536, "metrics_port must be between 1 and 65535"),
+    ],
+)
+def test_lifespan_rejects_invalid_metrics_listener(
+    metrics_host: str,
+    metrics_port: int,
+    message: str,
+):
+    """Test that invalid dedicated-listener settings fail startup."""
+    from stampbot.main import app
+
+    with (
+        patch("stampbot.main.is_configured", return_value=True),
+        patch("stampbot.main.settings") as mock_settings,
+    ):
+        mock_settings.app_name = "stampbot"
+        mock_settings.host = "0.0.0.0"
+        mock_settings.port = 8000
+        mock_settings.log_level = "INFO"
+        mock_settings.metrics_enabled = True
+        mock_settings.metrics_host = metrics_host
+        mock_settings.metrics_port = metrics_port
+
+        with pytest.raises(RuntimeError, match=message):
+            with TestClient(app):
+                pass
 
 
 def test_request_with_content_length(test_client: TestClient):

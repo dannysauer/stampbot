@@ -76,12 +76,12 @@ GitHub Webhook -> POST /webhook -> WebhookHandler.handle_event()
 ```
 
 **Core modules in `stampbot/`:**
-- `main.py` - FastAPI app, endpoints (/webhook, /health liveness, /ready readiness, /metrics)
+- `main.py` - FastAPI app, webhook, health, readiness, and setup endpoints
 - `webhook_handler.py` - Event routing, label/chatops processing
 - `github_client.py` - GitHub API with app authentication (JWT)
 - `config.py` - Dynaconf-based configuration (env vars, settings.toml, per-repo stampbot.toml)
 - `manifest.py` - GitHub App manifest creation for easy setup
-- `metrics.py` - Prometheus metrics definitions
+- `metrics.py` - Prometheus metric definitions and the optional separate listener
 - `telemetry.py` - OpenTelemetry tracing setup
 - `logger.py` - Structlog configuration
 
@@ -256,7 +256,7 @@ make helm-unittest   # Run unit tests via Docker (no plugin install needed)
 
 **Unit tests:** Located in `charts/stampbot/tests/`. Each `*_test.yaml` file tests a specific template. When adding new templates or modifying existing ones, update/add corresponding tests.
 
-**Post-install tests (`helm test`):** Chart-shipped test hooks live in `charts/stampbot/templates/tests/` and run against a deployed release with `helm test <release>`. `test-connection` checks `/health`, `/ready`, `/metrics`, and `/` reachability from inside the cluster; `test-webhook` verifies the `/webhook` HMAC signature path (valid `ping` → 200, tampered → 401). The CI install job runs these after the pod is Ready. They reuse the application image, so no extra image needs pinning.
+**Post-install tests (`helm test`):** Chart-shipped test hooks live in `charts/stampbot/templates/tests/` and run against a deployed release with `helm test <release>`. `test-connection` checks `/health`, `/ready`, and `/` on the main Service. It also checks `/metrics` on the internal metrics Service when metrics are enabled. `test-webhook` verifies the `/webhook` HMAC signature path (valid `ping` → 200, tampered → 401). The CI install job runs these after the pod is Ready. They reuse the application image, so no extra image needs pinning.
 
 **Pre-commit hooks:** The `helm-kubeconform` hook validates templates on commit. Requires `kubeconform` installed locally (`go install github.com/yannh/kubeconform/cmd/kubeconform@latest`).
 
@@ -413,7 +413,16 @@ ngrok http 8000
 ### Inspect Metrics
 
 ```bash
-curl http://localhost:8000/metrics
+export STAMPBOT_METRICS_ENABLED=true
+export STAMPBOT_METRICS_HOST=127.0.0.1
+export STAMPBOT_METRICS_PORT=9090
+.venv/bin/python -m stampbot
+```
+
+In another terminal:
+
+```bash
+curl http://127.0.0.1:9090/metrics
 ```
 
 ### Check Health

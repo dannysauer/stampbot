@@ -204,7 +204,9 @@ gcloud run deploy "${SERVICE_NAME}" \
 
 GitHub webhooks require an unauthenticated route. That also makes the app's
 other routes public unless you put a path-aware proxy in front of Cloud Run.
-In particular, decide whether `/metrics` is acceptable on that public surface.
+Stampbot doesn't register `/metrics` on this listener. Leave
+`STAMPBOT_METRICS_ENABLED=false`. Cloud Run routes only the configured container
+port, so its service URL can't scrape Stampbot's separate metrics listener.
 
 Read the service URL and set it as Stampbot's public origin:
 

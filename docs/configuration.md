@@ -32,8 +32,9 @@ secret store in production.
 | `STAMPBOT_APP_ID` | `app_id` | integer or string | unset | Yes for webhooks | GitHub App ID. |
 | `STAMPBOT_PRIVATE_KEY` | `private_key` | PEM string or file path | unset | Yes for webhooks | App private key. A value beginning with `-----BEGIN` is read as PEM; any other value is treated as an operator-selected regular-file path. Files are limited to 64 KiB and the value must have a complete private-key PEM envelope. |
 | `STAMPBOT_WEBHOOK_SECRET` | `webhook_secret` | string | unset | Yes for webhooks | Secret used to verify `X-Hub-Signature-256`. |
-| `STAMPBOT_METRICS_ENABLED` | `metrics_enabled` | boolean | `true` | No | Reserved. The current app serves `/metrics` regardless of this value. |
-| `STAMPBOT_METRICS_PORT` | `metrics_port` | integer | `8000` | No | Reserved. Metrics currently use the main HTTP port. |
+| `STAMPBOT_METRICS_ENABLED` | `metrics_enabled` | boolean | `false` | No | Starts a separate Prometheus listener. The main HTTP listener never serves `/metrics`. |
+| `STAMPBOT_METRICS_HOST` | `metrics_host` | nonempty string | `127.0.0.1` | When metrics are enabled | Bind address for the metrics listener. Use a non-loopback address only behind a trusted network boundary. |
+| `STAMPBOT_METRICS_PORT` | `metrics_port` | integer, 1–65535 | `9090` | When metrics are enabled | Metrics listener port. It must differ from `STAMPBOT_PORT`. |
 
 The OTLP exporter uses TLS and the system certificate store by default. Set the
 standard OpenTelemetry variable `OTEL_EXPORTER_OTLP_CERTIFICATE` to a PEM CA
@@ -49,6 +50,11 @@ Setup requires both `STAMPBOT_SETUP_ENABLED=true` and a valid
 return `403` even if the first flag was accidentally left on. Reopening those
 routes additionally requires `STAMPBOT_SETUP_ALLOW_CONFIGURED=true`. This is a
 break-glass reprovisioning control, not a normal production setting.
+
+The metrics listener has no application-level authentication. Leave it disabled
+unless a local-only or private monitoring network can reach its address. The
+Helm chart handles this by creating a separate ClusterIP Service that the chart
+Ingress doesn't reference.
 
 ## Service-wide repository defaults
 

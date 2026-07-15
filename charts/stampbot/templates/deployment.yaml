@@ -44,6 +44,11 @@ spec:
         - name: http
           containerPort: 8000
           protocol: TCP
+        {{- if .Values.metrics.enabled }}
+        - name: metrics
+          containerPort: {{ .Values.metrics.port }}
+          protocol: TCP
+        {{- end }}
         env:
         - name: STAMPBOT_HOST
           value: "0.0.0.0"
@@ -53,6 +58,14 @@ spec:
           value: {{ .Values.setup.enabled | quote }}
         - name: STAMPBOT_SETUP_ALLOW_CONFIGURED
           value: {{ .Values.setup.allowConfigured | quote }}
+        - name: STAMPBOT_METRICS_ENABLED
+          value: {{ .Values.metrics.enabled | quote }}
+        {{- if .Values.metrics.enabled }}
+        - name: STAMPBOT_METRICS_HOST
+          value: "0.0.0.0"
+        - name: STAMPBOT_METRICS_PORT
+          value: {{ .Values.metrics.port | quote }}
+        {{- end }}
         {{- if .Values.setup.baseUrl }}
         - name: STAMPBOT_BASE_URL
           value: {{ .Values.setup.baseUrl | quote }}

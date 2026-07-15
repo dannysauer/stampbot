@@ -47,6 +47,8 @@ tests:
               ports:
                 - protocol: TCP
                   port: 8000
+                - protocol: TCP
+                  port: metrics
             - from:
                 - namespaceSelector:
                     matchLabels:
@@ -66,7 +68,7 @@ tests:
                       app.kubernetes.io/name: prometheus
               ports:
                 - protocol: TCP
-                  port: 8000
+                  port: metrics
 
   - it: should restrict egress to DNS, HTTPS, and the local OTLP collector
     set:
@@ -82,6 +84,8 @@ tests:
               ports:
                 - protocol: TCP
                   port: 8000
+                - protocol: TCP
+                  port: metrics
             - to:
                 - namespaceSelector:
                     matchLabels:
@@ -115,3 +119,19 @@ tests:
       - equal:
           path: spec.podSelector.matchLabels["app.kubernetes.io/instance"]
           value: RELEASE-NAME
+
+  - it: should keep the policy on the named metrics port when its number changes
+    set:
+      networkPolicy.enabled: true
+      metrics.enabled: true
+      metrics.port: 9100
+    asserts:
+      - equal:
+          path: spec.ingress[0].ports[1].port
+          value: metrics
+      - equal:
+          path: spec.ingress[2].ports[0].port
+          value: metrics
+      - equal:
+          path: spec.egress[0].ports[1].port
+          value: metrics

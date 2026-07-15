@@ -27,7 +27,7 @@ tests:
           path: spec.automountServiceAccountToken
           value: false
 
-  - it: targets the in-cluster service URL and core endpoints
+  - it: targets the public in-cluster service and core endpoints
     asserts:
       - matchRegex:
           path: spec.containers[0].args[0]
@@ -38,6 +38,18 @@ tests:
       - matchRegex:
           path: spec.containers[0].args[0]
           pattern: "/ready"
+      - notMatchRegex:
+          path: spec.containers[0].args[0]
+          pattern: "/metrics"
+
+  - it: checks the internal metrics service when metrics are enabled
+    set:
+      metrics.enabled: true
+      metrics.port: 9100
+    asserts:
+      - matchRegex:
+          path: spec.containers[0].args[0]
+          pattern: "RELEASE-NAME-stampbot-metrics\\..*\\.svc:9100"
       - matchRegex:
           path: spec.containers[0].args[0]
           pattern: "/metrics"

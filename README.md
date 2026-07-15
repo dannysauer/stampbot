@@ -122,8 +122,9 @@ validation rule, permission, and fallback.
 | Deploy with the repository's Cloud Run workflow | [Deploy to Cloud Run](docs/deploy-gcp-cloudrun.md) |
 | Verify a release before deployment | [Verify a release](docs/release-verification.md) |
 
-The app exposes liveness, readiness, Prometheus metrics, structured logs, and
-optional OpenTelemetry traces. Operators should start with the
+The app exposes liveness and readiness, plus structured logs and optional
+OpenTelemetry traces. Operators can enable Prometheus metrics on a separate
+listener. Start with the
 [runbook](docs/operations.md).
 
 ## Find the right document

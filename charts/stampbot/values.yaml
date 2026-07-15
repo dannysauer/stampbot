@@ -68,10 +68,7 @@ serviceAccount:
 deploymentAnnotations: {}
 
 # podAnnotations -- Annotations added to the Pod template.
-podAnnotations:
-  prometheus.io/scrape: "true"
-  prometheus.io/port: "8000"
-  prometheus.io/path: "/metrics"
+podAnnotations: {}
 
 # podSecurityContext -- Pod-level security context.
 podSecurityContext:
@@ -105,10 +102,16 @@ service:
   # service.annotations -- Annotations added to the Service.
   annotations: {}
 
-# metrics -- Prometheus discovery settings. Stampbot always serves /metrics.
+# metrics -- Dedicated Prometheus listener and discovery settings.
 metrics:
-  # metrics.enabled -- Permit ServiceMonitor creation; this does not disable the endpoint.
-  enabled: true
+  # metrics.enabled -- Start the internal metrics listener and create its ClusterIP Service.
+  enabled: false
+  # metrics.port -- Internal metrics listener and Service port. It must differ from 8000.
+  port: 9090
+  # metrics.service -- Internal metrics Service settings.
+  service:
+    # metrics.service.annotations -- Annotations added to the metrics Service.
+    annotations: {}
   # metrics.serviceMonitor -- Prometheus Operator ServiceMonitor settings.
   serviceMonitor:
     # metrics.serviceMonitor.enabled -- Create a ServiceMonitor.
@@ -314,6 +317,8 @@ networkPolicy:
       ports:
         - protocol: TCP
           port: 8000
+        - protocol: TCP
+          port: metrics
     - from:
         - namespaceSelector:
             matchLabels:
@@ -333,7 +338,7 @@ networkPolicy:
               app.kubernetes.io/name: prometheus
       ports:
         - protocol: TCP
-          port: 8000
+          port: metrics
   # networkPolicy.egress -- Raw networking.k8s.io/v1 egress rules.
   egress:
     - to:
@@ -343,6 +348,8 @@ networkPolicy:
       ports:
         - protocol: TCP
           port: 8000
+        - protocol: TCP
+          port: metrics
     - to:
         - namespaceSelector:
             matchLabels:

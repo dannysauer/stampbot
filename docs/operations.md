@@ -167,11 +167,19 @@ effective commands and policy so readers can discover the repository's setup.
 
 ## Use metrics to narrow the failure
 
-Port-forward the Kubernetes service when metrics aren't public:
+This procedure requires a Helm release with `metrics.enabled=true`. Port-forward
+the internal metrics Service. The public Stampbot Service doesn't carry this
+port.
 
 ```bash
-kubectl port-forward svc/stampbot 8000:80 --namespace stampbot
-curl -fsS http://127.0.0.1:8000/metrics
+kubectl get service stampbot-metrics --namespace stampbot
+kubectl port-forward service/stampbot-metrics 9090:9090 --namespace stampbot
+```
+
+In another terminal:
+
+```bash
+curl -fsS http://127.0.0.1:9090/metrics
 ```
 
 | Metric | Question it answers |
@@ -187,8 +195,9 @@ curl -fsS http://127.0.0.1:8000/metrics
 | `stampbot_github_api_rate_limit_remaining` | Is an installation close to its core API limit? |
 | `stampbot_errors_total` | Which application error category is rising? |
 
-The app doesn't authenticate `/metrics`. Keep it behind an operator boundary
-when the public should not see it.
+The listener doesn't authenticate `/metrics`. Keep the metrics Service private,
+and restrict port `9090` to the monitoring namespace when a NetworkPolicy
+controls ingress. Stop the port-forward when you finish.
 
 ## Respond to GitHub API failures
 
