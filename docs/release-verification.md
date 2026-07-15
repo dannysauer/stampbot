@@ -200,7 +200,7 @@ If a future app release lists a matching provenance file, download it and run:
 slsa-verifier verify-artifact app-release/sbom.spdx.json \
   --provenance-path "app-release/stampbot-${APP_VERSION}.intoto.jsonl" \
   --source-uri github.com/dannysauer/stampbot \
-  --source-tag "v${APP_VERSION}"
+  --source-branch main
 ```
 
 For a future chart release:
@@ -209,7 +209,7 @@ For a future chart release:
 slsa-verifier verify-artifact "chart-release/stampbot-${CHART_VERSION}.tgz" \
   --provenance-path "chart-release/stampbot-chart-${CHART_VERSION}.intoto.jsonl" \
   --source-uri github.com/dannysauer/stampbot \
-  --source-tag "chart-v${CHART_VERSION}"
+  --source-branch main
 ```
 
 Don't run these commands against a guessed filename. Confirm the provenance

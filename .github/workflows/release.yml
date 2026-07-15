@@ -276,11 +276,13 @@ jobs:
 
           cat app-changelog.md
 
-      - name: Create GitHub Release
+      - name: Create draft GitHub Release
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           tag_name: v${{ needs.determine-version.outputs.version }}
           name: "stampbot v${{ needs.determine-version.outputs.version }}"
+          draft: true
+          fail_on_unmatched_files: true
           body_path: app-changelog.md
           files: |
             sbom.spdx.json
@@ -305,10 +307,35 @@ jobs:
       provenance-name: stampbot-${{ needs.determine-version.outputs.version }}.intoto.jsonl
       upload-assets: true
       upload-tag-name: v${{ needs.determine-version.outputs.version }}
+      draft-release: "true"
+
+  publish-app-release:
+    name: Publish App Release
+    needs: [determine-version, app-release-provenance]
+    if: needs.determine-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.AUTOMATION_ID }}
+          private-key: ${{ secrets.AUTOMATION_SECRET }}
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TAG: v${{ needs.determine-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq '.draft')" = "false"
 
   release-chart:
     name: Release Helm Chart
-    needs: [determine-version, build-and-publish-image]
+    needs: [determine-version, build-and-publish-image, publish-app-release]
     if: needs.determine-version.outputs.should_release == 'true'
     uses: ./.github/workflows/chart-release.yml
     with:
@@ -326,7 +353,7 @@ jobs:
 
   deploy-cloudrun:
     name: Deploy to Cloud Run
-    needs: [determine-version, build-and-publish-image]
+    needs: [determine-version, build-and-publish-image, publish-app-release]
     if: needs.determine-version.outputs.should_release == 'true' && vars.GCP_SERVICE_ACCOUNT != ''
     uses: ./.github/workflows/deploy-cloudrun.yml
     with:
