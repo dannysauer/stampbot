@@ -23,12 +23,27 @@ to create the App before Stampbot has a reachable URL.
 
 ### Use the setup wizard
 
-Run Stampbot without App credentials and leave setup enabled. Set
-`STAMPBOT_BASE_URL` when a proxy, ingress, or tunnel changes the public origin.
+Run Stampbot without App credentials and explicitly enable setup with a trusted
+public URL:
+
+```dotenv
+STAMPBOT_SETUP_ENABLED=true
+STAMPBOT_BASE_URL=https://stampbot.example.com
+```
+
+`STAMPBOT_BASE_URL` is required. Stampbot does not derive callback or webhook
+destinations from `Host` or `X-Forwarded-*` request headers. HTTP is accepted
+only for `localhost` development URLs.
+
+Existing configured services continue serving webhooks without either setup
+setting. An unconfigured service upgrading from an earlier release must add the
+two values above before the wizard will open.
 
 > **Protect the setup flow.** The callback shows the new private key and webhook
 > secret in the browser. Use it once, save the credentials in your secret
-> store, and disable setup before normal operation.
+> store, and disable setup before normal operation. Setup closes automatically
+> after credentials are present unless the separate configured-instance
+> override is enabled.
 
 1. Open `BASE_URL/setup`.
 2. Select **Create GitHub App**.
@@ -46,11 +61,11 @@ Check the finished service:
 ```bash
 BASE_URL=https://stampbot.example.com
 curl -fsS "${BASE_URL}/ready"
-curl -fsS "${BASE_URL}/setup/status"
 ```
 
-The readiness response should report `configured: true`. The setup response
-should report `setup_enabled: false`.
+The readiness response should report `configured: true` and
+`setup_enabled: false`. A normal configured instance returns `403` for every
+`/setup` route.
 
 ### Create the App manually
 
@@ -192,6 +207,7 @@ github:
 
 setup:
   enabled: false
+  allowConfigured: false
   baseUrl: https://stampbot.example.com
 
 ingress:

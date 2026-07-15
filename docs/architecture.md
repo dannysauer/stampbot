@@ -127,10 +127,11 @@ belong in a secret store, never in `stampbot.toml` or source control.
 Installation tokens are short-lived and scoped by GitHub, but they still need
 the least permissions listed in the [configuration reference](configuration.md#github-app-permissions).
 
-`/setup` returns generated credentials during the manifest flow. Keep setup
-disabled after provisioning. `/metrics` has no application-level
-authentication, so protect it at the ingress or service boundary when the
-service is public.
+`/setup` returns generated credentials during the manifest flow. It is disabled
+by default, uses only the configured trusted base URL, and closes automatically
+after credentials are present. Reopening it requires a second explicit flag.
+`/metrics` has no application-level authentication, so protect it at the
+ingress or service boundary when the service is public.
 
 ## Deliberate boundaries
 

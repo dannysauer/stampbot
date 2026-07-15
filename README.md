@@ -56,6 +56,8 @@ creates `.venv/` and keeps all Python tools inside it.
 git clone https://github.com/dannysauer/stampbot.git
 cd stampbot
 make install-dev
+STAMPBOT_SETUP_ENABLED=true \
+STAMPBOT_BASE_URL=http://localhost:8000 \
 make dev
 ```
 
@@ -71,10 +73,12 @@ The response is:
 {"status":"healthy"}
 ```
 
-Open <http://127.0.0.1:8000> to create a GitHub App with the setup wizard. A
-`localhost` webhook URL isn't reachable from GitHub. For a working local webhook,
-expose port 8000 through a public HTTPS tunnel and set `STAMPBOT_BASE_URL` to that
-public origin before you open the wizard.
+Open <http://127.0.0.1:8000> to create a GitHub App with the setup wizard. Setup
+is off by default and requires an explicit trusted base URL; request host and
+proxy headers never choose the callback or webhook destination. A `localhost`
+webhook URL isn't reachable from GitHub. For a working local webhook, expose
+port 8000 through a public HTTPS tunnel and use that public origin as
+`STAMPBOT_BASE_URL` before you open the wizard.
 
 Once the App is installed and GitHub can reach `/webhook`, add this file to the
 default branch of a test repository:

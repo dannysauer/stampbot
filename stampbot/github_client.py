@@ -3,8 +3,11 @@
 
 """GitHub API client for app authentication and operations."""
 
+import os
 import re
+import stat
 import time
+from pathlib import Path
 from typing import TypedDict
 
 from github import Auth, Github, GithubIntegration
@@ -25,6 +28,7 @@ from stampbot.telemetry import add_span_attributes, create_span, set_span_error,
 GITHUB_API_TIMEOUT = 30  # seconds
 GITHUB_API_RETRY_TOTAL = 3
 GITHUB_API_RETRY_BACKOFF = 0.5  # exponential backoff factor
+MAX_PRIVATE_KEY_SIZE = 64 * 1024
 
 logger = get_logger(__name__)
 
@@ -114,31 +118,42 @@ class GitHubAppClient:
         if key is None:
             raise RuntimeError("Private key not configured")
 
-        # If it looks like PEM content, use directly
+        # A non-PEM value is an operator-selected file path. It is not
+        # request-controlled, so arbitrary relative and absolute paths are
+        # intentional. Validate the opened target instead of pretending that
+        # normalizing '..' segments creates a meaningful traversal boundary.
         if key.startswith("-----BEGIN"):
             pem_content = key
         else:
-            # Treat as file path - read the file
-            import os
-            from pathlib import Path
-
-            key_path = Path(key).resolve()
-
-            # Security: prevent path traversal by ensuring the path doesn't escape
-            # expected directories and doesn't follow symlinks to unexpected locations
-            if ".." in str(key_path) or not os.path.isfile(key_path):
-                raise ValueError(f"Invalid private key path: {key}")
-
             try:
-                with open(key_path) as f:
-                    pem_content = f.read()
-            except Exception as e:
-                logger.error("Failed to read private key from file: %s", e)
+                with Path(key).expanduser().open(encoding="utf-8") as key_file:
+                    file_metadata = os.fstat(key_file.fileno())
+                    if not stat.S_ISREG(file_metadata.st_mode):
+                        raise ValueError("Private key path must reference a regular file")
+                    if file_metadata.st_size > MAX_PRIVATE_KEY_SIZE:
+                        raise ValueError(f"Private key file exceeds {MAX_PRIVATE_KEY_SIZE} bytes")
+                    pem_content = key_file.read(MAX_PRIVATE_KEY_SIZE + 1)
+            except FileNotFoundError:
+                raise ValueError("Invalid private key path: file does not exist") from None
+            except OSError as e:
+                logger.error("Failed to read private key file: %s", e)
                 raise
 
-        # Validate the content is actually a PEM-formatted key
-        if not pem_content.strip().startswith("-----BEGIN"):
+        if len(pem_content.encode("utf-8")) > MAX_PRIVATE_KEY_SIZE:
+            raise ValueError(f"Private key exceeds {MAX_PRIVATE_KEY_SIZE} bytes")
+
+        # Validate a complete PEM private-key envelope. PyGithub performs the
+        # cryptographic parsing when it creates AppAuth.
+        pem_lines = pem_content.strip().splitlines()
+        if len(pem_lines) < 3 or not pem_lines[0].startswith("-----BEGIN "):
             raise ValueError("Private key must be in PEM format")
+        if not pem_lines[0].endswith("PRIVATE KEY-----"):
+            raise ValueError("PEM value must contain a private key")
+        expected_footer = pem_lines[0].replace("-----BEGIN ", "-----END ", 1)
+        if pem_lines[-1] != expected_footer:
+            raise ValueError("Private key PEM footer does not match its header")
+        if not any(line.strip() for line in pem_lines[1:-1]):
+            raise ValueError("Private key PEM body is empty")
 
         return pem_content
 

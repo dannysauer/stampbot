@@ -144,8 +144,14 @@ tests:
     template: deployment.yaml
     set:
       setup.enabled: true
+      setup.allowConfigured: true
       setup.baseUrl: "https://stampbot.example.com"
     asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: STAMPBOT_SETUP_ALLOW_CONFIGURED
+            value: "true"
       - contains:
           path: spec.template.spec.containers[0].env
           content:

@@ -14,16 +14,25 @@ The default bind address is `0.0.0.0:8000`.
 | `GET /ready` | None | `200` when credentials are complete or setup mode is enabled. The JSON includes `configured` and `setup_enabled` checks. | `503` when credentials are incomplete and setup is disabled. |
 | `GET /metrics` | None | `200` with Prometheus text. | None expected. |
 | `POST /webhook` | Signed GitHub webhook JSON | `200` with handler `status` and `message`. A handler-level error may still use HTTP `200`. | `400`, `401`, `413`, `503`, or `500`. |
-| `GET /setup` | None | `200` setup page or already-configured page. | `403` when setup is disabled. |
-| `GET /setup/callback` | GitHub manifest `code` query value | `200` page containing the new App credentials. | `403`, `422` for a missing code, or `500` when exchange fails. |
-| `GET /setup/status` | None | `200` with `configured`, `setup_enabled`, and `app_id` when configured. | None expected. |
+| `GET /setup` | None | `200` setup page when setup is explicitly enabled, the trusted base URL is valid, and the configured-state gate permits it. | `403` when disabled or automatically closed; `503` when `STAMPBOT_BASE_URL` is missing or invalid. |
+| `GET /setup/callback` | GitHub manifest `code` query value | `200` page containing the new App credentials while setup is available. | `403`, `422` for a missing code, or `500` when exchange fails. |
+| `GET /setup/status` | None | `200` with only `configured` and `setup_enabled` while setup is available. | `403` when setup is disabled or automatically closed. |
 | `GET /openapi.json` | None | FastAPI OpenAPI JSON. | Framework errors. |
 | `GET /docs` | None | Swagger UI. | Framework errors. |
 | `GET /redoc` | None | ReDoc UI. | Framework errors. |
 
 `/health` doesn't inspect credentials or GitHub. `/ready` is the traffic signal:
 an unconfigured process stays ready while setup is enabled so the setup page can
-still receive traffic.
+still receive traffic. Readiness does not validate `STAMPBOT_BASE_URL`; `/setup`
+returns `503` with a configuration error when that value is missing or invalid.
+
+Setup is disabled by default. Its manifest URLs come only from the required
+operator-configured `STAMPBOT_BASE_URL`; `Host`, `X-Forwarded-Host`, and
+`X-Forwarded-Proto` do not affect them. Credentials automatically close every
+setup route unless `STAMPBOT_SETUP_ALLOW_CONFIGURED=true` explicitly reopens
+the surface. Setup HTML responses use `Cache-Control: no-store`, prohibit
+framing, and suppress referrer data so the callback URL is not forwarded when
+the operator follows its installation link.
 
 The current application constant reports version `0.1.0` in the root response,
 OpenAPI document, metric, and tracing resource.

@@ -26,8 +26,11 @@ metrics_enabled = true
 metrics_port = 8000
 
 # Setup mode settings
-setup_enabled = true
-# base_url = ""  # Override auto-detected URL for /setup (e.g., https://stampbot.example.com)
+setup_enabled = false
+# Reopening setup after credentials are configured requires this second,
+# deliberate opt-in. Leave it false during normal operation.
+setup_allow_configured = false
+# base_url = ""  # Required when setup is enabled (e.g., https://stampbot.example.com)
 
 # GitHub App credentials (required for operation, set via env vars or .secrets.toml)
 # app_id = 12345

@@ -209,9 +209,12 @@ config:
 
 # setup -- GitHub App setup-flow settings.
 setup:
-  # setup.enabled -- Enable /setup. Keep this false after provisioning.
+  # setup.enabled -- Enable first-run /setup. Setup still closes after credentials exist.
   enabled: false
-  # setup.baseUrl -- Public Stampbot origin used for callback and webhook URLs.
+  # setup.allowConfigured -- Deliberately reopen setup on an already-configured instance.
+  allowConfigured: false
+  # setup.baseUrl -- Trusted public Stampbot URL used for callback and webhook URLs.
+  # Required when setup.enabled is true. Request headers are never used as a fallback.
   baseUrl: ""
 
 # github -- GitHub App credential source.

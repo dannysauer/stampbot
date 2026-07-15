@@ -25,10 +25,11 @@ secret store in production.
 | `STAMPBOT_OTEL_ENABLED` | `otel_enabled` | boolean | `false` | No | Enables FastAPI and logging instrumentation. |
 | `STAMPBOT_OTEL_ENDPOINT` | `otel_endpoint` | string | unset | When tracing is enabled | OTLP gRPC endpoint. Without it, Stampbot logs a warning and doesn't export spans. |
 | `STAMPBOT_OTEL_SERVICE_NAME` | `otel_service_name` | string | `stampbot` | No | OpenTelemetry service name. |
-| `STAMPBOT_SETUP_ENABLED` | `setup_enabled` | boolean | `true` in source; `false` in Helm | No | Enables `/setup` and its callback. Disable it after provisioning. |
-| `STAMPBOT_BASE_URL` | `base_url` | HTTPS URL | auto-detected | Behind a proxy or tunnel | Public origin used to build manifest callback and webhook URLs. Local HTTP is accepted only for `localhost` addresses. |
+| `STAMPBOT_SETUP_ENABLED` | `setup_enabled` | boolean | `false` | No | Enables setup for an unconfigured instance. Setup closes automatically after credentials are present. |
+| `STAMPBOT_SETUP_ALLOW_CONFIGURED` | `setup_allow_configured` | boolean | `false` | No | Reopens setup on a configured instance. Use only for deliberate App reprovisioning, then turn it off again. |
+| `STAMPBOT_BASE_URL` | `base_url` | HTTPS URL | unset | When setup is enabled | Trusted public URL used to build manifest callback and webhook URLs. It is never inferred from request headers. Local HTTP is accepted only for `localhost` addresses. |
 | `STAMPBOT_APP_ID` | `app_id` | integer or string | unset | Yes for webhooks | GitHub App ID. |
-| `STAMPBOT_PRIVATE_KEY` | `private_key` | PEM string or file path | unset | Yes for webhooks | App private key. A value beginning with `-----BEGIN` is read as PEM; any other value is treated as a regular-file path. |
+| `STAMPBOT_PRIVATE_KEY` | `private_key` | PEM string or file path | unset | Yes for webhooks | App private key. A value beginning with `-----BEGIN` is read as PEM; any other value is treated as an operator-selected regular-file path. Files are limited to 64 KiB and the value must have a complete private-key PEM envelope. |
 | `STAMPBOT_WEBHOOK_SECRET` | `webhook_secret` | string | unset | Yes for webhooks | Secret used to verify `X-Hub-Signature-256`. |
 | `STAMPBOT_METRICS_ENABLED` | `metrics_enabled` | boolean | `true` | No | Reserved. The current app serves `/metrics` regardless of this value. |
 | `STAMPBOT_METRICS_PORT` | `metrics_port` | integer | `8000` | No | Reserved. Metrics currently use the main HTTP port. |
@@ -38,6 +39,12 @@ network path or add transport protection in front of it.
 
 Stampbot considers itself configured only when App ID, private key, and webhook
 secret are all present. Without all three, `POST /webhook` returns `503`.
+
+Setup requires both `STAMPBOT_SETUP_ENABLED=true` and a valid
+`STAMPBOT_BASE_URL`. Once all three App credentials are present, setup routes
+return `403` even if the first flag was accidentally left on. Reopening those
+routes additionally requires `STAMPBOT_SETUP_ALLOW_CONFIGURED=true`. This is a
+break-glass reprovisioning control, not a normal production setting.
 
 ## Service-wide repository defaults
 

@@ -6,6 +6,7 @@
 import html
 import json
 import time
+import urllib.parse
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -27,6 +28,7 @@ from stampbot.manifest import (
     GITHUB_MANIFEST_URL,
     create_manifest,
     exchange_code_for_credentials,
+    validate_base_url,
 )
 from stampbot.metrics import (
     errors_total,
@@ -55,6 +57,65 @@ APP_VERSION = "0.1.0"
 # Security limits
 MAX_WEBHOOK_BODY_SIZE = 1024 * 1024  # 1MB - GitHub webhooks are typically much smaller
 UNMATCHED_ENDPOINT = "unmatched"
+SETUP_HTML_HEADERS = {
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": (
+        "base-uri 'none'; frame-ancestors 'none'; form-action https://github.com"
+    ),
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+}
+
+
+def _setup_requested() -> bool:
+    """Return whether the operator explicitly enabled setup."""
+    return bool(settings.get("setup_enabled", False))
+
+
+def _setup_allowed_when_configured() -> bool:
+    """Return whether setup was explicitly reopened after configuration."""
+    return bool(settings.get("setup_allow_configured", False))
+
+
+def _setup_is_available(configured: bool | None = None) -> bool:
+    """Return whether setup routes should be available for the current state."""
+    if not _setup_requested():
+        return False
+
+    app_configured = is_configured() if configured is None else configured
+    return not app_configured or _setup_allowed_when_configured()
+
+
+def _require_setup_access() -> None:
+    """Reject requests when the operator has not made setup available.
+
+    Raises:
+        HTTPException: If setup is disabled or automatically closed.
+    """
+    if not _setup_requested():
+        raise HTTPException(status_code=403, detail="Setup is disabled")
+    if is_configured() and not _setup_allowed_when_configured():
+        raise HTTPException(
+            status_code=403,
+            detail="Setup is closed because Stampbot is already configured",
+        )
+
+
+def _trusted_setup_base_url() -> str:
+    """Return the validated operator-configured setup base URL.
+
+    Raises:
+        HTTPException: If the trusted public URL is missing or invalid.
+    """
+    configured_base_url = settings.get("base_url", "")
+    try:
+        return validate_base_url(configured_base_url)
+    except ValueError as error:
+        logger.warning("Setup base URL is missing or invalid: %s", error)
+        raise HTTPException(
+            status_code=503,
+            detail=("Setup requires STAMPBOT_BASE_URL to be set to Stampbot's trusted public URL"),
+        ) from None
 
 
 @asynccontextmanager
@@ -78,9 +139,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
 
     # Log setup mode status
-    if not is_configured():
-        logger.warning("GitHub App credentials not configured. Running in setup mode.")
-        logger.info("Visit /setup to create your GitHub App")
+    configured = is_configured()
+    if not configured:
+        logger.warning("GitHub App credentials not configured.")
+        if _setup_is_available(configured=False):
+            logger.info("Setup is enabled; visit /setup to create your GitHub App")
+        else:
+            logger.warning("Setup is disabled; enable it explicitly to provision the App")
     else:
         logger.info("GitHub App credentials configured successfully")
 
@@ -257,7 +322,8 @@ async def root() -> Response:
     Returns:
         Redirect to /setup if unconfigured, otherwise JSON status response.
     """
-    if not is_configured() and settings.setup_enabled:
+    configured = is_configured()
+    if not configured and _setup_is_available(configured=False):
         return RedirectResponse(url="/setup", status_code=307)
 
     return Response(
@@ -303,7 +369,7 @@ async def ready() -> Response:
         JSON response with a per-check breakdown: 200 when ready, 503 otherwise.
     """
     configured = is_configured()
-    setup_enabled = bool(settings.setup_enabled)
+    setup_enabled = _setup_is_available(configured=configured)
     checks = {"configured": configured, "setup_enabled": setup_enabled}
     is_ready = configured or setup_enabled
     return JSONResponse(
@@ -411,11 +477,8 @@ async def webhook(
 
 
 @app.get("/setup")
-async def setup_page(request: Request) -> Response:
+async def setup_page() -> Response:
     """Setup page with manifest creation button.
-
-    Args:
-        request: FastAPI request for URL detection.
 
     Returns:
         HTML page with setup instructions and GitHub App creation button.
@@ -423,57 +486,18 @@ async def setup_page(request: Request) -> Response:
     Raises:
         HTTPException: If setup is disabled (403).
     """
-    if not settings.setup_enabled:
-        raise HTTPException(status_code=403, detail="Setup not allowed in this environment")
+    _require_setup_access()
 
-    if is_configured():
-        return HTMLResponse(
-            content="""
-            <!DOCTYPE html>
-            <html>
-            <head><title>Stampbot - Already Configured</title>
-            <style>
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                       max-width: 600px; margin: 50px auto; padding: 20px; }
-                h1 { color: #24292e; }
-                .info { background: #dcffe4; border: 1px solid #34d058; padding: 16px;
-                        border-radius: 6px; }
-            </style>
-            </head>
-            <body>
-                <h1>Stampbot Already Configured</h1>
-                <div class="info">
-                    <p>Your GitHub App credentials are already configured.</p>
-                    <p>Stampbot is ready to receive webhooks.</p>
-                </div>
-            </body>
-            </html>
-            """,
-            status_code=200,
-        )
-
-    # Determine base URL with priority:
-    # 1. Explicit configuration (STAMPBOT_BASE_URL)
-    # 2. Proxy headers (X-Forwarded-Proto + Host/X-Forwarded-Host)
-    # 3. Request base URL (fallback)
-    configured_base_url = settings.get("base_url", "")
-    if configured_base_url:
-        base_url = configured_base_url.rstrip("/")
-    else:
-        # Check for proxy headers from ingress/load balancer
-        # Cloud Run sends X-Forwarded-Proto but uses standard Host header
-        forwarded_proto = request.headers.get("X-Forwarded-Proto", "")
-        forwarded_host = request.headers.get("X-Forwarded-Host", request.headers.get("Host", ""))
-        if forwarded_proto and forwarded_host:
-            base_url = f"{forwarded_proto}://{forwarded_host}"
-        else:
-            base_url = str(request.base_url).rstrip("/")
+    # This URL is operator-controlled configuration. Request Host and
+    # X-Forwarded-* headers are deliberately never trusted for App manifests.
+    base_url = _trusted_setup_base_url()
     redirect_url = f"{base_url}/setup/callback"
     webhook_url = f"{base_url}/webhook"
 
     manifest = create_manifest(redirect_url, webhook_url=webhook_url)
     # HTML-escape the JSON for safe embedding in the form
     manifest_json = html.escape(json.dumps(manifest))
+    webhook_url_escaped = html.escape(webhook_url, quote=True)
 
     html_content = f"""
     <!DOCTYPE html>
@@ -522,21 +546,20 @@ async def setup_page(request: Request) -> Response:
 
         <div class="info">
             <p><strong>Note:</strong> The webhook URL will be automatically configured to:</p>
-            <p><code>{webhook_url}</code></p>
+            <p><code>{webhook_url_escaped}</code></p>
         </div>
     </body>
     </html>
     """
 
-    return HTMLResponse(content=html_content)
+    return HTMLResponse(content=html_content, headers=SETUP_HTML_HEADERS)
 
 
 @app.get("/setup/callback")
-async def setup_callback(request: Request, code: str) -> Response:
+async def setup_callback(code: str) -> Response:
     """Handle callback from GitHub after app creation.
 
     Args:
-        request: FastAPI request.
         code: Temporary code from GitHub to exchange for credentials.
 
     Returns:
@@ -545,8 +568,7 @@ async def setup_callback(request: Request, code: str) -> Response:
     Raises:
         HTTPException: If setup disabled (403) or code exchange fails (500).
     """
-    if not settings.setup_enabled:
-        raise HTTPException(status_code=403, detail="Setup not allowed")
+    _require_setup_access()
 
     try:
         credentials = await exchange_code_for_credentials(code)
@@ -561,8 +583,15 @@ async def setup_callback(request: Request, code: str) -> Response:
     # 3. Users can immediately rotate the webhook secret if concerned
     # 4. The alternative (file download) adds friction without meaningful security gain
     #    since the credentials must be transmitted to the browser regardless
-    private_key_escaped = credentials["pem"].replace("\n", "\\n")
-    app_slug = credentials.get("slug", "stampbot")
+    private_key_escaped = html.escape(str(credentials["pem"]).replace("\n", "\\n"), quote=True)
+    app_id_escaped = html.escape(str(credentials["id"]), quote=True)
+    webhook_secret_escaped = html.escape(str(credentials["webhook_secret"]), quote=True)
+    app_name_escaped = html.escape(str(credentials.get("name", "Stampbot")), quote=True)
+    app_slug = urllib.parse.quote(str(credentials.get("slug", "stampbot")), safe="")
+    installation_url = html.escape(
+        f"https://github.com/settings/apps/{app_slug}/installations",
+        quote=True,
+    )
 
     html_content = f"""
     <!DOCTYPE html>
@@ -594,8 +623,8 @@ async def setup_callback(request: Request, code: str) -> Response:
 
         <div class="success">
             <strong>GitHub App created successfully!</strong>
-            <p>App Name: {credentials.get("name", "Stampbot")}</p>
-            <p>App ID: {credentials["id"]}</p>
+            <p>App Name: {app_name_escaped}</p>
+            <p>App ID: {app_id_escaped}</p>
         </div>
 
         <div class="warning">
@@ -606,8 +635,8 @@ async def setup_callback(request: Request, code: str) -> Response:
         <h2>Environment Variables</h2>
         <p>Add these to your <code>.env</code> file or environment:</p>
 
-        <pre id="env-vars">STAMPBOT_APP_ID={credentials["id"]}
-STAMPBOT_WEBHOOK_SECRET={credentials["webhook_secret"]}
+        <pre id="env-vars">STAMPBOT_APP_ID={app_id_escaped}
+STAMPBOT_WEBHOOK_SECRET={webhook_secret_escaped}
 STAMPBOT_PRIVATE_KEY="{private_key_escaped}"</pre>
 
         <button class="copy-btn" onclick="copyEnv()">Copy to Clipboard</button>
@@ -616,8 +645,8 @@ STAMPBOT_PRIVATE_KEY="{private_key_escaped}"</pre>
         <p>For Kubernetes deployment, create a secret with the private key in a file:</p>
 
         <pre>kubectl create secret generic stampbot-github \\
-  --from-literal=STAMPBOT_APP_ID={credentials["id"]} \\
-  --from-literal=STAMPBOT_WEBHOOK_SECRET={credentials["webhook_secret"]} \\
+  --from-literal=STAMPBOT_APP_ID={app_id_escaped} \\
+  --from-literal=STAMPBOT_WEBHOOK_SECRET={webhook_secret_escaped} \\
   --from-file=STAMPBOT_PRIVATE_KEY=private-key.pem \\
   -n stampbot</pre>
 
@@ -625,7 +654,7 @@ STAMPBOT_PRIVATE_KEY="{private_key_escaped}"</pre>
         <ol>
             <li>Save the credentials above to your <code>.env</code> file</li>
             <li>Restart stampbot with the new credentials</li>
-            <li><a href="https://github.com/settings/apps/{app_slug}/installations" target="_blank">
+            <li><a href="{installation_url}" target="_blank" rel="noopener noreferrer">
                 Install the app on your repositories</a></li>
         </ol>
 
@@ -641,7 +670,7 @@ STAMPBOT_PRIVATE_KEY="{private_key_escaped}"</pre>
     </html>
     """
 
-    return HTMLResponse(content=html_content)
+    return HTMLResponse(content=html_content, headers=SETUP_HTML_HEADERS)
 
 
 @app.get("/setup/status")
@@ -651,8 +680,8 @@ async def setup_status() -> dict[str, Any]:
     Returns:
         Dictionary with configuration status and settings.
     """
+    _require_setup_access()
     return {
         "configured": is_configured(),
-        "setup_enabled": settings.setup_enabled,
-        "app_id": settings.app_id if is_configured() else None,
+        "setup_enabled": True,
     }

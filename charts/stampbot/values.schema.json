@@ -263,6 +263,9 @@
         "enabled": {
           "type": "boolean"
         },
+        "allowConfigured": {
+          "type": "boolean"
+        },
         "baseUrl": {
           "type": "string"
         }
@@ -453,6 +456,55 @@
               "roleArn": {
                 "type": "string",
                 "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "setup": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "setup": {
+            "properties": {
+              "baseUrl": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "setup": {
+            "properties": {
+              "allowConfigured": {
+                "const": true
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "setup": {
+            "properties": {
+              "enabled": {
+                "const": true
               }
             }
           }

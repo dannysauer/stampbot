@@ -270,18 +270,22 @@ gate applies to automatic releases, manual runs, and reusable-workflow calls.
 ```bash
 curl -fsS "${SERVICE_URL}/health"
 curl -fsS "${SERVICE_URL}/ready"
-curl -fsS "${SERVICE_URL}/setup/status"
 ```
 
 Expected production state:
 
 ```json
 {
-  "configured": true,
-  "setup_enabled": false,
-  "app_id": "123456"
+  "status": "ready",
+  "checks": {
+    "configured": true,
+    "setup_enabled": false
+  }
 }
 ```
+
+A normal configured service returns `403` for `/setup`, `/setup/callback`, and
+`/setup/status`.
 
 Read recent logs:
 

@@ -139,7 +139,7 @@ def test_setup_routes_keep_distinct_static_labels(
     setup_response = test_client.get("/setup")
     callback_response = test_client.get("/setup/callback")
 
-    assert setup_response.status_code == 200
+    assert setup_response.status_code == 403
     assert callback_response.status_code == 422
     assert _endpoint_labels(http_metric_spies["http_requests_total"]) == [
         "/setup",

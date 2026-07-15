@@ -12,6 +12,7 @@ from stampbot.manifest import (
     create_manifest,
     exchange_code_for_credentials,
     get_manifest_url,
+    validate_base_url,
 )
 
 
@@ -53,6 +54,41 @@ class TestUrlValidation:
                 redirect_url="https://example.com/setup/callback",
                 webhook_url="ftp://example.com/webhook",
             )
+
+    @pytest.mark.parametrize(
+        "base_url",
+        [
+            "",
+            "example.test",
+            "http://public.example.test",
+            "https://user@example.test",
+            "https://example.test?next=elsewhere",
+            "https://example.test#fragment",
+            "https://example.test?",
+            "https://example.test/#",
+            "https://example.test/bad path",
+            "https://example.test/<unsafe>",
+            "https://example.test\\unexpected",
+            "https://:443",
+            "https://example.test:invalid",
+        ],
+    )
+    def test_rejects_unsafe_base_url(self, base_url):
+        """Test trusted setup base URLs reject ambiguous or unsafe forms."""
+        with pytest.raises(ValueError, match="Invalid base_url"):
+            validate_base_url(base_url)
+
+    @pytest.mark.parametrize(
+        ("base_url", "expected"),
+        [
+            ("https://stampbot.example.test/", "https://stampbot.example.test"),
+            ("https://stampbot.example.test/service/", "https://stampbot.example.test/service"),
+            ("http://localhost:8000/", "http://localhost:8000"),
+        ],
+    )
+    def test_normalizes_safe_base_url(self, base_url, expected):
+        """Test trusted setup base URLs preserve supported deployment forms."""
+        assert validate_base_url(base_url) == expected
 
 
 class TestCreateManifest:

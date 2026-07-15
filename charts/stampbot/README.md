@@ -97,6 +97,7 @@ github:
 
 setup:
   enabled: false
+  allowConfigured: false
   baseUrl: https://stampbot.example.com
 
 ingress:
@@ -408,8 +409,9 @@ Docker, and kubeconform.
 | `config.otelEnabled` | boolean | `false` | `STAMPBOT_OTEL_ENABLED`. |
 | `config.otelEndpoint` | string | empty | `STAMPBOT_OTEL_ENDPOINT` when tracing is enabled. |
 | `config.otelServiceName` | string | `stampbot` | `STAMPBOT_OTEL_SERVICE_NAME`. |
-| `setup.enabled` | boolean | `false` | Enables `/setup`. Keep it off after provisioning. |
-| `setup.baseUrl` | string | empty | `STAMPBOT_BASE_URL`. |
+| `setup.enabled` | boolean | `false` | Enables first-run `/setup`; it still closes after credentials exist. |
+| `setup.allowConfigured` | boolean | `false` | Reopens setup on a configured instance. Use only for deliberate reprovisioning. |
+| `setup.baseUrl` | string | empty | Trusted `STAMPBOT_BASE_URL`; required while setup is enabled. |
 | `github.appId` | string or integer | empty | Inline App ID. |
 | `github.privateKey` | string | empty | Inline PEM private key. |
 | `github.webhookSecret` | string | empty | Inline webhook secret. |
@@ -454,7 +456,8 @@ Docker, and kubeconform.
 ## Security notes
 
 - Prefer `github.existingSecret` or External Secrets Operator.
-- Keep `setup.enabled=false` after setup.
+- Keep `setup.enabled=false` after setup and leave `setup.allowConfigured=false`
+  unless deliberately reprovisioning the App.
 - Pin a verified chart version and image digest for controlled promotion.
 - Protect `/metrics` at the network boundary when it shouldn't be public.
 - Review the default NetworkPolicy rules before enabling them; defaults are

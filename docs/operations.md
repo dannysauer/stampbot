@@ -11,16 +11,15 @@ Set `BASE_URL` to the public Stampbot origin:
 BASE_URL=https://stampbot.example.com
 curl -fsS "${BASE_URL}/health"
 curl -fsS "${BASE_URL}/ready"
-curl -fsS "${BASE_URL}/setup/status"
 ```
 
-Read the three results separately:
+Read the two results separately:
 
 - `/health` proves only that the process can answer HTTP.
 - `/ready` reports whether the process has credentials or can still serve setup.
-- `/setup/status` shows `configured` and `setup_enabled` directly.
 
-A production instance should be ready and configured with setup disabled.
+A production instance should be ready and report `configured: true` with
+`setup_enabled: false`.
 
 For Kubernetes, check the workload and its recent logs:
 
@@ -61,11 +60,25 @@ disabled. Check the runtime for all three variables:
 - `STAMPBOT_PRIVATE_KEY`; and
 - `STAMPBOT_WEBHOOK_SECRET`.
 
-If the private-key value is a path, the file must exist inside the process or
-container and begin with a PEM `-----BEGIN` line.
+If the private-key value is a path, it must select a regular file no larger than
+64 KiB inside the process or container. Its PEM header and footer must match.
 
-Keep `STAMPBOT_SETUP_ENABLED=false` after provisioning. If a proxy changes the
-external host or scheme, set `STAMPBOT_BASE_URL` to the public HTTPS origin.
+First-run setup requires both `STAMPBOT_SETUP_ENABLED=true` and a trusted
+`STAMPBOT_BASE_URL`. Request host and forwarding headers are ignored. After
+credentials are configured, setup returns `403` automatically. Keep
+`STAMPBOT_SETUP_ENABLED=false` and `STAMPBOT_SETUP_ALLOW_CONFIGURED=false` in
+normal operation.
+
+During first-run setup only, this status check is available:
+
+```bash
+curl -fsS "${BASE_URL}/setup/status"
+```
+
+It returns only `configured` and `setup_enabled`; it never returns the App ID.
+If deliberate reprovisioning is necessary, set both setup flags to `true` for
+the shortest possible maintenance window, confirm `STAMPBOT_BASE_URL`, and turn
+both flags off after storing the replacement credentials.
 
 ## Check GitHub App access
 

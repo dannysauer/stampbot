@@ -54,14 +54,21 @@ tests:
       - equal:
           path: data.STAMPBOT_SETUP_ENABLED
           value: "false"
+      - equal:
+          path: data.STAMPBOT_SETUP_ALLOW_CONFIGURED
+          value: "false"
 
   - it: should set setup base URL when provided
     set:
       setup.enabled: true
+      setup.allowConfigured: true
       setup.baseUrl: "https://stampbot.example.com"
     asserts:
       - equal:
           path: data.STAMPBOT_SETUP_ENABLED
+          value: "true"
+      - equal:
+          path: data.STAMPBOT_SETUP_ALLOW_CONFIGURED
           value: "true"
       - equal:
           path: data.STAMPBOT_BASE_URL

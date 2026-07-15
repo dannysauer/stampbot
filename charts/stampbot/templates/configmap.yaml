@@ -12,6 +12,7 @@ data:
   OTEL_SERVICE_NAME: {{ .Values.config.otelServiceName | quote }}
   {{- end }}
   STAMPBOT_SETUP_ENABLED: {{ .Values.setup.enabled | quote }}
+  STAMPBOT_SETUP_ALLOW_CONFIGURED: {{ .Values.setup.allowConfigured | quote }}
   {{- if .Values.setup.baseUrl }}
   STAMPBOT_BASE_URL: {{ .Values.setup.baseUrl | quote }}
   {{- end }}

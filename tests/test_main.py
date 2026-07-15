@@ -39,6 +39,27 @@ def test_lifespan_startup_unconfigured():
             assert response.status_code == 200
 
 
+def test_lifespan_startup_unconfigured_setup_disabled():
+    """Test startup remains live when credentials and setup are both absent."""
+    from stampbot.main import app
+
+    with (
+        patch("stampbot.main.is_configured", return_value=False),
+        patch("stampbot.main.settings") as mock_settings,
+    ):
+        mock_settings.app_name = "stampbot"
+        mock_settings.host = "0.0.0.0"
+        mock_settings.port = 8000
+        mock_settings.log_level = "INFO"
+        mock_settings.get.side_effect = lambda key, default=None: {
+            "setup_enabled": False,
+            "setup_allow_configured": False,
+        }.get(key, default)
+
+        with TestClient(app) as client:
+            assert client.get("/health").status_code == 200
+
+
 def test_root_endpoint(test_client: TestClient):
     """Test root endpoint returns basic info."""
     response = test_client.get("/")
@@ -76,7 +97,10 @@ def test_ready_endpoint_unconfigured_setup_enabled(test_client: TestClient):
         patch("stampbot.main.is_configured", return_value=False),
         patch("stampbot.main.settings") as mock_settings,
     ):
-        mock_settings.setup_enabled = True
+        mock_settings.get.side_effect = lambda key, default=None: {
+            "setup_enabled": True,
+            "setup_allow_configured": False,
+        }.get(key, default)
         response = test_client.get("/ready")
     assert response.status_code == 200
     data = response.json()
@@ -90,7 +114,10 @@ def test_ready_endpoint_unconfigured_setup_disabled(test_client: TestClient):
         patch("stampbot.main.is_configured", return_value=False),
         patch("stampbot.main.settings") as mock_settings,
     ):
-        mock_settings.setup_enabled = False
+        mock_settings.get.side_effect = lambda key, default=None: {
+            "setup_enabled": False,
+            "setup_allow_configured": False,
+        }.get(key, default)
         response = test_client.get("/ready")
     assert response.status_code == 503
     data = response.json()

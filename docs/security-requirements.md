@@ -44,7 +44,11 @@ secure.
 - Local credentials belong in ignored files or environment variables.
 - Production credentials belong in a secret manager or a Kubernetes Secret
   with controlled access.
-- Operators must disable `/setup` after the manifest flow.
+- `/setup` must be opt-in, use an operator-configured trusted public URL, and
+  close automatically after App credentials are present. Reopening it on a
+  configured instance requires a separate explicit control.
+- Setup HTML must not be cached or framed, and the credential callback must not
+  send its URL as a referrer.
 - Public deployments must protect `/metrics` outside the app when its contents
   shouldn't be public.
 - A reverse proxy header may supply `client_ip` only when the operator trusts

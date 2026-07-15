@@ -159,8 +159,7 @@ class TestLoadPrivateKey:
 
             client = GitHubAppClient()
 
-            # Mock open to raise an exception after the file existence check passes
-            with patch("builtins.open", side_effect=PermissionError("Access denied")):
+            with patch("pathlib.Path.open", side_effect=PermissionError("Access denied")):
                 with pytest.raises(PermissionError, match="Access denied"):
                     client._load_private_key()
 
@@ -177,6 +176,96 @@ class TestLoadPrivateKey:
             client = GitHubAppClient()
             with pytest.raises(ValueError, match="Private key must be in PEM format"):
                 client._load_private_key()
+
+    def test_load_private_key_allows_operator_selected_parent_path(self, tmp_path, monkeypatch):
+        """Test normalized parent segments are valid operator configuration."""
+        key_file = tmp_path / "private-key.pem"
+        key_file.write_text(TEST_PEM_KEY)
+        child = tmp_path / "runtime"
+        child.mkdir()
+        monkeypatch.chdir(child)
+
+        with patch("stampbot.github_client.settings") as mock_settings:
+            mock_settings.private_key = "../private-key.pem"
+
+            from stampbot.github_client import GitHubAppClient
+
+            assert GitHubAppClient()._load_private_key() == TEST_PEM_KEY
+
+    def test_load_private_key_rejects_non_regular_file(self, tmp_path):
+        """Test a non-regular target cannot be read as a private key."""
+        key_file = tmp_path / "private-key.pem"
+        key_file.write_text(TEST_PEM_KEY)
+
+        with (
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.os.fstat") as mock_fstat,
+        ):
+            mock_settings.private_key = str(key_file)
+            mock_fstat.return_value.st_mode = 0
+            mock_fstat.return_value.st_size = 0
+
+            from stampbot.github_client import GitHubAppClient
+
+            with pytest.raises(ValueError, match="regular file"):
+                GitHubAppClient()._load_private_key()
+
+    def test_load_private_key_rejects_oversized_file(self, tmp_path):
+        """Test an unexpectedly large configured file is rejected before parsing."""
+        from stampbot.github_client import MAX_PRIVATE_KEY_SIZE, GitHubAppClient
+
+        key_file = tmp_path / "private-key.pem"
+        key_file.write_text("x" * (MAX_PRIVATE_KEY_SIZE + 1))
+
+        with patch("stampbot.github_client.settings") as mock_settings:
+            mock_settings.private_key = str(key_file)
+
+            with pytest.raises(ValueError, match="exceeds"):
+                GitHubAppClient()._load_private_key()
+
+    def test_load_private_key_rejects_mismatched_footer(self):
+        """Test the PEM header and footer must describe the same key type."""
+        with patch("stampbot.github_client.settings") as mock_settings:
+            mock_settings.private_key = (
+                "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----"
+            )
+
+            from stampbot.github_client import GitHubAppClient
+
+            with pytest.raises(ValueError, match="footer does not match"):
+                GitHubAppClient()._load_private_key()
+
+    def test_load_private_key_rejects_oversized_inline_value(self):
+        """Test an oversized inline value is rejected before PEM parsing."""
+        from stampbot.github_client import MAX_PRIVATE_KEY_SIZE, GitHubAppClient
+
+        with patch("stampbot.github_client.settings") as mock_settings:
+            mock_settings.private_key = TEST_PEM_KEY.replace("test", "x" * MAX_PRIVATE_KEY_SIZE)
+
+            with pytest.raises(ValueError, match="exceeds"):
+                GitHubAppClient()._load_private_key()
+
+    def test_load_private_key_rejects_non_private_pem(self):
+        """Test another PEM object type is not accepted as a private key."""
+        with patch("stampbot.github_client.settings") as mock_settings:
+            mock_settings.private_key = (
+                "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----"
+            )
+
+            from stampbot.github_client import GitHubAppClient
+
+            with pytest.raises(ValueError, match="must contain a private key"):
+                GitHubAppClient()._load_private_key()
+
+    def test_load_private_key_rejects_empty_pem_body(self):
+        """Test a private-key envelope must contain body data."""
+        with patch("stampbot.github_client.settings") as mock_settings:
+            mock_settings.private_key = TEST_PEM_KEY.replace("test", "")
+
+            from stampbot.github_client import GitHubAppClient
+
+            with pytest.raises(ValueError, match="body is empty"):
+                GitHubAppClient()._load_private_key()
 
 
 class TestGetInstallationClient:

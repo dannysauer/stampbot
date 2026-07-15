@@ -38,6 +38,51 @@ def _validate_url(url: str, name: str) -> None:
         raise ValueError(f"Invalid {name}: must use HTTPS")
 
 
+def validate_base_url(base_url: str) -> str:
+    """Validate and normalize the trusted public URL used by setup.
+
+    The setup flow must receive this value from operator configuration, never
+    from request headers. Paths are allowed for deployments mounted below a
+    reverse-proxy prefix, but credentials, query strings, fragments, and
+    whitespace are not valid parts of the public base URL.
+
+    Args:
+        base_url: Operator-configured public URL.
+
+    Returns:
+        The normalized URL without a trailing slash.
+
+    Raises:
+        ValueError: If the URL is incomplete, unsafe, or unsupported.
+    """
+    if not isinstance(base_url, str) or not base_url.strip():
+        raise ValueError("Invalid base_url: must be configured")
+
+    normalized = base_url.strip().rstrip("/")
+    if any(
+        character.isspace() or ord(character) < 32 or character in {"<", ">", '"', "'", "\\"}
+        for character in normalized
+    ):
+        raise ValueError("Invalid base_url: contains an unsafe character")
+
+    _validate_url(normalized, "base_url")
+    parsed = urlparse(normalized)
+
+    if parsed.hostname is None:
+        raise ValueError("Invalid base_url: hostname is required")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("Invalid base_url: must not contain credentials")
+    if "?" in normalized or "#" in normalized:
+        raise ValueError("Invalid base_url: must not contain a query or fragment")
+
+    try:
+        _ = parsed.port
+    except ValueError as error:
+        raise ValueError("Invalid base_url: port is invalid") from error
+
+    return normalized
+
+
 # GitHub App Manifest URLs
 GITHUB_MANIFEST_URL = "https://github.com/settings/apps/new"
 GITHUB_MANIFEST_CONVERSION_URL = "https://api.github.com/app-manifests/{code}/conversions"
