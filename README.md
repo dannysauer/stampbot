@@ -15,42 +15,45 @@
 [![Helm](https://img.shields.io/badge/helm-v3-blue.svg)](https://helm.sh)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://hub.docker.com)
 
-Stampbot is a GitHub App that turns a configured label or an authorized ChatOps
-comment into a pull request approval. It can also withdraw its own approval.
+Stampbot is a GitHub App that approves pull requests when repository policy says
+it may. A label or an authorized `@stampbot` comment can create an approval.
+Stampbot can withdraw its own approval too.
 
-Stampbot does one job. It doesn't merge pull requests, change branch protection, or
-approve as a human reviewer.
+It never merges a pull request, changes branch protection, grants access, or
+reviews as a person. That boundary is the point.
 
-## How it works
+Visit the [Stampbot project site](https://stampbot.github.io/) for the short
+version, or keep reading for a working setup.
 
-GitHub sends Stampbot a signed webhook whenever a relevant pull request changes.
-Stampbot verifies the signature, reads the repository's policy, and acts as that
-GitHub App installation.
+## Choose when Stampbot may approve
 
-A repository can approve by label:
+Policy lives in `stampbot.toml` on the repository's default branch. This small
+policy approves pull requests carrying the `autoapprove` label:
 
-1. Add a label listed in `approval_labels`.
-2. Stampbot checks any label, title, user, and team filters.
-3. If every configured filter passes, Stampbot adds its approval.
+```toml
+approval_labels = ["autoapprove"]
+reapprove = false
+chatops_required_permission = "maintain"
+```
 
-Or a maintainer can leave `@stampbot approve` on the pull request. ChatOps commands
-have their own repository-permission threshold and don't use the label eligibility
-filters.
+Label approval can also require another label, a matching title, a named author,
+or membership in an organization team. Every configured filter category must
+pass. Values inside a category are alternatives.
 
-Removing any configured approval label dismisses Stampbot's active approvals.
-Approvals aren't refreshed after a new commit unless `reapprove = true` or an
-authorized maintainer asks Stampbot to approve again.
+ChatOps follows a separate rule. A commenter with the configured repository
+permission can write `@stampbot approve` or `@stampbot unapprove`; label filters
+don't apply to that command.
 
-> **Stampbot is not a native code owner.** GitHub Apps can't appear in
-> `CODEOWNERS`. If you need path-level bot ownership, use
-> [Extra CODEOWNERS](https://github.com/stampbot/extra-codeowners) and read its
-> [current safety boundary](https://extra-codeowners.readthedocs.io/en/latest/reference/checks/#eventual-consistency)
-> before replacing GitHub's native code-owner rule.
+Removing an approval label dismisses Stampbot's active reviews. A new commit
+doesn't receive another approval unless `reapprove = true` or an authorized
+maintainer asks for one.
 
-## Try Stampbot locally
+The [configuration reference](docs/configuration.md) lists every key, limit,
+default, and fallback.
 
-You need Git, Make, Poetry, and Python 3.11 or newer. The repository's Makefile
-creates `.venv/` and keeps all Python tools inside it.
+## Try it from source
+
+Install Git, Make, Poetry, and Python 3.11 or newer. Then run:
 
 ```bash
 git clone https://github.com/dannysauer/stampbot.git
@@ -61,86 +64,65 @@ STAMPBOT_BASE_URL=http://localhost:8000 \
 make dev
 ```
 
-In another terminal, check the process:
+Check the process from another terminal:
 
 ```bash
-curl http://127.0.0.1:8000/health
+curl -fsS http://127.0.0.1:8000/health
 ```
 
-The response is:
+It should return:
 
 ```json
 {"status":"healthy"}
 ```
 
-Open <http://127.0.0.1:8000> to create a GitHub App with the setup wizard. Setup
-is off by default and requires an explicit trusted base URL; request host and
-proxy headers never choose the callback or webhook destination. A `localhost`
-webhook URL isn't reachable from GitHub. For a working local webhook, expose
-port 8000 through a public HTTPS tunnel and use that public origin as
-`STAMPBOT_BASE_URL` before you open the wizard.
+Open <http://127.0.0.1:8000/setup> to create a development GitHub App. The
+wizard is off by default and uses only the `STAMPBOT_BASE_URL` you supplied.
+Request headers can't change its callback or webhook destination.
 
-Once the App is installed and GitHub can reach `/webhook`, add this file to the
-default branch of a test repository:
+GitHub can't deliver a webhook to localhost. Before testing a real pull request,
+put port 8000 behind a public HTTPS tunnel and restart Stampbot with that origin
+as `STAMPBOT_BASE_URL`. The [installation guide](INSTALLATION.md) walks through
+the App permissions, credentials, and production runtimes.
 
-```toml
-# stampbot.toml
-approval_labels = ["autoapprove"]
-reapprove = false
-chatops_required_permission = "maintain"
-```
+## Pick a runtime
 
-Open a pull request and add the `autoapprove` label. A successful run leaves an
-approval review from your Stampbot App on the pull request.
-
-For production credentials and every deployment path, use the
-[installation guide](INSTALLATION.md).
-
-## What you can configure
-
-Repository policy lives in `stampbot.toml`. Each repository can choose:
-
-- labels that create or dismiss approval;
-- commands and the permission needed to run them;
-- whether a new commit can receive a fresh approval;
-- required labels or title patterns; and
-- allowed users or organization teams.
-
-Stampbot first checks `stampbot.toml` on the target repository's default branch.
-For an organization repository, it then checks `ORG/.github`. If neither file
-exists, the service defaults apply.
-
-See the [configuration reference](docs/configuration.md) for every key, default,
-validation rule, permission, and fallback.
-
-## Run it where you need it
-
-| If you want to… | Start here |
+| Goal | Guide |
 | --- | --- |
-| Run from a source checkout or container | [Install Stampbot](INSTALLATION.md) |
-| Install the published Helm chart | [Stampbot Helm chart](charts/stampbot/README.md) |
-| Deploy with the repository's Cloud Run workflow | [Deploy to Cloud Run](docs/deploy-gcp-cloudrun.md) |
-| Verify a release before deployment | [Verify a release](docs/release-verification.md) |
+| Run from source or a container | [Install Stampbot](INSTALLATION.md) |
+| Run on Kubernetes | [Install the Helm chart](charts/stampbot/README.md) |
+| Deploy through the repository's Google Cloud workflow | [Deploy to Cloud Run](docs/deploy-gcp-cloudrun.md) |
+| Promote a signed image or chart | [Verify a release](docs/release-verification.md) |
 
 The app exposes liveness and readiness, plus structured logs and optional
 OpenTelemetry traces. Operators can enable Prometheus metrics on a separate
 listener. Start with the
 [runbook](docs/operations.md).
 
-## Find the right document
+## Understand the boundary
 
-The [documentation index](docs/README.md) groups pages by task. Common entry
-points are:
+GitHub sends a signed webhook. Stampbot verifies the signature before parsing
+the body, loads policy from GitHub, and acts through the App installation that
+received the event. GitHub remains the source of truth for review state.
 
-- [interface reference](docs/reference.md) for HTTP routes, webhooks, ChatOps, and metrics;
-- [architecture](docs/architecture.md) for the request path and trust boundaries;
-- [security requirements](docs/security-requirements.md) for the properties this project protects;
-- [contributing guide](CONTRIBUTING.md) for local checks and pull request expectations; and
-- [security policy](SECURITY.md) for private vulnerability reports.
+Stampbot is not a native code owner. GitHub Apps can't appear in `CODEOWNERS`.
+For path-level bot ownership, use
+[Extra CODEOWNERS](https://github.com/stampbot/extra-codeowners) and read its
+[safety boundary](https://extra-codeowners.readthedocs.io/en/latest/reference/checks/#eventual-consistency)
+before replacing GitHub's native code-owner review rule.
 
-Project direction and ownership are in [ROADMAP.md](ROADMAP.md) and
-[GOVERNANCE.md](GOVERNANCE.md).
+The [architecture](docs/architecture.md) traces the complete request path. The
+[security requirements](docs/security-requirements.md) state the properties a
+change must preserve.
 
-## License
+## Find the rest
 
-Stampbot is available under the [Apache License 2.0](LICENSE).
+The [documentation index](docs/README.md) routes readers by task. These files
+cover project work:
+
+- [contributing](CONTRIBUTING.md) explains local checks and pull requests;
+- [security](SECURITY.md) explains private vulnerability reporting;
+- [governance](GOVERNANCE.md) records ownership and decisions; and
+- [roadmap](ROADMAP.md) records planned work.
+
+Stampbot is licensed under the [Apache License 2.0](LICENSE).

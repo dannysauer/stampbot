@@ -1,131 +1,136 @@
 # Architecture
 
-Stampbot sits between GitHub webhooks and GitHub's pull request review API. It
-has no database and owns no merge state.
+Stampbot sits between GitHub's webhook service and pull request review API. It
+keeps no database and owns no merge state.
 
-Think of it as another reviewer at the table. It can raise its hand, withdraw
-that hand, and explain why. It can't press the Merge button.
+Think of it as a narrowly instructed reviewer. It may raise its hand, withdraw
+that hand, and explain a configuration error. The Merge button remains across
+the table. That's as far as the metaphor goes.
 
-## From webhook to review
-
-This diagram shows the main request path and the point where repository policy
-enters it.
+## Request path
 
 ```mermaid
 flowchart LR
     github["GitHub webhook"]
     http["POST /webhook"]
-    signature["Verify HMAC signature"]
-    router["Route event"]
-    policy["Load repository policy"]
-    decision{"Policy allows action?"}
-    token["Create installation client"]
-    review["Write review or comment"]
-    telemetry["Logs, metrics, traces"]
+    signature["Verify HMAC"]
+    route["Route event"]
+    policy["Load policy"]
+    decision{"Action allowed?"}
+    installation["Create installation client"]
+    write["Write review or comment"]
+    signals["Logs, metrics, traces"]
 
     github --> http
     http --> signature
-    signature --> router
-    router --> policy
+    signature --> route
+    route --> policy
     policy --> decision
-    decision -->|yes| token
-    token --> review
-    decision -->|no| telemetry
-    router --> telemetry
-    review --> telemetry
+    decision -->|yes| installation
+    installation --> write
+    decision -->|no| signals
+    route --> signals
+    write --> signals
 ```
 
-GitHub signs the raw body with the App's webhook secret. The HTTP layer rejects
-an invalid signature before it parses or routes the event. Valid requests then
-move to `WebhookHandler`.
+GitHub signs the raw request body with the App's webhook secret. The HTTP layer
+checks that signature before parsing JSON or routing the event. It also rejects
+bodies larger than 1 MiB.
 
-The handler loads policy for the target repository and decides whether the
-event calls for an approval, dismissal, help comment, or no action. When it
-needs GitHub, `GitHubAppClient` exchanges an App JWT for an installation token.
-That token carries the installation's repository scope.
+A valid request moves to `WebhookHandler`. The handler loads policy for the
+target repository and decides whether the event calls for approval, dismissal,
+a help comment, or no action.
 
-The response to GitHub only says what Stampbot did with the event. The visible
-result lives on the pull request timeline.
+When a write is needed, `GitHubAppClient` signs an App JWT and exchanges it for
+an installation token. GitHub scopes that token to the installation. The
+visible result lands on the pull request timeline; the webhook response only
+describes what Stampbot did.
 
-## Approval lifecycle
+## Review state
 
-Stampbot tracks its state through GitHub reviews rather than local storage.
-This keeps replicas independent, but it also makes GitHub the final source of
-truth.
+Stampbot finds its state in GitHub reviews instead of local storage. Replicas
+therefore agree without coordination, and GitHub remains authoritative.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Unapproved
-    Unapproved --> Approved: matching label event or authorized approve command
-    Approved --> Dismissed: approval label removed or authorized unapprove command
-    Approved --> Stale: pull request head changes
-    Stale --> Approved: reapprove enabled or authorized approve command
-    Dismissed --> Approved: later matching event or authorized approve command
+    Unapproved --> Approved: matching label or authorized command
+    Approved --> Dismissed: label removed or unapprove command
+    Approved --> Stale: head commit changes
+    Stale --> Approved: reapprove enabled or authorized command
+    Dismissed --> Approved: later matching event or command
 ```
 
-In plain text:
+The same flow in words:
 
-- A matching `opened`, `reopened`, or `labeled` event can create approval.
-- Eligibility filters apply to label-driven approval.
+- `opened`, `reopened`, and `labeled` may create a label-driven approval.
+- Every configured eligibility category must pass before that approval.
 - Removing any configured approval label dismisses active Stampbot approvals.
-- A new head commit leaves the old review behind. `reapprove` decides whether a
-  `synchronize` event can add a fresh one.
-- An authorized ChatOps command can approve the current head or dismiss active
+- A new head makes an old approval stale. `reapprove` decides whether a
+  `synchronize` event may create a fresh review.
+- An authorized ChatOps command may approve the current head or dismiss active
   Stampbot reviews.
 
-The diagram describes Stampbot's reviews. GitHub may apply separate branch
-rules, dismissal settings, and merge requirements.
+This is only Stampbot's state machine. GitHub applies branch rules, dismissal
+settings, and merge requirements after it.
 
-## Where policy comes from
+## Policy boundary
 
-For each webhook, Stampbot looks in this order:
+For every event, Stampbot looks for policy in this order:
 
 1. `stampbot.toml` on the target repository's default branch;
-2. `stampbot.toml` in the owner's `.github` repository, when the target belongs
-   to an organization; and
-3. the defaults loaded by the running Stampbot service.
+2. `stampbot.toml` in the owner's `.github` repository, for organization-owned
+   repositories; and
+3. defaults from the running service.
 
-There are two different failure paths. If GitHub can't return a policy file,
-Stampbot logs the read failure and uses its defaults. If it reads a file but
-can't parse or validate it, Stampbot stops automation for that event. On a new
-pull request, it also leaves a review comment with the validation error.
+The first file wins. Repository and organization files are not merged.
 
-That difference is deliberate in the current implementation. Operators who
-need a stricter fallback should set conservative service defaults and monitor
-`stampbot_repo_config_loads_total`.
+A missing file moves lookup to the next source. A GitHub read failure currently
+falls back to service defaults and records a load error. A readable but invalid
+file stops automation for that event.
 
-## Components and ownership
+That distinction is historical and visible, not magical. Operators who need a
+strict fallback should choose conservative service defaults and alert on
+`stampbot_repo_config_loads_total{status="error"}`.
 
-| Component | Responsibility |
+Repository title patterns cross a smaller boundary inside this flow. A
+maintainer supplies the expression, while any pull request author may supply
+the title. Stampbot bounds pattern count and length, caps title length, applies
+a per-pattern timeout, and runs matching outside the event loop. A timeout
+fails closed.
+
+## Components
+
+| Component | Owns |
 | --- | --- |
-| `stampbot/main.py` | FastAPI routes, body limits, signature entry point, setup pages, and HTTP telemetry |
-| `stampbot/webhook_handler.py` | Event routing, policy decisions, ChatOps parsing, and approval lifecycle |
-| `stampbot/github_client.py` | App authentication, installation clients, retries, and GitHub API calls |
+| `stampbot/main.py` | HTTP routes, body limits, setup gates, and request metrics |
+| `stampbot/webhook_handler.py` | Event routing, policy decisions, ChatOps, and review lifecycle |
+| `stampbot/github_client.py` | App authentication, installation clients, retries, and GitHub calls |
 | `stampbot/config.py` | Service settings, repository defaults, TOML parsing, and policy validation |
+| `stampbot/manifest.py` | Trusted setup URLs and GitHub App manifest creation |
 | `stampbot/metrics.py` | Prometheus metric definitions and the dedicated listener lifecycle |
 | `stampbot/telemetry.py` | Optional OpenTelemetry export and span helpers |
-| `charts/stampbot/` | Kubernetes packaging and runtime policy |
+| `stampbot/version.py` | One runtime version shared by HTTP, metrics, and traces |
+| `charts/stampbot/` | Kubernetes packaging and deployment policy |
 
-The [interface reference](reference.md) describes the public surface. The
-[configuration reference](configuration.md) describes the values that feed
-these components.
+The [interface reference](reference.md) describes the surfaces these components
+expose. The [configuration reference](configuration.md) describes their inputs.
 
 ## Trust boundaries
 
-The webhook body is untrusted until HMAC-SHA256 verification succeeds.
-Stampbot compares signatures in constant time and caps the body at 1 MiB. A
-valid signature proves GitHub sent the payload, not that repository contributors
-are trusted: pull request titles remain attacker-controlled. Title matching
-bounds inputs and execution time and runs outside the asyncio event loop.
+The webhook body is untrusted until its HMAC-SHA256 signature passes a
+constant-time comparison. The body stays untrusted data after that; the
+signature proves GitHub sent it, not that repository content is safe.
 
-Repository policy is trusted at the same level as the target repository's
-default branch. Anyone who can change that file can change when Stampbot
-approves in that repository.
+Repository policy has the trust level of the default branch that holds it.
+Anyone who can change that file can change when Stampbot approves in that
+repository.
 
-The App private key and webhook secret cross a more sensitive boundary. They
-belong in a secret store, never in `stampbot.toml` or source control.
-Installation tokens are short-lived and scoped by GitHub, but they still need
-the least permissions listed in the [configuration reference](configuration.md#github-app-permissions).
+The App private key and webhook secret are credentials. They belong in a secret
+store, never in repository policy, logs, examples, or issue reports.
+Installation tokens are short-lived and installation-scoped, but they still
+carry the App permissions listed in the
+[configuration reference](configuration.md#github-app-permissions).
 
 `/setup` returns generated credentials during the manifest flow. It is disabled
 by default, uses only the configured trusted base URL, and closes automatically
@@ -134,11 +139,14 @@ Metrics use a disabled-by-default listener on a separate port. That listener
 has no application-level authentication, so bind it only to loopback or a
 private monitoring network. The public HTTP listener never serves `/metrics`.
 
-## Deliberate boundaries
+Endpoint labels use route templates, and unmatched paths collapse to one value.
+Raw attacker-controlled paths never become labels.
 
-Stampbot creates and dismisses only reviews made by its own App identity. It
-doesn't merge, edit branch protection, grant repository access, or pretend to
-be a native `CODEOWNERS` entry.
+## Deliberate limits
 
-Those limits keep the approval decision visible. They also leave final control
-with GitHub's branch rules and the people who own the repository.
+Stampbot creates and dismisses reviews made by its own App identity. It doesn't
+merge, edit branch protection, grant repository access, or impersonate a native
+`CODEOWNERS` entry.
+
+Those limits keep its decision visible and leave final control with GitHub's
+rules and the people who own the repository.

@@ -1,178 +1,218 @@
 # Interface reference
 
-Stampbot exposes a main HTTP service and an optional metrics listener. It writes
-results through the GitHub API. This page describes those interfaces as
-implemented.
+Stampbot receives HTTP requests, reads repository policy through GitHub, and
+writes review state through the GitHub App installation API.
 
-## HTTP endpoints
+## Public HTTP service
 
-The main service binds to `0.0.0.0:8000` by default. The optional metrics
-listener uses a separate address and port.
+The default bind address is `0.0.0.0:8000`.
 
-| Method and path | Input | Success response | Other responses |
-| --- | --- | --- | --- |
-| `GET /` | None | `307` to `/setup` when setup is enabled and credentials are missing. Otherwise, JSON with `app`, `version`, and `status`. | None expected. |
-| `GET /health` | None | `200 {"status":"healthy"}`. This is liveness only. | None expected. |
-| `GET /ready` | None | `200` when credentials are complete or setup mode is enabled. The JSON includes `configured` and `setup_enabled` checks. | `503` when credentials are incomplete and setup is disabled. |
-| `GET /metrics` on the metrics listener | None | `200` with Prometheus text when metrics are enabled. | The listener doesn't exist when metrics are disabled. |
-| `POST /webhook` | Signed GitHub webhook JSON | `200` with handler `status` and `message`. A handler-level error may still use HTTP `200`. | `400`, `401`, `413`, `503`, or `500`. |
-| `GET /setup` | None | `200` setup page when setup is explicitly enabled, the trusted base URL is valid, and the configured-state gate permits it. | `403` when disabled or automatically closed; `503` when `STAMPBOT_BASE_URL` is missing or invalid. |
-| `GET /setup/callback` | GitHub manifest `code` query value | `200` page containing the new App credentials while setup is available. | `403`, `422` for a missing code, or `500` when exchange fails. |
-| `GET /setup/status` | None | `200` with only `configured` and `setup_enabled` while setup is available. | `403` when setup is disabled or automatically closed. |
-| `GET /openapi.json` | None | FastAPI OpenAPI JSON. | Framework errors. |
-| `GET /docs` | None | Swagger UI. | Framework errors. |
-| `GET /redoc` | None | ReDoc UI. | Framework errors. |
+| Method and path | Success | Other responses |
+| --- | --- | --- |
+| `GET /` | `200` JSON with `app`, `version`, and `status`. | `307` to `/setup` when setup is available and credentials are absent. |
+| `GET /health` | `200 {"status":"healthy"}`. | None defined. |
+| `GET /ready` | `200` when configured or setup is available. | `503` when neither condition is true. |
+| `POST /webhook` | `200` handler result after authentication and parsing. | `400`, `401`, `413`, `503`, or `500`. |
+| `GET /setup` | `200` GitHub App manifest form while setup is available. | `403` when closed; `503` for a missing or invalid base URL. |
+| `GET /setup/callback` | `200` credential page for a valid manifest code. | `403`, `422`, or `500`. |
+| `GET /setup/status` | `200` with `configured` and `setup_enabled` while setup is available. | `403` when setup is closed. |
+| `GET /metrics` | None. | `404`; metrics are never registered on this listener. |
+| `GET /openapi.json` | FastAPI OpenAPI JSON. | Framework errors. |
+| `GET /docs` | Swagger UI. | Framework errors. |
+| `GET /redoc` | ReDoc UI. | Framework errors. |
 
-`/health` doesn't inspect credentials or GitHub. `/ready` is the traffic signal:
-an unconfigured process stays ready while setup is enabled so the setup page can
-still receive traffic. Readiness does not validate `STAMPBOT_BASE_URL`; `/setup`
-returns `503` with a configuration error when that value is missing or invalid.
+`/health` is a shallow liveness signal. `/ready` reports whether Stampbot can
+serve webhooks or can still serve first-run setup. It does not call GitHub.
 
-Setup is disabled by default. Its manifest URLs come only from the required
-operator-configured `STAMPBOT_BASE_URL`; `Host`, `X-Forwarded-Host`, and
-`X-Forwarded-Proto` do not affect them. Credentials automatically close every
-setup route unless `STAMPBOT_SETUP_ALLOW_CONFIGURED=true` explicitly reopens
-the surface. Setup HTML responses use `Cache-Control: no-store`, prohibit
-framing, and suppress referrer data so the callback URL is not forwarded when
-the operator follows its installation link.
+## Setup access
 
-Published images receive the release workflow's computed version at build time.
-Stampbot resolves that value once and uses it in the root response, OpenAPI
-document, `stampbot_info` metric, and OpenTelemetry `service.version` resource
-attribute. A source installation falls back to its installed package metadata;
-an unversioned source-container build reports `0.0.0+unknown` rather than
-claiming to be a published release. Local `make docker-build` builds default to
-`0.0.0+local`; set `APP_VERSION` to give one a more specific identifier.
+Setup is available only when `STAMPBOT_SETUP_ENABLED=true`. It also requires a
+valid `STAMPBOT_BASE_URL`. HTTPS is required except for localhost addresses.
+
+Credentials close setup automatically. A configured instance also needs
+`STAMPBOT_SETUP_ALLOW_CONFIGURED=true` before any setup route opens.
+
+Manifest URLs come only from `STAMPBOT_BASE_URL`. The service ignores `Host`,
+`X-Forwarded-Host`, and `X-Forwarded-Proto` for this purpose.
+
+Setup HTML responses use the following controls:
+
+- `Cache-Control: no-store`;
+- a frame prohibition;
+- a restrictive referrer policy; and
+- HTML escaping for generated values.
+
+`GET /setup/status` never returns the App ID. The callback page displays the new
+private key and webhook secret because the manifest flow has to deliver them to
+the operator.
 
 ## Webhook request
 
 `POST /webhook` requires:
 
-- `X-GitHub-Event` with the event name;
+- `X-GitHub-Event` with an event name;
 - `X-Hub-Signature-256` with an HMAC-SHA256 signature of the raw body;
 - a JSON body no larger than 1 MiB; and
-- all three GitHub App credentials on the server.
+- App ID, private key, and webhook secret at the service.
+
+Stampbot verifies the signature before parsing JSON. It compares signatures in
+constant time.
 
 | HTTP status | Cause |
 | --- | --- |
-| `200` | The signature and JSON were valid. The handler result may be `success`, `ignored`, `ok`, or `error`. |
-| `400` | The event header is missing or the body isn't valid JSON. |
-| `401` | The signature is missing or doesn't match. |
-| `413` | `Content-Length` or the body itself exceeds 1 MiB. |
-| `503` | App ID, private key, or webhook secret is missing. |
-| `500` | Event handling raised an unhandled exception. |
+| `200` | Authentication and parsing succeeded. The handler result may be `success`, `ignored`, `ok`, or `error`. |
+| `400` | The event header is missing or the body is invalid JSON. |
+| `401` | The signature is missing or does not match. |
+| `413` | The declared or actual body exceeds 1 MiB. |
+| `503` | At least one App credential is missing. |
+| `500` | The handler raised an unhandled exception. |
+
+A handler-level error remains an HTTP `200` unless the handler raises.
 
 ## Webhook events
 
-| Event | Fields and behavior |
+| Event | Behavior |
 | --- | --- |
 | `ping` | Returns `{"status":"ok","message":"pong"}`. |
-| `pull_request` | Reads action, number, title, author, labels, head SHA, repository identity, default branch, owner type, and installation ID. |
-| `issue_comment` | Handles comments only when the issue is a pull request. |
+| `pull_request` | Handles label, open, reopen, synchronize, and related review decisions. |
+| `issue_comment` | Handles `@stampbot` commands only when the issue is a pull request. |
 | `pull_request_review_comment` | Handles `@stampbot` commands in review comments. |
-| Any other event | Returns an `ignored` result. |
+| Any other event | Returns an ignored result. |
 
-Missing pull request, repository, or installation fields produce a handler-level
-`error` result. The HTTP response remains `200` unless the handler raises.
+Pull request handling reads the number, title, author, labels, head SHA,
+repository identity, default branch, owner type, and installation ID. Missing
+required fields produce a handler-level error.
+
+## Repository policy lookup
+
+Stampbot checks policy in this order:
+
+1. `stampbot.toml` on the repository's default branch;
+2. `stampbot.toml` in the owner organization's `.github` repository; and
+3. service-wide defaults.
+
+The organization fallback applies only to organization-owned repositories. A
+missing file continues lookup. A GitHub read failure records an error and uses
+service defaults. A readable but invalid file stops automation for that event.
+
+See [Configuration reference](configuration.md#repository-policy) for every
+field and validation rule.
 
 ## Label-driven approval
 
-`auto_approve_on_label` controls all behavior in this table.
+`auto_approve_on_label` controls the behavior below.
 
-| Pull request action | Condition | Result |
+| Pull request action | Conditions | Result |
 | --- | --- | --- |
-| `opened` or `reopened` | Any current label appears in `approval_labels` and every eligibility filter passes. | Create approval unless an active Stampbot approval already exists. |
-| `labeled` with an approval label | The added label is configured and every filter passes. | Create approval unless an active approval exists. |
-| `labeled` with another label | A configured approval label remains, a previous Stampbot review exists, and no active approval covers the current head. Filters must pass. | Refresh approval. |
-| `synchronize` | `reapprove = true`, a configured approval label remains, a previous Stampbot review exists, and no active approval covers the new head. Filters must pass. | Create a fresh approval. |
-| `unlabeled` | The removed label appears in `approval_labels`. | Dismiss every active Stampbot approval on the pull request. |
+| `opened` or `reopened` | A current label is configured and every eligibility filter passes. | Create an approval unless an active Stampbot approval covers the head. |
+| `labeled` with an approval label | The new label is configured and every filter passes. | Create an approval unless one already covers the head. |
+| `labeled` with another label | An approval label remains, a prior Stampbot review exists, and every filter passes. | Refresh approval when no active review covers the head. |
+| `synchronize` | `reapprove=true`, an approval label remains, a prior Stampbot review exists, and every filter passes. | Approve the new head. |
+| `unlabeled` | The removed label is in `approval_labels`. | Dismiss active Stampbot approvals. |
 
 Removing one configured approval label dismisses the review even when another
-configured approval label remains. A later matching event can approve again.
+configured approval label remains.
 
-Title filtering accepts at most 20 Python-compatible patterns of 256 characters
-each and evaluates no more than 256 title characters. Each pattern has a 10 ms
-matching limit. Eligibility evaluation runs outside the asyncio event loop; a
-matching timeout or engine error fails closed without creating an approval.
+Title filtering accepts at most 20 patterns. Each pattern and the title are
+limited to 256 characters. Each pattern has a 10 ms match budget. Matching runs
+outside the asyncio event loop and fails closed on timeout or engine error.
 
 ## ChatOps
 
-Stampbot lowercases and trims a comment before searching for
-`@stampbot <command>`. It ignores comments over 65,536 characters.
+Stampbot lowercases and trims comments before searching for
+`@stampbot <command>`. Comments over 65,536 characters are ignored.
 
 | Default command | Permission | Result |
 | --- | --- | --- |
-| `@stampbot approve` | `maintain` or configured threshold | Approve the current head unless it already has an active Stampbot approval. |
-| `@stampbot stamp` | `maintain` or configured threshold | Same as `approve`. |
-| `@stampbot unapprove` | `maintain` or configured threshold | Dismiss active Stampbot approvals. |
-| `@stampbot unstamp` | `maintain` or configured threshold | Same as `unapprove`. |
-| `@stampbot help` | No collaborator check | Post the effective commands, permission threshold, labels, and filters. |
+| `@stampbot approve` | `maintain`, or the configured threshold | Approve the current head. |
+| `@stampbot stamp` | Same as `approve` | Approve the current head. |
+| `@stampbot unapprove` | `maintain`, or the configured threshold | Dismiss active Stampbot approvals. |
+| `@stampbot unstamp` | Same as `unapprove` | Dismiss active Stampbot approvals. |
+| `@stampbot help` | No collaborator check | Post effective commands, labels, permission, and filters. |
 
-Custom approve and unapprove words come from repository policy. An unknown word
-returns an `ignored` result.
+Custom command words come from repository policy. A command is one `\w+` word.
+An unknown word returns an ignored result.
+
+ChatOps authorization is separate from label-driven eligibility filters.
 
 ## GitHub writes
 
 Stampbot may create:
 
 - an approval review;
-- a dismissal of one of its active approval reviews;
+- a dismissal of one of its own active approvals;
 - a review comment describing invalid policy on a newly opened pull request; or
 - an issue comment in response to `@stampbot help`.
 
-It doesn't dismiss another reviewer's approval and doesn't merge the pull
-request.
+Stampbot does not dismiss another identity's review or merge a pull request.
 
-## Prometheus metrics
+## Metrics service
 
-The main service doesn't register `/metrics`. Set `metrics_enabled=true` to
-start the dedicated metrics listener. Its default address is
-`127.0.0.1:9090`. The `metrics_host` and `metrics_port` settings select another
-address.
+Metrics are disabled by default. When enabled, the separate listener defaults
+to `127.0.0.1:9090`. Its port must be in the range 1–65535 and must differ from
+the public HTTP port. The listener has no application authentication.
 
-The metrics listener doesn't authenticate requests. Keep it on loopback or a
-private monitoring network. In the Helm chart, `metrics.enabled=true` creates a
-separate ClusterIP Service and `metrics.serviceMonitor.enabled=true` points a
-ServiceMonitor at that Service. The chart's Ingress continues to use only the
-main HTTP Service.
+The Helm chart binds this listener to `0.0.0.0` inside the Pod and creates a
+separate ClusterIP Service. Its Ingress and main Service expose only the public
+HTTP listener. ServiceMonitor selects only the metrics Service.
 
-| Metric | Type | Labels | Meaning |
-| --- | --- | --- | --- |
-| `stampbot_info` | Info | `version` | Application build information. |
-| `stampbot_http_requests_total` | Counter | `method`, `endpoint`, `status` | HTTP responses. |
-| `stampbot_http_request_duration_seconds` | Histogram | `method`, `endpoint` | HTTP duration. |
-| `stampbot_http_request_size_bytes` | Histogram | `method`, `endpoint` | Request `Content-Length` when present. |
-| `stampbot_http_response_size_bytes` | Histogram | `method`, `endpoint` | Response `Content-Length` when present. |
-| `stampbot_http_requests_in_progress` | Gauge | `method`, `endpoint` | Requests currently running. |
-| `stampbot_webhook_events_total` | Counter | `event_type`, `action` | Authenticated events routed to the handler. |
-| `stampbot_webhook_signature_validations_total` | Counter | `result` | Valid and invalid signature checks. |
-| `stampbot_webhook_processing_duration_seconds` | Histogram | `event_type` | Handler duration. |
-| `stampbot_pr_approvals_total` | Counter | `trigger_type`, `status` | Approval attempts. |
-| `stampbot_pr_approval_duration_seconds` | Histogram | none | Approval operation duration. |
-| `stampbot_pr_dismissals_total` | Counter | `trigger_type`, `status` | Dismissal attempts. |
-| `stampbot_pr_dismissal_duration_seconds` | Histogram | none | Dismissal operation duration. |
-| `stampbot_chatops_commands_total` | Counter | `command`, `status` | Parsed ChatOps outcomes. |
-| `stampbot_github_api_requests_total` | Counter | `operation`, `status` | GitHub client operations. |
-| `stampbot_github_api_request_duration_seconds` | Histogram | `operation` | GitHub client duration. |
-| `stampbot_github_api_rate_limit_remaining` | Gauge | `installation_id` | Remaining core API quota. |
-| `stampbot_github_api_rate_limit_limit` | Gauge | `installation_id` | Core API quota ceiling. |
-| `stampbot_repo_config_loads_total` | Counter | `status` | Policy loads: `found`, `default`, or `error`. |
-| `stampbot_errors_total` | Counter | `error_type` | Application error categories. |
+| Metric | Type | Labels |
+| --- | --- | --- |
+| `stampbot_info` | Info | `version` |
+| `stampbot_http_requests_total` | Counter | `method`, `endpoint`, `status` |
+| `stampbot_http_request_duration_seconds` | Histogram | `method`, `endpoint` |
+| `stampbot_http_request_size_bytes` | Histogram | `method`, `endpoint` |
+| `stampbot_http_response_size_bytes` | Histogram | `method`, `endpoint` |
+| `stampbot_http_requests_in_progress` | Gauge | `method`, `endpoint` |
+| `stampbot_webhook_events_total` | Counter | `event_type`, `action` |
+| `stampbot_webhook_signature_validations_total` | Counter | `result` |
+| `stampbot_webhook_processing_duration_seconds` | Histogram | `event_type` |
+| `stampbot_pr_approvals_total` | Counter | `trigger_type`, `status` |
+| `stampbot_pr_approval_duration_seconds` | Histogram | none |
+| `stampbot_pr_dismissals_total` | Counter | `trigger_type`, `status` |
+| `stampbot_pr_dismissal_duration_seconds` | Histogram | none |
+| `stampbot_chatops_commands_total` | Counter | `command`, `status` |
+| `stampbot_github_api_requests_total` | Counter | `operation`, `status` |
+| `stampbot_github_api_request_duration_seconds` | Histogram | `operation` |
+| `stampbot_github_api_rate_limit_remaining` | Gauge | `installation_id` |
+| `stampbot_github_api_rate_limit_limit` | Gauge | `installation_id` |
+| `stampbot_repo_config_loads_total` | Counter | `status` |
+| `stampbot_errors_total` | Counter | `error_type` |
 
-The HTTP metrics use the matched FastAPI route template for `endpoint` (for
-example, `/widgets/{widget_id}`), not the request's raw URL path. Requests that
-do not match a registered route share the `unmatched` label. For
-method-not-allowed responses, the label still uses the matching route template
-and the status is `405`. This keeps label cardinality bounded while preserving
-useful per-route signals.
+HTTP metrics use the matched FastAPI route template as `endpoint`. Unmatched
+requests share `unmatched`. A method-not-allowed response uses its matching
+route template and status `405`. Raw URL paths do not become labels.
 
-## Client behavior
+## OpenTelemetry
 
-GitHub requests use a 30-second timeout. The client configures up to three total
-retries with exponential backoff for HTTP `500`, `502`, `503`, and `504`.
+Tracing is disabled by default. When enabled, the OTLP gRPC exporter uses TLS.
+`STAMPBOT_OTEL_INSECURE=true` permits plaintext only for a non-HTTPS endpoint.
+An HTTPS endpoint cannot be downgraded.
 
-Errors returned in logs are scrubbed for common GitHub token formats. Operators
-must still remove repository, customer, and credential data before sharing logs.
+`OTEL_EXPORTER_OTLP_CERTIFICATE` selects a PEM CA file for a private certificate
+authority. The Helm chart can mount that file from an existing Secret.
+
+## Runtime version
+
+Published images receive the computed release version during the build. One
+resolved value appears in:
+
+- the root response;
+- OpenAPI metadata;
+- `stampbot_info`; and
+- the OpenTelemetry `service.version` resource attribute.
+
+A source installation falls back to distribution metadata. An unversioned
+source-container build reports `0.0.0+unknown`. `make docker-build` defaults to
+`0.0.0+local` unless `APP_VERSION` is set.
+
+## GitHub client behavior
+
+GitHub requests use a 30-second timeout. The client permits up to three retries
+with exponential backoff for `500`, `502`, `503`, and `504` responses.
+
+Logs scrub common GitHub token formats. Operators still need to remove private
+repository and customer data before sharing logs.
 
 ## Distribution
 
@@ -182,5 +222,5 @@ must still remove repository, customer, and credential data before sharing logs.
 | Container | `ghcr.io/dannysauer/stampbot` and `docker.io/stampbot/stampbot` |
 | Helm chart | `oci://ghcr.io/dannysauer/charts/stampbot` |
 
-Use [Install Stampbot](../INSTALLATION.md) for deployment choices and
-[Verify a release](release-verification.md) before promoting an artifact.
+Use [Install Stampbot](../INSTALLATION.md) for deployment procedures. Use
+[Verify a release](release-verification.md) before promotion.

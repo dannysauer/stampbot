@@ -1,11 +1,12 @@
-# Operations runbook
+# Operate Stampbot
 
-Use this runbook when Stampbot is running but setup, webhooks, reviews, or
-metrics aren't behaving as expected.
+Use this runbook when Stampbot is unhealthy, unready, or not changing a review
+as expected. Keep one GitHub delivery ID throughout an investigation so logs,
+responses, and metrics describe the same input.
 
-## Start with the service
+## Check the process
 
-Set `BASE_URL` to the public Stampbot origin:
+Set the public origin, then check liveness and readiness separately:
 
 ```bash
 BASE_URL=https://stampbot.example.com
@@ -13,111 +14,118 @@ curl -fsS "${BASE_URL}/health"
 curl -fsS "${BASE_URL}/ready"
 ```
 
-Read the two results separately:
+- `/health` proves that the HTTP process answers.
+- `/ready` proves that credentials are complete or first-run setup is available.
 
-- `/health` proves only that the process can answer HTTP.
-- `/ready` reports whether the process has credentials or can still serve setup.
+A production instance should report `configured: true` and
+`setup_enabled: false`. An unconfigured instance with setup disabled returns
+`503` from `/ready`.
 
-A production instance should be ready and report `configured: true` with
-`setup_enabled: false`.
-
-For Kubernetes, check the workload and its recent logs:
+For Kubernetes, inspect the Deployment without printing Secret data:
 
 ```bash
-kubectl get pods --namespace stampbot
 kubectl rollout status deployment/stampbot --namespace stampbot
+kubectl get pods --namespace stampbot
 kubectl logs deployment/stampbot --namespace stampbot --tail=100
 kubectl get secret stampbot-github --namespace stampbot
 ```
 
-`kubectl get secret` confirms the object exists; it doesn't print secret values.
+The last command confirms that the Secret object exists. It does not prove that
+all three required keys contain usable values.
 
-## Read the GitHub delivery
+## Follow one GitHub delivery
 
-In the GitHub App settings, open **Advanced**, then **Recent Deliveries**. Record
-the delivery ID, event, action, response code, and sanitized response body.
+Open the GitHub App's **Advanced** settings, then open **Recent Deliveries**.
+Record the delivery ID, event, action, response status, and a redacted response
+body.
 
 | Response | Meaning | Next check |
 | --- | --- | --- |
-| `200` with `status: success` or `ok` | Stampbot completed the action. | Inspect the pull request timeline. |
-| `200` with `status: ignored` | The event was valid but didn't call for an action. | Check labels, command text, filters, and `reapprove`. |
-| `200` with `status: error` | The handler found missing fields, invalid policy, or a failed GitHub operation. | Read `message` and correlate the delivery with logs and metrics. |
-| `400` | The event header is missing or the body isn't JSON. | Redeliver from GitHub. Repeated failures need the delivery metadata. |
-| `401` | The signature is missing or the webhook secret doesn't match. | Make the App and `STAMPBOT_WEBHOOK_SECRET` use the same secret. |
-| `413` | The delivery exceeds the 1 MiB body limit. | Record the event and delivery ID, then report a reproducible GitHub payload. |
-| `503` | One or more App credentials are missing. | Check App ID, private key, and webhook secret in the runtime. |
-| `500` | Event handling raised unexpectedly. | Find the matching sanitized error in the service logs. |
+| `200`, `success` or `ok` | Stampbot completed the handler. | Read the pull request timeline. |
+| `200`, `ignored` | The event was valid but did not require an action. | Check the action, labels, command, filters, and `reapprove`. |
+| `200`, `error` | Policy, payload fields, or a GitHub operation failed. | Read the response message and matching logs. |
+| `400` | The event header is missing or the body is not JSON. | Redeliver the unchanged event. |
+| `401` | The signature is missing or invalid. | Compare the App webhook secret with the runtime Secret. |
+| `413` | The body exceeds 1 MiB. | Save only the delivery metadata and report a reproducible case. |
+| `503` | One or more App credentials are missing. | Check App ID, private key, and webhook secret. |
+| `500` | The handler raised unexpectedly. | Find the sanitized exception for the delivery window. |
 
-Redeliver the same event after fixing a route, secret, permission, or policy.
-That keeps the input constant.
+After correcting one cause, redeliver the same event. Changing the payload at
+the same time makes the result harder to compare.
 
 ## Check credentials and setup
 
-`/ready` returns `503` only when credentials are incomplete and setup is
-disabled. Check the runtime for all three variables:
+Stampbot needs all three values:
 
 - `STAMPBOT_APP_ID`;
 - `STAMPBOT_PRIVATE_KEY`; and
 - `STAMPBOT_WEBHOOK_SECRET`.
 
-If the private-key value is a path, it must select a regular file no larger than
-64 KiB inside the process or container. Its PEM header and footer must match.
+A private-key value may contain PEM text or select a regular file. A selected
+file must be no larger than 64 KiB and must contain a complete private-key PEM
+envelope.
 
-First-run setup requires both `STAMPBOT_SETUP_ENABLED=true` and a trusted
-`STAMPBOT_BASE_URL`. Request host and forwarding headers are ignored. After
-credentials are configured, setup returns `403` automatically. Keep
-`STAMPBOT_SETUP_ENABLED=false` and `STAMPBOT_SETUP_ALLOW_CONFIGURED=false` in
-normal operation.
+First-run setup also needs both values below:
 
-During first-run setup only, this status check is available:
+```dotenv
+STAMPBOT_SETUP_ENABLED=true
+STAMPBOT_BASE_URL=https://stampbot.example.com
+```
+
+The base URL is trusted configuration. Request host and forwarding headers do
+not change the manifest callback or webhook URL.
+
+Check setup only during the provisioning window:
 
 ```bash
 curl -fsS "${BASE_URL}/setup/status"
 ```
 
-It returns only `configured` and `setup_enabled`; it never returns the App ID.
-If deliberate reprovisioning is necessary, set both setup flags to `true` for
-the shortest possible maintenance window, confirm `STAMPBOT_BASE_URL`, and turn
-both flags off after storing the replacement credentials.
+The response contains only `configured` and `setup_enabled`. Setup closes after
+credentials appear. Keep `STAMPBOT_SETUP_ENABLED=false` and
+`STAMPBOT_SETUP_ALLOW_CONFIGURED=false` during normal operation.
+
+For deliberate reprovisioning, set both flags to `true` for the shortest useful
+window. Confirm `STAMPBOT_BASE_URL` first, store the replacement credentials,
+then disable both flags.
 
 ## Check GitHub App access
 
-The [permission table](configuration.md#github-app-permissions) is the source of
-truth.
+Use the [permission table](configuration.md#github-app-permissions) as the
+source of truth.
 
-| Symptom | Likely access problem |
+| Symptom | Check |
 | --- | --- |
-| Approval, lookup, or dismissal fails | Pull requests isn't read and write. |
-| Repository policy isn't found | Contents isn't read, or the App isn't installed on that repository. |
-| Organization fallback isn't found | The App isn't installed on `ORG/.github`. |
-| Team filters reject every author | Members isn't read, the team slug is wrong, or the repository isn't organization-owned. |
-| An authorized ChatOps user is rejected | Administration isn't read. |
-| Comments never reach Stampbot | Comment event subscriptions are missing. |
+| Approval lookup, creation, or dismissal fails | Pull requests has read and write access. |
+| Repository policy is missing | Contents has read access and the App is installed on the repository. |
+| Organization fallback is missing | The App is installed on the organization's `.github` repository. |
+| Every team-filtered author is rejected | Members has read access and the team slug is correct. |
+| An authorized ChatOps user is rejected | Administration has read access. |
+| Comments never arrive | Issue comment and review comment events are subscribed. |
 
-After changing App permissions, approve the new permissions on the installation.
-Then redeliver a recent webhook.
+Approve changed App permissions on each installation before redelivering the
+event.
 
 ## Inspect repository policy
 
-Set the repository coordinates first:
+Set the repository coordinates:
 
 ```bash
 OWNER=example-org
 REPOSITORY=example-repo
 ```
 
-Ask GitHub for each possible file:
+Check both policy locations:
 
 ```bash
 gh api "repos/${OWNER}/${REPOSITORY}/contents/stampbot.toml" --jq .download_url
 gh api "repos/${OWNER}/.github/contents/stampbot.toml" --jq .download_url
 ```
 
-The first file wins. The organization file is checked only when the first one
-is absent and the owner is an organization.
+The repository file wins. Stampbot checks the organization file only when the
+repository file is absent and the owner is an organization.
 
-To validate a file with Stampbot's parser, run this from a Stampbot source
-checkout with its virtual environment installed:
+Validate a downloaded file from a Stampbot source checkout:
 
 ```bash
 POLICY_FILE=/path/to/stampbot.toml
@@ -132,97 +140,131 @@ print("stampbot.toml is valid")
 PY
 ```
 
-If GitHub can't read a policy file, Stampbot uses its service defaults. If it
-reads invalid TOML, an invalid permission, or an invalid or out-of-bounds title
-pattern list, Stampbot stops automation for that event.
+A GitHub read failure uses service defaults and records a policy-load error. A
+readable but invalid file stops automation for that event.
 
 ## Diagnose label approval
 
 | Symptom | Check |
 | --- | --- |
-| A labeled pull request isn't approved | Confirm the current labels include an `approval_labels` value and every configured filter passes. |
-| Logs say an approval label doesn't exist | Create that repository label or remove it from policy. |
-| Removing one approval label dismisses the review while another remains | This is current behavior. Any configured approval-label removal dismisses active Stampbot approvals. |
-| A new commit doesn't receive approval | `reapprove` defaults to `false`. Enable it only when a new head should inherit the policy decision. |
-| Repeated events don't add another review | This is expected when an active Stampbot approval already covers the current head. |
-| `synchronize` still does nothing with `reapprove = true` | Stampbot needs a previous App review and a configured approval label on the pull request. |
-| The response mentions a title-pattern safety limit or evaluation failure | A pattern exceeded its 10 ms match budget or the engine failed. Reproduce with the policy validator and a sanitized title, then simplify or split the pattern. Stampbot intentionally doesn't approve that event. |
+| A labeled pull request is not approved | A current label appears in `approval_labels`, and every configured filter category passes. |
+| An approval label is reported missing | Create that label or remove it from policy. |
+| Removing one approval label dismisses the review | This is current behavior, even when another approval label remains. |
+| A new commit is not approved | `reapprove` defaults to `false`. |
+| A repeated event creates no review | An active Stampbot approval already covers the current head. |
+| `synchronize` does nothing with `reapprove = true` | A prior App review and a configured approval label must both exist. |
+| Title evaluation fails safely | Simplify the expression or split it. Each pattern has a 10 ms budget. |
 
-Eligibility filters apply to label-driven approval. They don't limit an
-authorized ChatOps approval.
+Title matching accepts at most 20 patterns of 256 characters. It evaluates at
+most 256 title characters. A timeout or engine error never creates an approval.
 
 ## Diagnose ChatOps
 
 | Symptom | Check |
 | --- | --- |
-| `@stampbot help` does nothing | The comment must be on a pull request and its webhook must reach Stampbot. |
-| Approve or unapprove is ignored | Compare the commenter with `chatops_required_permission`. |
-| The response says `Unknown command` | Use a word listed in `approve_commands` or `unapprove_commands`. |
-| A custom command is cut short | Commands parse as one `\w+` word; avoid hyphens and spaces. |
-| A long comment is ignored | Retry with a comment under 65,536 characters. |
-| Approval isn't blocked by label filters | This is expected. ChatOps authorization uses repository permission. |
+| `@stampbot help` does nothing | The comment belongs to a pull request and its webhook reached Stampbot. |
+| Approve or unapprove is forbidden | The commenter meets `chatops_required_permission`. |
+| The command is unknown | Its word appears in `approve_commands` or `unapprove_commands`. |
+| A custom command is cut short | Commands contain one `\w+` word; avoid spaces and hyphens. |
+| A long comment is ignored | Retry below 65,536 characters. |
+| ChatOps ignores label filters | This is intentional; repository permission authorizes ChatOps. |
 
-`@stampbot help` doesn't run the collaborator permission check. It reports the
-effective commands and policy so readers can discover the repository's setup.
+`@stampbot help` does not require the collaborator permission check. It reports
+the effective command and policy names so contributors can discover them.
 
-## Use metrics to narrow the failure
+## Inspect metrics privately
 
-This procedure requires a Helm release with `metrics.enabled=true`. Port-forward
-the internal metrics Service. The public Stampbot Service doesn't carry this
-port.
+The public HTTP listener does not serve metrics. A request to its `/metrics`
+path returns `404`.
+
+For a source process, enable the separate loopback listener:
 
 ```bash
-kubectl get service stampbot-metrics --namespace stampbot
-kubectl port-forward service/stampbot-metrics 9090:9090 --namespace stampbot
+export STAMPBOT_METRICS_ENABLED=true
+export STAMPBOT_METRICS_HOST=127.0.0.1
+export STAMPBOT_METRICS_PORT=9090
+.venv/bin/python -m stampbot
 ```
 
-In another terminal:
+Query it from the same host:
 
 ```bash
 curl -fsS http://127.0.0.1:9090/metrics
 ```
 
-| Metric | Question it answers |
-| --- | --- |
-| `stampbot_http_requests_total` | Is traffic reaching the expected path, and which HTTP statuses return? |
-| `stampbot_webhook_signature_validations_total` | Are signatures failing? |
-| `stampbot_webhook_events_total` | Which authenticated events and actions reach the handler? |
-| `stampbot_repo_config_loads_total` | Is policy found, defaulted, or failing? |
-| `stampbot_pr_approvals_total` | Are approval attempts succeeding? |
-| `stampbot_pr_dismissals_total` | Are dismissal attempts succeeding? |
-| `stampbot_chatops_commands_total` | Are commands parsed, forbidden, or ignored? |
-| `stampbot_github_api_requests_total` | Which GitHub operation is failing? |
-| `stampbot_github_api_rate_limit_remaining` | Is an installation close to its core API limit? |
-| `stampbot_errors_total` | Which application error category is rising? |
+For Helm, set `metrics.enabled=true`. The chart creates a separate ClusterIP
+Service that the Ingress never selects:
 
-The listener doesn't authenticate `/metrics`. Keep the metrics Service private,
-and restrict port `9090` to the monitoring namespace when a NetworkPolicy
-controls ingress. Stop the port-forward when you finish.
+```bash
+kubectl port-forward service/stampbot-metrics 9090:9090 --namespace stampbot
+curl -fsS http://127.0.0.1:9090/metrics
+```
+
+| Metric | Question |
+| --- | --- |
+| `stampbot_http_requests_total` | Which route templates and statuses are active? |
+| `stampbot_webhook_signature_validations_total` | Are signature checks failing? |
+| `stampbot_webhook_events_total` | Which authenticated events reach the handler? |
+| `stampbot_repo_config_loads_total` | Is policy found, defaulted, or invalid? |
+| `stampbot_pr_approvals_total` | Are approval attempts succeeding? |
+| `stampbot_pr_dismissals_total` | Are dismissals succeeding? |
+| `stampbot_chatops_commands_total` | Are commands accepted, forbidden, or ignored? |
+| `stampbot_github_api_requests_total` | Which GitHub operation fails? |
+| `stampbot_github_api_rate_limit_remaining` | Is an installation near its API limit? |
+| `stampbot_errors_total` | Which application error class is rising? |
+
+The metrics listener has no application authentication. Bind it to loopback or
+a private monitoring network.
+
+## Check telemetry transport
+
+OTLP uses TLS by default. For a collector with a private certificate authority,
+set `OTEL_EXPORTER_OTLP_CERTIFICATE` to a mounted PEM CA path. The Helm chart can
+mount that path from an existing Secret.
+
+Use `STAMPBOT_OTEL_INSECURE=true` only for a plaintext collector on an isolated
+development network. An HTTPS endpoint remains secure even when that flag is
+set.
+
+## Check Kubernetes policy
+
+The chart leaves NetworkPolicy disabled because peer labels differ by cluster.
+Before enabling it, compare its namespace and pod selectors with the labels in
+your ingress controller, Prometheus, DNS, and OTLP collector.
+
+The defaults allow HTTP from Stampbot and ingress-nginx peers, metrics from
+Prometheus, DNS, TCP 443, and a labeled local collector. Kubernetes
+NetworkPolicy cannot restrict TCP 443 by DNS name. Use a CNI or egress gateway
+with hostname policy when destination control is required.
+
+The default rules target the named `metrics` container port, so changing
+`metrics.port` preserves them. Replace the raw rules only when peer selectors
+or additional traffic differ from the defaults. The chart also disables
+Kubernetes API token mounts and limits `/tmp` to 64 MiB by default.
 
 ## Respond to GitHub API failures
 
-GitHub calls have a 30-second timeout and retry server errors with exponential
-backoff. Authorization errors and rate limits still need operator action.
+GitHub calls use a 30-second timeout. Stampbot retries server errors with
+exponential backoff; authorization and rate-limit failures need operator action.
 
-When the remaining rate limit is low:
+When the remaining limit is low:
 
-1. Look for webhook redelivery loops or a sudden increase in event volume.
-2. Find repeated file, label, review, or permission lookups in the operation
-   metric and logs.
-3. Stop unnecessary redeliveries.
+1. Stop webhook redelivery loops.
+2. Find repeated operations in logs and `stampbot_github_api_requests_total`.
+3. Reduce avoidable event volume.
 4. Wait for the installation limit to reset.
 
-Adding replicas doesn't increase a GitHub App installation's rate limit.
+Adding replicas does not increase a GitHub App installation's rate limit.
 
-## Roll back a deployment
+## Roll back
 
 For Helm:
 
 ```bash
 helm history stampbot --namespace stampbot
-helm rollback stampbot PREVIOUS_REVISION --namespace stampbot
+helm rollback stampbot PREVIOUS_REVISION --namespace stampbot --wait
 kubectl rollout status deployment/stampbot --namespace stampbot
-helm test stampbot --namespace stampbot --logs
+helm test stampbot --namespace stampbot --logs --timeout 2m
 ```
 
 For Cloud Run:
@@ -234,22 +276,21 @@ gcloud run services update-traffic stampbot \
   --to-revisions PREVIOUS_REVISION=100
 ```
 
-A deployment rollback doesn't restore GitHub App settings, Kubernetes Secrets,
-or Secret Manager versions. Restore those separately when they caused the
-failure.
+A deployment rollback does not restore GitHub App settings, Kubernetes Secrets,
+Secret Manager versions, or repository policy. Restore those separately when
+they caused the incident.
 
-## Escalate with useful evidence
+## Escalate with safe evidence
 
 Include:
 
-- deployment mode and Stampbot version;
+- deployment mode and reported Stampbot version;
 - image digest and chart version, when applicable;
 - GitHub App permission and event-subscription state;
-- delivery ID, event, action, HTTP status, and sanitized response body;
-- the effective `stampbot.toml` with sensitive names removed;
-- relevant logs around the delivery; and
-- error, webhook, GitHub API, policy-load, and rate-limit metrics from the same
-  window.
+- delivery ID, event, action, status, and redacted response;
+- a sanitized effective policy;
+- logs around the delivery; and
+- related error, policy, GitHub API, webhook, and rate-limit metrics.
 
-Remove tokens, private keys, webhook secrets, cloud identifiers, customer data,
-and private repository content before sharing any evidence.
+Remove tokens, private keys, webhook secrets, cloud account identifiers,
+customer data, and private repository content before sharing evidence.

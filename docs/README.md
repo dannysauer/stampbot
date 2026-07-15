@@ -1,35 +1,36 @@
 # Stampbot documentation
 
-Start with the task in front of you. These pages are written for GitHub and don't
-depend on a separate documentation site.
+Start with what you need to do. The pages below keep setup instructions,
+operational procedures, reference facts, and design discussion separate.
 
-## Set up and deploy
+## Install and deploy
 
-| Task | Page | Type |
-| --- | --- | --- |
-| Create the GitHub App and choose a runtime | [Install Stampbot](../INSTALLATION.md) | How-to |
-| Install or upgrade on Kubernetes | [Stampbot Helm chart](../charts/stampbot/README.md) | How-to and reference |
-| Deploy with GitHub Actions to Google Cloud Run | [Deploy to Cloud Run](deploy-gcp-cloudrun.md) | How-to |
-| Verify release assets and images | [Verify a release](release-verification.md) | How-to |
+| You need to… | Read |
+| --- | --- |
+| Create the GitHub App or choose a runtime | [Install Stampbot](../INSTALLATION.md) |
+| Install, upgrade, or roll back on Kubernetes | [Helm chart guide](../charts/stampbot/README.md) |
+| Deploy through GitHub Actions to Google Cloud Run | [Deploy to Cloud Run](deploy-gcp-cloudrun.md) |
+| Check signatures and provenance before promotion | [Verify a release](release-verification.md) |
 
 ## Configure and operate
 
-| Task | Page | Type |
-| --- | --- | --- |
-| Set app options or repository approval policy | [Configuration reference](configuration.md) | Reference |
-| Look up routes, webhook behavior, commands, or metrics | [Interface reference](reference.md) | Reference |
-| Diagnose a failed webhook, approval, or deployment | [Operations runbook](operations.md) | How-to |
+| You need to… | Read |
+| --- | --- |
+| Set service options or repository approval policy | [Configuration reference](configuration.md) |
+| Look up routes, events, commands, metrics, or artifacts | [Interface reference](reference.md) |
+| Diagnose a webhook, review, credential, or deployment failure | [Operations runbook](operations.md) |
 
-## Understand the system
+## Understand the design
 
-| Question | Page | Type |
-| --- | --- | --- |
-| How does a webhook become an approval? | [Architecture](architecture.md) | Explanation |
-| Which security properties must changes preserve? | [Security requirements](security-requirements.md) | Normative explanation |
+| You want to know… | Read |
+| --- | --- |
+| How a signed webhook becomes a GitHub review | [Architecture](architecture.md) |
+| Which trust and failure properties changes must preserve | [Security requirements](security-requirements.md) |
 
-The [Google Python Style Guide](external/google-python-style-guide.md) is a
-vendored external reference. An automated workflow keeps it synchronized; it
-isn't Stampbot product documentation.
+The repository also vendors the
+[Google Python Style Guide](external/google-python-style-guide.md). Automation
+keeps that external reference current; it isn't part of the Stampbot product
+guide.
 
-For contribution, governance, roadmap, and vulnerability-reporting policies,
-return to the [repository README](../README.md#find-the-right-document).
+Contribution, governance, roadmap, and vulnerability-reporting policies remain
+at the [repository root](../README.md#find-the-rest).

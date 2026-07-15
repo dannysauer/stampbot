@@ -1,30 +1,53 @@
 # Contributing to Stampbot
 
-Stampbot welcomes bug reports, documentation fixes, tests, and focused code
-changes. Start with the problem you want to solve.
+Stampbot accepts contributions that solve a focused problem. That includes
+code, tests, and documentation. Start with the user or operator who needs the
+change.
 
-## Before you open an issue
+By participating, you agree to follow the [code of conduct](CODE_OF_CONDUCT.md).
 
-Search [open and closed issues](https://github.com/dannysauer/stampbot/issues)
-for the same behavior. If you find one, add new evidence there instead of
-splitting the discussion.
+## Before you start
 
-For a bug, include:
+Search the [open and closed issues](https://github.com/dannysauer/stampbot/issues)
+before you open a new one. Add evidence to an existing issue when it covers the
+same problem.
 
-- the Stampbot version and deployment type;
-- the event and action that failed;
-- expected and actual behavior;
-- a minimal `stampbot.toml` when policy matters; and
-- sanitized logs or webhook response details.
+Use the bug report template for unexpected behavior. Include:
 
-For an enhancement, explain the user problem before proposing an interface.
+- The Stampbot application version, container digest, or chart version
+- The deployment mode
+- The webhook event and action
+- Expected and actual behavior
+- The relevant part of a sanitized `stampbot.toml`
+- Sanitized logs or a summary of the GitHub webhook response
 
-Don't report a suspected vulnerability in a public issue. Follow
-[SECURITY.md](SECURITY.md).
+For a feature proposal, describe who has the problem and what outcome they
+need. Discuss changes to GitHub App permissions, public configuration, or
+deployment behavior in an issue before writing a large patch.
 
-## Set up a development checkout
+Do not report a suspected vulnerability in a public issue. Follow the private
+process in the [security policy](SECURITY.md).
 
-You need Git, Make, Poetry, and Python 3.11 or newer. Clone your fork, then run:
+## Prepare a development checkout
+
+You need Git and Make. Stampbot supports Python 3.11 through 3.14, and CI tests
+each version.
+
+The pinned contributor toolchain uses Python 3.14.6 and Poetry 2.4.1. Chart work
+uses Helm 4.2.3. CI reads the same version files.
+
+If you use [mise](https://mise.jdx.dev/), install the pinned tools from the
+repository root:
+
+```bash
+mise install
+```
+
+If you don't use mise, install a supported Python version and Poetry yourself.
+Install Helm, Docker, and kubeconform before you work on the chart.
+
+Fork the repository and clone your fork. Then run these commands from the
+repository root:
 
 ```bash
 make install-dev
@@ -32,98 +55,129 @@ make test
 make lint
 ```
 
-The Makefile creates `.venv/` through Poetry. Use its executables for direct
-commands:
+`make install-dev` creates `.venv/` through Poetry. The test and lint targets use
+that environment. A successful checkout finishes both commands without errors.
 
-```bash
-.venv/bin/pytest tests/test_webhook_handler.py -v
-.venv/bin/ruff check stampbot tests
-```
+Keep project tools inside `.venv/`. Running pytest, Ruff, or MyPy from a global
+environment can use different dependencies than CI.
 
-Don't install project tools globally or run a different environment by
-accident. The repository virtual environment is the one CI behavior is built
-around.
+## Make one coherent change
 
-## Make the change
+Keep implementation, tests, and public documentation together.
 
-Keep code, tests, and docs together.
-
-- Add a regression test for a bug when practical.
-- Cover new behavior at the nearest useful level.
-- Update configuration, interface, deployment, or operations docs when their
+- Add a regression test for a bug when the behavior can be reproduced safely.
+- Test new behavior at the narrowest level that proves it works.
+- Update configuration, deployment, interface, and operations docs when their
   source changes.
-- Keep credentials and real delivery payloads out of fixtures.
-- Avoid unrelated formatting and refactoring in a focused change.
+- Preserve compatibility with existing `stampbot.toml` files unless the change
+  is intentionally breaking and the migration is documented.
+- Use synthetic webhook payloads and repository data in tests.
+- Leave unrelated formatting and refactoring for another pull request.
 
 Stampbot follows the
-[Google Python Style Guide](docs/external/google-python-style-guide.md) with
-Ruff formatting, a 100-character line limit, Google-style docstrings, and MyPy
-type checks. `pyproject.toml` is the active tool configuration.
+[Google Python Style Guide](docs/external/google-python-style-guide.md), with
+Ruff as the formatter and linter. The active rules live in `pyproject.toml`.
+Ruff enforces a 100-character line limit and Google-style docstrings. MyPy
+checks types.
 
-When dependencies change, edit `pyproject.toml` and regenerate `poetry.lock`
-with Poetry. Don't edit `requirements.txt` by hand; automation exports it from
-the Poetry sources.
+The copy of the style guide under `docs/external/` is synchronized from
+upstream. Do not edit that generated file by hand.
 
-## Check the work
+### Change dependencies
 
-Run the repository checks before you push:
+Direct application and development dependencies use exact versions. Preserve
+that policy when you add or update one.
+
+Edit `pyproject.toml`, then regenerate the lock file with Poetry:
 
 ```bash
+poetry lock
+make install-dev
 make pre-commit
 ```
 
-For a smaller local loop:
+The `poetry-export` hook generates `requirements.txt` from the Poetry sources.
+Review and stage that generated change. Do not edit `requirements.txt` by hand.
 
-```bash
-make lint
-make test
-```
+`constraints.txt` pins the installer used by the container build. Change it
+only when the build-tool constraint itself changes, and include the package
+hash from the published distribution.
 
-If you changed anything under `charts/`, also run:
+### Change GitHub Actions
 
-```bash
-make helm-test
-```
+Pin each third-party `uses:` entry to a full commit SHA. Keep the release
+version in an end-of-line comment so reviewers can identify the pin.
 
-At minimum, confirm that the chart lints and renders with the documented
-credential contract. A chart change should add or update a Helm unit or
-integration case when behavior changes.
+Use read-only workflow permissions by default. Grant a job only the additional
+permissions it needs, and do not expose repository secrets to untrusted pull
+request code.
 
-## Name the branch and commits
+The SLSA reusable workflows have a documented semantic-tag exception for
+provenance verifier compatibility. Check the
+[Scorecard findings tracker](https://github.com/dannysauer/stampbot/issues/267)
+before you change how those workflows are pinned.
 
-Use a short branch prefix:
+## Check the result
 
-- `feat/` for a feature;
-- `fix/` for a bug;
-- `docs/` for documentation;
-- `test/` for tests;
-- `refactor/` for restructuring; or
-- `chore/` for maintenance.
+Run every check that applies to the files you changed. This table gives the
+normal local commands.
 
-Every commit and the pull request title must use Conventional Commits:
+| Change | Commands |
+| --- | --- |
+| Any change | `make pre-commit` |
+| Python behavior | `make lint` and `make test` |
+| Helm chart or Kubernetes manifest | `make helm-test` |
+| Dependency metadata | `poetry lock`; `make install-dev`; `make pre-commit` |
+
+`make pre-commit` checks all tracked files. It needs the external tools used by
+the matching hooks, including Helm and kubeconform for chart files. If you
+cannot run a check, name it and explain why in the pull request.
+
+The default test command excludes tests marked `live`. Live tests make network
+requests. Run them only against an installation and account you are authorized
+to use, and keep credentials and private response data out of test output.
+
+## Name branches and commits
+
+Use a short branch name with a conventional prefix such as `feat/`, `fix/`,
+`docs/`, `test/`, `refactor/`, or `chore/`.
+
+Every commit and the pull request title must follow Conventional Commits:
 
 ```text
-<type>[optional scope]: <description>
+<type>[optional scope][optional !]: <description>
 ```
 
-Common types are `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `ci`,
-`style`, `perf`, `build`, and `revert`. The pull request title matters because
-squash merge turns it into the commit on `main`, where release automation reads
-it.
+The release workflow reads commit subjects on `main`:
+
+- `fix` can produce a patch release
+- `feat` can produce a minor release
+- A breaking marker can produce a major release
+
+Other commit types do not trigger an application release by themselves.
+
+Every application release also produces a chart release. Without an
+application release, any change under `charts/` since the latest reachable
+chart tag produces a chart-only release. Only `release.yml` owns automatic
+push-triggered planning; manual chart runs serialize with its chart
+publication.
+
+Keep the branch history small, and sign commits when you can. Before final
+review, rebase onto the current `main`; do not merge `main` into the branch.
+
+The maintainer generally fast-forwards a small branch with clean, signed
+commits after its required checks pass. A larger branch may be squash-merged.
+The repository does not accept merge commits.
 
 ## Open the pull request
 
-Describe the behavior change and the reason for it. Include the commands you
-ran and any check you couldn't run.
+Complete the pull request template. Explain the behavior change and why it
+belongs in Stampbot. List the exact checks you ran and describe any security or
+operator effect.
 
-Before requesting review:
+Link the issue that provides context. Use `Closes #123` only when merging the
+pull request should close that issue.
 
-1. Rebase or merge the current `main` according to your normal fork workflow.
-2. Run `make pre-commit`.
-3. Confirm tests cover changed behavior.
-4. Confirm public docs match the implementation.
-5. Use a Conventional Commit pull request title.
-
-By contributing, you certify that you have the right to submit the work under
-the project's Apache-2.0 license. Stampbot doesn't require a separate
-Contributor License Agreement.
+Contributions are submitted under the project's
+[Apache License 2.0](LICENSE). You must have the right to submit the work.
+Stampbot does not require a separate Contributor License Agreement.

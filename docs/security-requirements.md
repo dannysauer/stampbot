@@ -1,80 +1,145 @@
 # Security requirements
 
-This page records the properties Stampbot changes must preserve. It is a
-review checklist, not a claim that one control makes the whole deployment
-secure.
+Use these requirements when changing Stampbot. They describe properties the
+implementation and deployment must preserve. They do not replace a threat
+model or a review of the environment where Stampbot runs.
 
-## Authenticate every webhook
+## Authenticate before parsing
 
-- `POST /webhook` must verify `X-Hub-Signature-256` against the raw body before
-  parsing the payload.
-- Signature comparison must remain constant-time.
-- The service must reject missing or invalid signatures.
-- Webhook bodies must remain bounded. The current limit is 1 MiB.
+- Verify `X-Hub-Signature-256` against the raw webhook body.
+- Compare signatures in constant time.
+- Reject a missing or invalid signature before parsing JSON.
+- Keep the declared and actual body limit at 1 MiB or lower.
+- Treat every payload field as untrusted after signature verification.
+
+The signature proves that GitHub sent the delivery. It does not make pull
+request titles, comments, labels, or repository policy safe input.
 
 ## Keep approval authority narrow
 
-- GitHub API calls must use App and installation authentication, not a personal
-  access token.
-- The App must request only the permissions listed in the
+- Use GitHub App and installation credentials, never a personal access token.
+- Request only the permissions in the
   [configuration reference](configuration.md#github-app-permissions).
-- Approve and unapprove ChatOps commands must enforce the configured repository
-  permission.
-- Stampbot must create and dismiss only its own reviews.
-- Stampbot must not merge pull requests or change branch protection.
+- Check repository permission before an approve or unapprove ChatOps command.
+- Create and dismiss reviews only under Stampbot's App identity.
+- Never merge pull requests or change branch protection.
+- Keep `reapprove` an explicit repository choice.
 
-## Preserve repository policy
+GitHub branch rules remain the final enforcement boundary.
 
-- Label-driven approval must pass every configured filter category.
-- User and team allowlists are alternatives within the same author category.
-- ChatOps approval must remain separate from label eligibility filters.
-- Reapproval after a new commit must remain an explicit repository choice.
-- Invalid TOML, permission values, and regular expressions must stop automation
-  for that event.
-- Pull request title matching must bound title length, pattern count, pattern
-  length, and per-pattern execution time. Matching must stay off the asyncio
-  event loop, and a timeout or engine failure must not create an approval.
-- A repository-policy read failure may use service defaults only while that
-  behavior is documented and observable.
+## Fail closed on policy input
 
-## Handle secrets as credentials
+- Require every configured label-driven filter category to pass.
+- Treat user and team allowlists as alternatives within the author category.
+- Keep ChatOps authorization separate from label-driven filters.
+- Stop automation for readable but invalid TOML.
+- Reject unknown permission names and invalid command lists.
+- Bound title length, pattern count, pattern length, and match time.
+- Run title matching outside the asyncio event loop.
+- Reject the event when matching times out or the regex engine fails.
 
-- Private keys, webhook secrets, installation tokens, cloud credentials, and
-  kubeconfigs must not enter source control, logs, examples, or issue reports.
-- Local credentials belong in ignored files or environment variables.
-- Production credentials belong in a secret manager or a Kubernetes Secret
-  with controlled access.
-- `/setup` must be opt-in, use an operator-configured trusted public URL, and
-  close automatically after App credentials are present. Reopening it on a
-  configured instance requires a separate explicit control.
-- Setup HTML must not be cached or framed, and the credential callback must not
-  send its URL as a referrer.
-- The public HTTP listener must not serve `/metrics`.
-- Metrics must stay disabled unless a separate listener is bound to loopback or
-  a private monitoring network.
-- A reverse proxy header may supply `client_ip` only when the operator trusts
-  the proxy that writes it.
+A GitHub policy-read failure may use service defaults only while that behavior
+remains documented and visible in logs and metrics.
+
+## Protect credentials and setup
+
+- Keep private keys, webhook secrets, installation tokens, cloud credentials,
+  and kubeconfigs out of source control, logs, examples, and issue reports.
+- Use ignored local files for development and a managed secret store in
+  production.
+- Accept a private-key path only when it selects a regular file no larger than
+  64 KiB with a complete private-key PEM envelope.
+- Leave setup disabled by default.
+- Build setup URLs only from the operator-configured trusted base URL.
+- Close setup after all App credentials exist.
+- Require a separate explicit flag to reopen setup on a configured instance.
+- Prevent setup HTML from being cached, framed, or forwarded as a referrer.
+- Never return the App ID from the setup status response.
+
+The setup callback displays credentials once. Restrict access to every setup
+route during that short provisioning window.
+
+## Isolate operational interfaces
+
+- Never register `/metrics` on the public HTTP listener.
+- Keep the separate metrics listener disabled by default.
+- Bind source deployments to loopback unless a private monitoring network is
+  ready.
+- Keep the Helm metrics Service separate from the main Service and Ingress.
+- Treat metrics as sensitive because installation IDs and traffic patterns may
+  appear in series.
+- Use matched route templates or fixed fallback values for HTTP metric labels.
+- Never put raw paths, repository names, pull request numbers, or comment text
+  in labels.
+
+The metrics listener has no application authentication. Network placement is
+its access control.
+
+## Secure telemetry transport
+
+- Use TLS for OTLP by default.
+- Permit plaintext only after an explicit literal boolean opt-in.
+- Never let a plaintext flag downgrade an HTTPS endpoint.
+- Mount a private CA from a Secret or equivalent secret store.
+- Do not place certificate contents in Helm values or repository files.
+
+Spans can contain repository, user, pull request, and installation context.
+
+## Harden Kubernetes defaults
+
+- Do not mount a service-account token unless a container needs the Kubernetes
+  API.
+- Keep the root filesystem read-only and bound writable temporary storage.
+- Drop Linux capabilities and block privilege escalation.
+- Run as a non-root user with a runtime-default seccomp profile.
+- Avoid blanket namespace and pod selectors in enabled NetworkPolicy rules.
+- Limit ingress to expected application, ingress, and monitoring peers.
+- Limit egress to DNS, HTTPS, required application peers, and the collector.
+
+Kubernetes NetworkPolicy cannot restrict TCP 443 by hostname. Document that
+residual risk and use a capable CNI or egress gateway when destinations must be
+named.
 
 ## Keep the supply chain inspectable
 
-- Python dependencies, workflow actions, and container bases must follow the
-  repository's pinning policy.
-- CI must keep CodeQL, secret detection, fuzzing, and container scanning active.
-- Release assets must state which signatures and attestations actually exist.
-  Verification docs must not promise artifacts that weren't published.
-- Helm deployments should pin a verified chart version and image digest.
+- Follow the repository's pinning policy for Python packages, Actions, and
+  container bases.
+- Keep CodeQL, secret detection, fuzzing, dependency review, and container
+  scanning active.
+- Do not suppress a finding without a narrow reason and an expiry or follow-up.
+- State which release signatures, checksums, attestations, and VEX documents
+  actually exist.
+- Pin verified chart versions and image digests during controlled promotion.
 
-See [Verify a release](release-verification.md) for current commands and known
-artifact limits.
+Use [Verify a release](release-verification.md) for the current artifact and
+provenance commands.
 
-## Make failures useful without leaking data
+## Make failures useful and safe
 
-- Logs must name the failed operation without printing tokens or private keys.
-- Error messages returned to webhook senders must not expose internal secrets.
-- Metric labels must stay bounded; repository names, pull request numbers, and
-  user-controlled text don't belong in metric labels.
-- Security-relevant failures need enough structured context to correlate them
-  with a GitHub delivery.
+- Name the failed operation without printing credential values.
+- Return generic internal errors to webhook callers.
+- Scrub common token forms before logging exceptions.
+- Preserve enough structured context to correlate a failure with a delivery.
+- Remove private repository, customer, account, and cloud identifier data before
+  sharing evidence.
 
-The [operations runbook](operations.md) lists the evidence maintainers need and
-the data they must remove before sharing it.
+The [operations runbook](operations.md#escalate-with-safe-evidence) lists the
+useful evidence and the required redactions.
+
+## Verify security-sensitive changes
+
+Run focused tests for the changed boundary and the full suite. Preserve 100%
+statement and branch coverage unless the repository explicitly changes that
+policy.
+
+For chart changes, also run:
+
+- Helm lint;
+- Helm unit tests;
+- schema-negative cases for mutually exclusive settings;
+- kubeconform on each affected feature combination; and
+- an install or upgrade test when runtime wiring changes.
+
+For documentation changes, verify every command against the current source or a
+rendered artifact. Never publish a security promise that the implementation
+does not enforce.

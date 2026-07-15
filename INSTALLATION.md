@@ -1,84 +1,81 @@
 # Install Stampbot
 
-You need two things: a running Stampbot service and a GitHub App that points
-webhooks at it. Create the App once, then install it on each repository that
-should use Stampbot.
+A working installation has two parts: a Stampbot service and a GitHub App whose
+webhook points at that service. Create the App once. Install it on each
+repository Stampbot should serve.
+
+Every production runtime needs a public HTTPS route to `POST /webhook`.
 
 ## Choose a runtime
 
-| Runtime | Use it when | Instructions |
+| Runtime | Choose it when… | Go to |
 | --- | --- | --- |
-| Source checkout | You are developing Stampbot or testing the setup flow. | [Run from source](#run-from-source) |
-| Container | You already operate a container runtime. | [Run the container](#run-the-container) |
-| Kubernetes | You want the supported chart, probes, scaling, and optional controllers. | [Install with Helm](#install-with-helm) |
-| Google Cloud Run | You want this repository's GitHub Actions deployment. | [Cloud Run guide](docs/deploy-gcp-cloudrun.md) |
-
-Every runtime needs a public HTTPS route to `POST /webhook` before GitHub can
-deliver real events.
+| Source checkout | You are developing Stampbot or testing setup. | [Run from source](#run-from-source) |
+| Container | You already operate Docker or another OCI runtime. | [Run the container](#run-the-container) |
+| Kubernetes | You want the supported chart, probes, scaling, and policy resources. | [Install with Helm](#install-with-helm) |
+| Google Cloud Run | You want the repository's gated GitHub Actions deployment. | [Cloud Run guide](docs/deploy-gcp-cloudrun.md) |
 
 ## Create the GitHub App
 
-The setup wizard is the shortest path. Manual setup is available when you need
-to create the App before Stampbot has a reachable URL.
+Use the setup wizard when Stampbot already has a reachable URL. Create the App
+manually when the App must exist first.
 
 ### Use the setup wizard
 
-Run Stampbot without App credentials and explicitly enable setup with a trusted
-public URL:
+Setup is off by default. Start an unconfigured instance with these values:
 
 ```dotenv
 STAMPBOT_SETUP_ENABLED=true
 STAMPBOT_BASE_URL=https://stampbot.example.com
 ```
 
-`STAMPBOT_BASE_URL` is required. Stampbot does not derive callback or webhook
-destinations from `Host` or `X-Forwarded-*` request headers. HTTP is accepted
-only for `localhost` development URLs.
+`STAMPBOT_BASE_URL` must be the public origin you control. Stampbot never uses
+`Host` or `X-Forwarded-*` request headers to choose the manifest callback or
+webhook destination. Plain HTTP is accepted only for localhost development.
 
-Existing configured services continue serving webhooks without either setup
-setting. An unconfigured service upgrading from an earlier release must add the
-two values above before the wizard will open.
+> **Warning:** The callback displays the new private key and webhook secret.
+> Restrict access to the setup route, save the values once, and disable setup
+> before normal traffic reaches the service.
 
-> **Protect the setup flow.** The callback shows the new private key and webhook
-> secret in the browser. Use it once, save the credentials in your secret
-> store, and disable setup before normal operation. Setup closes automatically
-> after credentials are present unless the separate configured-instance
-> override is enabled.
-
-1. Open `BASE_URL/setup`.
+1. Open `https://stampbot.example.com/setup`.
 2. Select **Create GitHub App**.
 3. Choose the GitHub user or organization that will own the App.
-4. Return to Stampbot and save the App ID, private key, and webhook secret.
-5. Add those values to the runtime.
+4. Save the returned App ID, private key, and webhook secret in your secret
+   store.
+5. Configure those three values in the runtime.
 6. Set `STAMPBOT_SETUP_ENABLED=false` and restart or roll out the service.
-7. Install the App on the repositories Stampbot should serve.
+7. Install the App on its target repositories.
 
-If you use organization-wide policy, install the App on the organization's
-`.github` repository too. Stampbot needs access to read its `stampbot.toml`.
+Setup closes as soon as all three credentials are present. Deliberate
+reprovisioning also requires `STAMPBOT_SETUP_ALLOW_CONFIGURED=true`; leave that
+break-glass setting off during normal operation.
 
-Check the finished service:
+If repositories inherit organization policy, install the App on the
+organization's `.github` repository as well. Stampbot needs that installation
+to read its `stampbot.toml`.
+
+Check the configured service:
 
 ```bash
 BASE_URL=https://stampbot.example.com
 curl -fsS "${BASE_URL}/ready"
 ```
 
-The readiness response should report `configured: true` and
-`setup_enabled: false`. A normal configured instance returns `403` for every
-`/setup` route.
+The response should report `configured: true` and `setup_enabled: false`.
+Configured production instances return `403` from the setup routes.
 
 ### Create the App manually
 
 Create a private GitHub App under the user or organization that will own it.
-Use these settings:
+Set these fields:
 
-| GitHub App setting | Value |
+| GitHub App field | Value |
 | --- | --- |
-| Homepage URL | The public Stampbot origin. |
-| Webhook URL | The public origin followed by `/webhook`. |
-| Webhook secret | A new random secret. Store the same value as `STAMPBOT_WEBHOOK_SECRET`. |
-| Webhook active | Enabled. |
-| Public App | Disabled unless you intend to serve installations outside the owner account. |
+| Homepage URL | The public Stampbot origin |
+| Webhook URL | The public origin followed by `/webhook` |
+| Webhook secret | A new random secret; store the same value as `STAMPBOT_WEBHOOK_SECRET` |
+| Webhook active | Enabled |
+| Public App | Disabled, unless you intend to serve installations outside the owner account |
 
 Grant these repository permissions:
 
@@ -92,18 +89,32 @@ Grant these repository permissions:
 | Administration | Read-only |
 
 Subscribe to `pull_request`, `issue_comment`, and
-`pull_request_review_comment` events.
+`pull_request_review_comment`. Then record the App ID, generate a private key,
+and install the App on its target repositories.
 
-Record the App ID and generate a private key. Configure those values with the
-webhook secret, then install the App on its target repositories.
+The [permission reference](docs/configuration.md#github-app-permissions)
+explains each grant and its failure mode.
 
-The [configuration reference](docs/configuration.md#github-app-permissions)
-explains why each permission exists and how its failure appears.
+## Configure credentials
+
+Every runtime needs these settings:
+
+| Setting | Content |
+| --- | --- |
+| `STAMPBOT_APP_ID` | The numeric GitHub App ID |
+| `STAMPBOT_PRIVATE_KEY` | A complete private-key PEM value or a path to a PEM file |
+| `STAMPBOT_WEBHOOK_SECRET` | The secret configured on the GitHub App webhook |
+
+Stampbot reads a private-key file only when it is a bounded regular file with a
+complete PEM envelope. Kubernetes Secret symlink mounts are supported.
+
+Keep credentials out of source control, command output, issue reports, and
+container images. Production credentials belong in the runtime's secret store.
 
 ## Run from source
 
-You need Git, Make, Poetry, and Python 3.11 or newer. Run these commands from a
-shell on the machine that will host Stampbot:
+Install Git, Make, Poetry, and Python 3.11 or newer. Then clone and install the
+development environment:
 
 ```bash
 git clone https://github.com/dannysauer/stampbot.git
@@ -111,7 +122,7 @@ cd stampbot
 make install-dev
 ```
 
-For a configured instance, create an ignored `.env` file:
+Create an ignored `.env` file for a configured instance:
 
 ```dotenv
 STAMPBOT_APP_ID=123456
@@ -120,35 +131,34 @@ STAMPBOT_WEBHOOK_SECRET=replace-with-the-github-webhook-secret
 STAMPBOT_SETUP_ENABLED=false
 ```
 
-Keep `private-key.pem` outside source control and readable only by the process
-owner.
-
-Start the service:
+Store `private-key.pem` outside source control and restrict it to the process
+owner. Start the development server:
 
 ```bash
 make dev
 ```
 
-Then check both probes:
+Check liveness and readiness:
 
 ```bash
 curl -fsS http://127.0.0.1:8000/health
 curl -fsS http://127.0.0.1:8000/ready
 ```
 
-`make dev` reloads code and is meant for development. Run
-`.venv/bin/python -m stampbot` without reload when you need the same entrypoint
-as the container.
+`make dev` reloads changed code. For the container entrypoint without reload,
+run `.venv/bin/python -m stampbot`.
 
-GitHub can't reach `127.0.0.1`. Use a public HTTPS tunnel for webhook testing and
-set `STAMPBOT_BASE_URL` before creating the App manifest.
+GitHub can't reach `127.0.0.1`. Put port 8000 behind a public HTTPS tunnel for
+real webhook tests. If you use the setup wizard, restart with that public origin
+as `STAMPBOT_BASE_URL` before creating the App.
 
 ## Run the container
 
-Choose an app release that you have verified. This example uses `1.11.0`:
+Choose and [verify](docs/release-verification.md) a release before promotion.
+This verified example uses app release `1.11.9`:
 
 ```bash
-APP_VERSION=1.11.0
+APP_VERSION=1.11.9
 ```
 
 Create a local environment file:
@@ -161,7 +171,7 @@ STAMPBOT_SETUP_ENABLED=false
 STAMPBOT_LOG_FORMAT=json
 ```
 
-Run the GHCR image and mount the private key read-only:
+Mount the key read-only and start the GHCR image:
 
 ```bash
 docker run --rm \
@@ -172,7 +182,7 @@ docker run --rm \
   "ghcr.io/dannysauer/stampbot:${APP_VERSION}"
 ```
 
-Verify the process from another terminal:
+Check readiness from another terminal:
 
 ```bash
 curl -fsS http://127.0.0.1:8000/ready
@@ -211,22 +221,28 @@ rotated key or webhook secret.
 
 ## Install with Helm
 
-You need a Kubernetes cluster, Helm 3.12 or newer, a `kubectl` context with
-namespace access, and the three GitHub App credentials.
+You need Kubernetes namespace access, Helm 3.12 or newer, and the three GitHub
+App credentials. This verified example uses chart release `0.13.12`.
 
-This example uses chart release `0.13.3`:
+Read the webhook secret without putting it in shell history:
 
 ```bash
-CHART_VERSION=0.13.3
+CHART_VERSION=0.13.12
 kubectl create namespace stampbot
+
+read -r -s -p "GitHub webhook secret: " STAMPBOT_WEBHOOK_SECRET
+printf '\n'
+
 kubectl create secret generic stampbot-github \
   --namespace stampbot \
   --from-literal=STAMPBOT_APP_ID=123456 \
   --from-file=STAMPBOT_PRIVATE_KEY=./private-key.pem \
-  --from-literal=STAMPBOT_WEBHOOK_SECRET=replace-with-the-github-webhook-secret
+  --from-literal=STAMPBOT_WEBHOOK_SECRET="${STAMPBOT_WEBHOOK_SECRET}"
+
+unset STAMPBOT_WEBHOOK_SECRET
 ```
 
-Store production settings in a values file:
+Create `values.yaml`:
 
 ```yaml
 github:
@@ -235,7 +251,6 @@ github:
 setup:
   enabled: false
   allowConfigured: false
-  baseUrl: https://stampbot.example.com
 
 ingress:
   enabled: true
@@ -251,46 +266,49 @@ ingress:
         - stampbot.example.com
 ```
 
-Install the OCI chart:
+Install the OCI chart and wait for its Deployment:
 
 ```bash
 helm install stampbot oci://ghcr.io/dannysauer/charts/stampbot \
   --version "${CHART_VERSION}" \
   --namespace stampbot \
-  --values values.yaml
+  --values values.yaml \
+  --wait \
+  --timeout 5m
 ```
 
-Wait for the deployment and run the chart's tests:
+Run the chart tests:
 
 ```bash
 kubectl rollout status deployment/stampbot --namespace stampbot
-helm test stampbot --namespace stampbot --logs
+helm test stampbot --namespace stampbot --logs --timeout 2m
 ```
 
 The tests call `/health`, `/ready`, and `/` from inside the cluster. When
 `metrics.enabled=true`, they also check `/metrics` through its internal Service.
-The webhook test sends one valid and one tampered signed `ping` payload.
+The webhook test sends one valid and one tampered signed `ping` payload. These
+checks don't prove that public DNS, TLS, or the GitHub webhook reaches the
+release.
 
-For External Secrets Operator, Amazon EKS IAM Roles for Service Accounts,
-autoscaling, monitoring, NetworkPolicy, and every value, use the
-[chart documentation](charts/stampbot/README.md).
+Use the [chart guide](charts/stampbot/README.md) for upgrades, rollback,
+External Secrets Operator, IRSA, autoscaling, monitoring, NetworkPolicy, and the
+complete values reference.
 
-If an upgrade fails:
+If an upgrade fails, return to the last healthy Helm revision:
 
 ```bash
 helm history stampbot --namespace stampbot
-helm rollback stampbot PREVIOUS_REVISION --namespace stampbot
+helm rollback stampbot PREVIOUS_REVISION --namespace stampbot --wait
 kubectl rollout status deployment/stampbot --namespace stampbot
 ```
 
-Replace `PREVIOUS_REVISION` with the last healthy revision shown by
-`helm history`. A Helm rollback doesn't restore an external secret version or
-GitHub App setting.
+Replace `PREVIOUS_REVISION` with the revision from `helm history`. Helm can't
+restore an external secret version, a removed CRD, or a GitHub App setting.
 
 ## Confirm GitHub delivery
 
 Open the App's **Advanced** settings and inspect **Recent Deliveries**. Redeliver
-a `ping` event after the webhook URL and secret are set.
+a `ping` event after you set the webhook URL and secret.
 
 A healthy response is:
 
@@ -298,7 +316,7 @@ A healthy response is:
 {"status":"ok","message":"pong"}
 ```
 
-Then create a pull request in a test repository and add one configured approval
-label. Confirm that the pull request timeline shows an approval from your App.
+Create a pull request in a test repository and add one configured approval
+label. The timeline should show an approval from your App.
 
-If either check fails, move to the [operations runbook](docs/operations.md).
+If either check fails, continue in the [operations runbook](docs/operations.md).

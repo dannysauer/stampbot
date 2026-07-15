@@ -1,40 +1,106 @@
 # Governance
 
-Stampbot is a small open source project with one maintainer.
+Stampbot uses a maintainer-led model. Contributors can shape decisions in
+issues and pull requests, while the maintainer remains accountable for the
+project's scope, releases, and access.
 
-## Maintainer
+## Roles
 
-Danny Sauer ([@dannysauer](https://github.com/dannysauer)) maintains the
-project. The maintainer:
+### Maintainer
 
-- reviews and merges changes;
-- triages bugs, proposals, and private vulnerability reports;
-- owns release and repository access;
-- maintains automation and dependencies; and
-- decides scope and compatibility.
+Danny Sauer ([@dannysauer](https://github.com/dannysauer)) is the current
+maintainer. The maintainer:
+
+- Sets project scope and compatibility policy
+- Triages issues and private vulnerability reports
+- Reviews and integrates changes
+- Manages releases, repository settings, and automation access
+- Enforces the [code of conduct](CODE_OF_CONDUCT.md)
+
+### Contributors
+
+A contributor helps improve Stampbot without holding maintainer authority.
+Reporting a problem or submitting any project change counts. Contribution does
+not grant repository or release access.
+
+### Automation
+
+Repository automation runs checks, updates dependencies, and creates releases.
+An automation identity is not a maintainer. Its permissions should cover only
+the declared job it performs.
 
 ## How decisions are made
 
-Use a GitHub issue or pull request for decisions that can be public. State the
-problem, affected readers, compatibility cost, and security impact.
+Make public decisions in a GitHub issue or pull request. State the user problem
+and proposed outcome. Cover compatibility, security, and long-term maintenance
+costs. The maintainer weighs that evidence and makes the final decision.
 
-The maintainer decides whether a proposal fits Stampbot and whether its
-implementation is ready. Security work may stay in a private advisory until
-disclosure is safe.
+Open an issue before a substantial change to a public contract or project
+governance. Public contracts include configuration, GitHub App permissions,
+and deployment behavior. Routine fixes can go straight to a focused pull
+request when the problem and solution are clear.
 
-## Access and continuity
+Security work may remain in a private GitHub Security Advisory until disclosure
+is safe. The [security policy](SECURITY.md) explains that process.
 
-Repository and release access is limited to the maintainer and the automation
-declared in this repository. Branch rules, required checks, secret scanning,
-dependency monitoring, and release controls reduce accidental changes; they
-don't create a second human maintainer.
+A decision can change when new evidence appears. Record the new reasoning in
+the issue or pull request so future contributors don't have to reconstruct it
+from commit history.
 
-There is no guaranteed multi-person continuity today. The Apache-2.0 license
-lets users fork and maintain Stampbot if the upstream project becomes
-unavailable.
+## Reviews and integration
 
-## Change this model
+Required checks must pass before a change reaches `main`. The maintainer checks
+that the implementation, tests, and public docs agree. Review also covers
+compatibility and security impact.
 
-Propose governance changes in an issue or pull request. A proposal that adds a
-maintainer or release principal must name the responsibility, access being
-granted, recovery path, and audit controls before access changes.
+Stampbot keeps a linear history. The maintainer generally fast-forwards a small
+branch when its commits are clean and signed. Squash merge is the fallback for
+a branch that needs consolidation. Merge commits are disabled.
+
+The project currently has one human maintainer, so it cannot promise an
+independent approval on every change. Repository rules and automated checks
+reduce accidental changes, but they are not a substitute for another reviewer.
+
+## Maintainer access
+
+Repository and release access stays limited to the maintainer and the
+automation declared in this repository. A change that grants a person or
+automation identity new access must document:
+
+- The responsibility that needs the access
+- The minimum repository, package, or deployment permissions
+- Who can revoke or recover the access
+- Which credentials need rotation
+- Where the change leaves an audit record
+
+Maintainer status is not earned by reaching a contribution count. The current
+maintainer may invite someone who has shown sustained judgment and understands
+the security boundary. The candidate must also agree to own a defined part of
+the project. Record the role and access change in a governance pull request
+before granting access.
+
+## Disagreements and conduct
+
+Keep technical disagreements on the issue or pull request. Summarize the points
+of disagreement and the evidence for each option. The maintainer decides when
+the project needs a conclusion.
+
+Follow the [code of conduct](CODE_OF_CONDUCT.md) for behavior concerns. There is
+no independent project escalation path while Stampbot has one maintainer. A
+participant may use GitHub's platform reporting and support channels when the
+concern involves account or platform abuse.
+
+## Continuity
+
+There is no guaranteed response time or release schedule. The project also
+lacks multi-person continuity today. If the maintainer becomes unavailable,
+the [Apache License 2.0](LICENSE) permits the community to fork and maintain
+Stampbot.
+
+A repository transfer does not change this governance model by itself. Any
+change in project authority must update this file.
+
+## Amend this policy
+
+Propose a governance change in an issue or pull request. Explain the problem
+with the current model and the authority or responsibility that would change.
