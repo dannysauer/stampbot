@@ -3,9 +3,9 @@
 Stampbot sits between GitHub's webhook service and pull request review API. It
 keeps no database and owns no merge state.
 
-Think of it as a narrowly instructed reviewer. It may raise its hand, withdraw
-that hand, and explain a configuration error. The Merge button remains across
-the table. That's as far as the metaphor goes.
+Think of it as a reviewer with one job. It may raise its hand, withdraw that
+hand, and explain a configuration error. The Merge button remains across the
+table. That's as far as the metaphor goes.
 
 ## Request path
 

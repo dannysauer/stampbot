@@ -6,15 +6,15 @@ the current status and acceptance criteria for individual changes.
 
 ## What guides the work
 
-Stampbot should make a narrow decision and make it predictably: whether a
-GitHub pull request matches the repository's approval policy. Reliability and
-security take priority over adding more ways to approve a change.
+Stampbot should answer one question predictably: does a GitHub pull request
+match the repository's approval policy? Reliability and security take priority
+over adding more ways to approve a change.
 
 New work should preserve these constraints:
 
 - Fail closed when authentication, authorization, policy, or required evidence
   is incomplete
-- Keep GitHub App permissions and deployment access as narrow as practical
+- Give the GitHub App only the permissions and deployment access it needs
 - Expose enough telemetry to diagnose a delivery without exposing credentials
   or private repository data
 - Keep configuration changes compatible or provide a clear migration

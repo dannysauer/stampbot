@@ -18,7 +18,7 @@ operators and runtime hold that secret, Stampbot treats the request as a GitHub
 delivery. Pull request titles, comments, labels, and repository policy remain
 untrusted input.
 
-## Keep approval authority narrow
+## Limit approval authority
 
 - Use GitHub App and installation credentials, never a personal access token.
 - Request only the permissions in the
@@ -109,7 +109,7 @@ named.
   container bases.
 - Keep CodeQL, secret detection, fuzzing, dependency review, and container
   scanning active.
-- Do not suppress a finding without a narrow reason and an expiry or follow-up.
+- If you suppress a finding, record why and set an expiry or follow-up.
 - State which release signatures, checksums, attestations, and VEX documents
   actually exist.
 - Pin verified chart versions and image digests during controlled promotion.
