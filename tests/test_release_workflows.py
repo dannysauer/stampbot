@@ -29,6 +29,20 @@ def test_slsa_never_discovers_or_uploads_to_a_release_by_tag() -> None:
         assert "draft-release:" not in workflow
 
 
+def test_slsa_callers_allow_the_pinned_generators_declared_permissions() -> None:
+    app_provenance = APP_WORKFLOW.split("  app-release-provenance:", maxsplit=1)[1].split(
+        "\n  publish-app-release:", maxsplit=1
+    )[0]
+    chart_provenance = CHART_WORKFLOW.split("  release-chart-provenance:", maxsplit=1)[1].split(
+        "\n  publish-chart-release:", maxsplit=1
+    )[0]
+
+    # GitHub validates the reusable workflow's nested contents:write job even
+    # though upload-assets=false makes that path a no-op at runtime.
+    assert "      contents: write" in app_provenance
+    assert "      contents: write" in chart_provenance
+
+
 def test_finalization_uses_captured_numeric_release_identity() -> None:
     for workflow in (APP_WORKFLOW, CHART_WORKFLOW):
         assert "id: create-release" in workflow

@@ -422,7 +422,10 @@ jobs:
     if: needs.release-chart.outputs.skip != 'true'
     permissions:
       actions: read  # For reusable workflow path detection
-      contents: read
+      # The pinned SLSA generator declares a nested contents:write job even
+      # when upload-assets is false. GitHub validates that declaration before
+      # evaluating the nested job condition, so the caller must allow it.
+      contents: write
       id-token: write  # For keyless SLSA provenance signing
     # SLSA generator workflows must use a full semantic tag for slsa-verifier compatibility.
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
