@@ -193,10 +193,16 @@ curl -fsS http://127.0.0.1:9090/metrics
 ```
 
 For Helm, set `metrics.enabled=true`. The chart creates a separate ClusterIP
-Service that the Ingress never selects:
+Service that the Ingress never selects. Start a port-forward and leave it
+running:
 
 ```bash
 kubectl port-forward service/stampbot-metrics 9090:9090 --namespace stampbot
+```
+
+From another terminal:
+
+```bash
 curl -fsS http://127.0.0.1:9090/metrics
 ```
 

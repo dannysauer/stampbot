@@ -118,9 +118,11 @@ expose. The [configuration reference](configuration.md) describes their inputs.
 
 ## Trust boundaries
 
-The webhook body is untrusted until its HMAC-SHA256 signature passes a
-constant-time comparison. The body stays untrusted data after that; the
-signature proves GitHub sent it, not that repository content is safe.
+Stampbot rejects a webhook body unless its HMAC-SHA256 signature passes a
+constant-time comparison. A match proves that the sender knew the webhook
+secret and that the body has not changed since signing. When only GitHub and
+Stampbot's operators and runtime hold that secret, Stampbot treats the request
+as a GitHub delivery. The payload remains untrusted data.
 
 Repository policy has the trust level of the default branch that holds it.
 Anyone who can change that file can change when Stampbot approves in that

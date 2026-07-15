@@ -12,8 +12,11 @@ model or a review of the environment where Stampbot runs.
 - Keep the declared and actual body limit at 1 MiB or lower.
 - Treat every payload field as untrusted after signature verification.
 
-The signature proves that GitHub sent the delivery. It does not make pull
-request titles, comments, labels, or repository policy safe input.
+A matching signature proves that the sender knew the webhook secret and that
+the body has not changed since signing. When only GitHub and Stampbot's
+operators and runtime hold that secret, Stampbot treats the request as a GitHub
+delivery. Pull request titles, comments, labels, and repository policy remain
+untrusted input.
 
 ## Keep approval authority narrow
 
