@@ -1,50 +1,72 @@
-# Security Requirements
+# Security requirements
 
-This document records the security properties Stampbot is expected to preserve.
+This page records the properties Stampbot changes must preserve. It is a
+review checklist, not a claim that one control makes the whole deployment
+secure.
 
-## Authentication and Authorization
+## Authenticate every webhook
 
-- Webhook requests must be authenticated with GitHub's `X-Hub-Signature-256` HMAC
-  signature before event payloads are trusted.
-- GitHub API access must use GitHub App authentication and installation tokens, not
-  long-lived personal access tokens.
-- ChatOps approval and dismissal commands must require the configured repository
-  permission threshold.
-- Stampbot must only approve or dismiss its own pull request reviews.
+- `POST /webhook` must verify `X-Hub-Signature-256` against the raw body before
+  parsing the payload.
+- Signature comparison must remain constant-time.
+- The service must reject missing or invalid signatures.
+- Webhook bodies must remain bounded. The current limit is 1 MiB.
 
-## Pull Request Approval Safety
+## Keep approval authority narrow
 
-- Adding one configured approval label may approve a pull request only when all configured
-  eligibility filters pass.
-- Removing approval labels must dismiss Stampbot's approval when the pull request no
-  longer satisfies approval policy.
-- Duplicate label events must not create duplicate approvals for the same pull request
-  head commit.
-- ChatOps approval must be able to refresh a stale Stampbot approval after new commits are
-  pushed.
-- Reapproval after new commits must remain opt-in per repository.
+- GitHub API calls must use App and installation authentication, not a personal
+  access token.
+- The App must request only the permissions listed in the
+  [configuration reference](configuration.md#github-app-permissions).
+- Approve and unapprove ChatOps commands must enforce the configured repository
+  permission.
+- Stampbot must create and dismiss only its own reviews.
+- Stampbot must not merge pull requests or change branch protection.
 
-## Secret Handling
+## Preserve repository policy
 
-- GitHub App private keys, webhook secrets, tokens, and cloud credentials must not be
-  committed to the repository.
-- Local development secrets belong in ignored files or environment variables.
-- CI must continue to run secret detection and GitHub secret scanning/push protection.
+- Label-driven approval must pass every configured filter category.
+- User and team allowlists are alternatives within the same author category.
+- ChatOps approval must remain separate from label eligibility filters.
+- Reapproval after a new commit must remain an explicit repository choice.
+- Invalid TOML, permission values, and regular expressions must stop automation
+  for that event.
+- A repository-policy read failure may use service defaults only while that
+  behavior is documented and observable.
 
-## Supply Chain
+## Handle secrets as credentials
 
-- GitHub Actions must be pinned according to the repository pinning policy, except where a
-  tool explicitly requires semantic tag references for verification compatibility.
-- Python dependencies and generated lock/requirements files must remain pinned.
-- Container images must be built from pinned base images and scanned before release.
-- Releases should include SBOM, VEX, Sigstore signatures, and SLSA provenance artifacts.
-  Verification commands are documented in [release-verification.md](release-verification.md).
+- Private keys, webhook secrets, installation tokens, cloud credentials, and
+  kubeconfigs must not enter source control, logs, examples, or issue reports.
+- Local credentials belong in ignored files or environment variables.
+- Production credentials belong in a secret manager or a Kubernetes Secret
+  with controlled access.
+- Operators must disable `/setup` after the manifest flow.
+- Public deployments must protect `/metrics` outside the app when its contents
+  shouldn't be public.
+- A reverse proxy header may supply `client_ip` only when the operator trusts
+  the proxy that writes it.
 
-## Observability
+## Keep the supply chain inspectable
 
-- Security-relevant failures should be logged with structured context, without leaking
-  secrets.
-- Metrics should use bounded-cardinality labels.
+- Python dependencies, workflow actions, and container bases must follow the
+  repository's pinning policy.
+- CI must keep CodeQL, secret detection, fuzzing, and container scanning active.
+- Release assets must state which signatures and attestations actually exist.
+  Verification docs must not promise artifacts that weren't published.
+- Helm deployments should pin a verified chart version and image digest.
 
-Operational escalation data and webhook troubleshooting are documented in
-[operations.md](operations.md).
+See [Verify a release](release-verification.md) for current commands and known
+artifact limits.
+
+## Make failures useful without leaking data
+
+- Logs must name the failed operation without printing tokens or private keys.
+- Error messages returned to webhook senders must not expose internal secrets.
+- Metric labels must stay bounded; repository names, pull request numbers, and
+  user-controlled text don't belong in metric labels.
+- Security-relevant failures need enough structured context to correlate them
+  with a GitHub delivery.
+
+The [operations runbook](operations.md) lists the evidence maintainers need and
+the data they must remove before sharing it.

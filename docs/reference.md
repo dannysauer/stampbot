@@ -1,148 +1,150 @@
-# Stampbot Interface Reference
+# Interface reference
 
-Stampbot is a GitHub App that receives GitHub webhooks and produces pull request reviews,
-issue comments, HTTP responses, structured logs, traces, and Prometheus metrics.
+Stampbot exposes one HTTP service and writes results through the GitHub API.
+This page describes those interfaces as implemented.
 
-For configuration keys, defaults, permissions, events, and failure behavior, see
-[Configuration Reference](configuration.md).
+## HTTP endpoints
 
-## HTTP Interface
+The default bind address is `0.0.0.0:8000`.
 
-Stampbot listens on `STAMPBOT_PORT` (`8000` by default).
+| Method and path | Input | Success response | Other responses |
+| --- | --- | --- | --- |
+| `GET /` | None | `307` to `/setup` when setup is enabled and credentials are missing. Otherwise, JSON with `app`, `version`, and `status`. | None expected. |
+| `GET /health` | None | `200 {"status":"healthy"}`. This is liveness only. | None expected. |
+| `GET /ready` | None | `200` when credentials are complete or setup mode is enabled. The JSON includes `configured` and `setup_enabled` checks. | `503` when credentials are incomplete and setup is disabled. |
+| `GET /metrics` | None | `200` with Prometheus text. | None expected. |
+| `POST /webhook` | Signed GitHub webhook JSON | `200` with handler `status` and `message`. A handler-level error may still use HTTP `200`. | `400`, `401`, `413`, `503`, or `500`. |
+| `GET /setup` | None | `200` setup page or already-configured page. | `403` when setup is disabled. |
+| `GET /setup/callback` | GitHub manifest `code` query value | `200` page containing the new App credentials. | `403`, `422` for a missing code, or `500` when exchange fails. |
+| `GET /setup/status` | None | `200` with `configured`, `setup_enabled`, and `app_id` when configured. | None expected. |
+| `GET /openapi.json` | None | FastAPI OpenAPI JSON. | Framework errors. |
+| `GET /docs` | None | Swagger UI. | Framework errors. |
+| `GET /redoc` | None | ReDoc UI. | Framework errors. |
 
-| Endpoint | Method | Input | Success output | Error output |
-| --- | --- | --- | --- | --- |
-| `/` | `GET` | No body. | Redirects to `/setup` with `307` when setup mode is enabled and credentials are missing; otherwise returns `{"app":"stampbot","version":"0.1.0","status":"running"}`. | None expected. |
-| `/health` | `GET` | No body. | `{"status":"healthy"}`. | None expected. |
-| `/metrics` | `GET` | No body. | Prometheus text exposition format. | None expected. |
-| `/webhook` | `POST` | GitHub webhook JSON body with `X-GitHub-Event` and `X-Hub-Signature-256`. | JSON `status` and `message`; may create or dismiss a pull request approval or post help. | `400`, `401`, `413`, `503`, or `500` with JSON `detail`. |
-| `/setup` | `GET` | No body. | HTML setup wizard when setup is enabled. | `403` when setup is disabled. |
-| `/setup/callback` | `GET` | GitHub manifest `code` query parameter. | HTML page containing generated GitHub App credentials and next steps. | `403` when setup is disabled; `500` when the manifest code exchange fails. |
-| `/setup/status` | `GET` | No body. | JSON setup status: `configured`, `setup_enabled`, and `app_id` when configured. | None expected. |
-| `/openapi.json` | `GET` | No body. | FastAPI-generated OpenAPI schema. | Framework-generated errors. |
-| `/docs` | `GET` | No body. | FastAPI Swagger UI. | Framework-generated errors. |
-| `/redoc` | `GET` | No body. | FastAPI ReDoc UI. | Framework-generated errors. |
+`/health` doesn't inspect credentials or GitHub. `/ready` is the traffic signal:
+an unconfigured process stays ready while setup is enabled so the setup page can
+still receive traffic.
 
-The setup wizard submits the generated GitHub App manifest to GitHub's manifest creation
-endpoint. That POST is handled by GitHub, not by Stampbot.
+The current application constant reports version `0.1.0` in the root response,
+OpenAPI document, metric, and tracing resource.
 
-## Webhook Request Requirements
+## Webhook request
 
 `POST /webhook` requires:
 
-- `X-GitHub-Event`: GitHub event name.
-- `X-Hub-Signature-256`: HMAC-SHA256 signature using `STAMPBOT_WEBHOOK_SECRET`.
-- JSON request body no larger than 1 MiB.
-- Configured GitHub App credentials: `STAMPBOT_APP_ID`, `STAMPBOT_PRIVATE_KEY`, and
-  `STAMPBOT_WEBHOOK_SECRET`.
+- `X-GitHub-Event` with the event name;
+- `X-Hub-Signature-256` with an HMAC-SHA256 signature of the raw body;
+- a JSON body no larger than 1 MiB; and
+- all three GitHub App credentials on the server.
 
-Webhook response codes:
-
-| Status | Cause |
+| HTTP status | Cause |
 | --- | --- |
-| `200` | Request was authenticated and handled, including ignored no-op events. |
-| `400` | Missing event header or invalid JSON body. |
-| `401` | Missing or invalid webhook signature. |
-| `413` | Request body larger than 1 MiB. |
-| `503` | Stampbot is missing required GitHub App credentials. |
-| `500` | Internal webhook handling error. |
+| `200` | The signature and JSON were valid. The handler result may be `success`, `ignored`, `ok`, or `error`. |
+| `400` | The event header is missing or the body isn't valid JSON. |
+| `401` | The signature is missing or doesn't match. |
+| `413` | `Content-Length` or the body itself exceeds 1 MiB. |
+| `503` | App ID, private key, or webhook secret is missing. |
+| `500` | Event handling raised an unhandled exception. |
 
-## GitHub Webhook Inputs
+## Webhook events
 
-Stampbot handles these event families:
-
-| Event | Actions and payload fields used |
+| Event | Fields and behavior |
 | --- | --- |
 | `ping` | Returns `{"status":"ok","message":"pong"}`. |
-| `pull_request` | Uses action, PR number, title, author, labels, head SHA, repository owner/name/default branch, owner type, and installation ID. |
-| `issue_comment` | Uses PR comments containing `@stampbot`; reads comment body, commenter, issue/PR number, repository owner/name/default branch, owner type, and installation ID. Non-PR issue comments are ignored. |
-| `pull_request_review_comment` | Uses review comments containing `@stampbot`; reads comment body, commenter, PR number, repository owner/name/default branch, owner type, and installation ID. |
+| `pull_request` | Reads action, number, title, author, labels, head SHA, repository identity, default branch, owner type, and installation ID. |
+| `issue_comment` | Handles comments only when the issue is a pull request. |
+| `pull_request_review_comment` | Handles `@stampbot` commands in review comments. |
+| Any other event | Returns an `ignored` result. |
 
-Subscribed event and permission requirements are listed in
-[configuration.md](configuration.md#github-app-permissions).
+Missing pull request, repository, or installation fields produce a handler-level
+`error` result. The HTTP response remains `200` unless the handler raises.
 
-## Pull Request Label Inputs
+## Label-driven approval
 
-When `auto_approve_on_label` is enabled, Stampbot can approve a PR on these
-`pull_request` actions:
+`auto_approve_on_label` controls all behavior in this table.
 
-- `opened`
-- `reopened`
-- `labeled`
-- `synchronize`, only when `reapprove = true` and a previous Stampbot approval is stale
+| Pull request action | Condition | Result |
+| --- | --- | --- |
+| `opened` or `reopened` | Any current label appears in `approval_labels` and every eligibility filter passes. | Create approval unless an active Stampbot approval already exists. |
+| `labeled` with an approval label | The added label is configured and every filter passes. | Create approval unless an active approval exists. |
+| `labeled` with another label | A configured approval label remains, a previous Stampbot review exists, and no active approval covers the current head. Filters must pass. | Refresh approval. |
+| `synchronize` | `reapprove = true`, a configured approval label remains, a previous Stampbot review exists, and no active approval covers the new head. Filters must pass. | Create a fresh approval. |
+| `unlabeled` | The removed label appears in `approval_labels`. | Dismiss every active Stampbot approval on the pull request. |
 
-Removing an approval label on an `unlabeled` action dismisses Stampbot approvals when the
-removed label is one of the configured approval labels.
+Removing one configured approval label dismisses the review even when another
+configured approval label remains. A later matching event can approve again.
 
-Default approval labels:
+## ChatOps
 
-```toml
-approval_labels = ["autoapprove", "stamp"]
-```
+Stampbot lowercases and trims a comment before searching for
+`@stampbot <command>`. It ignores comments over 65,536 characters.
 
-Eligibility filters are documented in [configuration.md](configuration.md#filter-logic).
+| Default command | Permission | Result |
+| --- | --- | --- |
+| `@stampbot approve` | `maintain` or configured threshold | Approve the current head unless it already has an active Stampbot approval. |
+| `@stampbot stamp` | `maintain` or configured threshold | Same as `approve`. |
+| `@stampbot unapprove` | `maintain` or configured threshold | Dismiss active Stampbot approvals. |
+| `@stampbot unstamp` | `maintain` or configured threshold | Same as `unapprove`. |
+| `@stampbot help` | No collaborator check | Post the effective commands, permission threshold, labels, and filters. |
 
-## ChatOps Inputs
+Custom approve and unapprove words come from repository policy. An unknown word
+returns an `ignored` result.
 
-When `chatops_enabled` is enabled, comments on PRs can use:
+## GitHub writes
 
-| Command | Result |
-| --- | --- |
-| `@stampbot approve` | Approves the pull request. |
-| `@stampbot stamp` | Approves the pull request. |
-| `@stampbot unapprove` | Dismisses Stampbot approvals. |
-| `@stampbot unstamp` | Dismisses Stampbot approvals. |
-| `@stampbot help` | Posts help for the effective repository configuration. |
+Stampbot may create:
 
-Approval and unapproval commands require `chatops_required_permission` or higher. The
-`help` command does not require a repository permission check. Comments longer than
-64 KiB are ignored.
+- an approval review;
+- a dismissal of one of its active approval reviews;
+- a review comment describing invalid policy on a newly opened pull request; or
+- an issue comment in response to `@stampbot help`.
 
-## GitHub Outputs
+It doesn't dismiss another reviewer's approval and doesn't merge the pull
+request.
 
-Stampbot can create these externally visible GitHub outputs:
+## Prometheus metrics
 
-- Pull request approval reviews.
-- Pull request review dismissals for Stampbot's own approvals.
-- Pull request review comments describing invalid `stampbot.toml` on newly opened PRs.
-- Issue comments in response to `@stampbot help`.
+`GET /metrics` is always registered on the main service. The current
+`metrics_enabled` and `metrics_port` settings don't change it.
 
-Stampbot does not merge pull requests.
-
-## Metrics Output
-
-Stampbot exposes Prometheus metrics from `/metrics`.
-
-| Metric | Type | Labels | Description |
+| Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |
-| `stampbot_info` | Info | `version` | Application version. |
-| `stampbot_http_requests_total` | Counter | `method`, `endpoint`, `status` | HTTP requests received. |
-| `stampbot_http_request_duration_seconds` | Histogram | `method`, `endpoint` | HTTP request duration. |
-| `stampbot_http_request_size_bytes` | Histogram | `method`, `endpoint` | HTTP request body size from `Content-Length`. |
-| `stampbot_http_response_size_bytes` | Histogram | `method`, `endpoint` | HTTP response body size from `Content-Length`. |
-| `stampbot_http_requests_in_progress` | Gauge | `method`, `endpoint` | In-flight HTTP requests. |
-| `stampbot_webhook_events_total` | Counter | `event_type`, `action` | Webhook events by event and action. |
-| `stampbot_webhook_signature_validations_total` | Counter | `result` | Webhook signature validations, `valid` or `invalid`. |
-| `stampbot_webhook_processing_duration_seconds` | Histogram | `event_type` | Webhook handling duration. |
-| `stampbot_pr_approvals_total` | Counter | `trigger_type`, `status` | Approval attempts by label or ChatOps trigger. |
+| `stampbot_info` | Info | `version` | Application build information. |
+| `stampbot_http_requests_total` | Counter | `method`, `endpoint`, `status` | HTTP responses. |
+| `stampbot_http_request_duration_seconds` | Histogram | `method`, `endpoint` | HTTP duration. |
+| `stampbot_http_request_size_bytes` | Histogram | `method`, `endpoint` | Request `Content-Length` when present. |
+| `stampbot_http_response_size_bytes` | Histogram | `method`, `endpoint` | Response `Content-Length` when present. |
+| `stampbot_http_requests_in_progress` | Gauge | `method`, `endpoint` | Requests currently running. |
+| `stampbot_webhook_events_total` | Counter | `event_type`, `action` | Authenticated events routed to the handler. |
+| `stampbot_webhook_signature_validations_total` | Counter | `result` | Valid and invalid signature checks. |
+| `stampbot_webhook_processing_duration_seconds` | Histogram | `event_type` | Handler duration. |
+| `stampbot_pr_approvals_total` | Counter | `trigger_type`, `status` | Approval attempts. |
 | `stampbot_pr_approval_duration_seconds` | Histogram | none | Approval operation duration. |
-| `stampbot_pr_dismissals_total` | Counter | `trigger_type`, `status` | Dismissal attempts by label removal or ChatOps trigger. |
+| `stampbot_pr_dismissals_total` | Counter | `trigger_type`, `status` | Dismissal attempts. |
 | `stampbot_pr_dismissal_duration_seconds` | Histogram | none | Dismissal operation duration. |
-| `stampbot_chatops_commands_total` | Counter | `command`, `status` | ChatOps commands by parsed command and outcome. |
-| `stampbot_github_api_requests_total` | Counter | `operation`, `status` | GitHub API calls. |
-| `stampbot_github_api_request_duration_seconds` | Histogram | `operation` | GitHub API call duration. |
-| `stampbot_github_api_rate_limit_remaining` | Gauge | `installation_id` | Remaining GitHub API rate limit. |
-| `stampbot_github_api_rate_limit_limit` | Gauge | `installation_id` | GitHub API rate limit ceiling. |
-| `stampbot_repo_config_loads_total` | Counter | `status` | Repository config loads: `found`, `default`, or `error`. |
+| `stampbot_chatops_commands_total` | Counter | `command`, `status` | Parsed ChatOps outcomes. |
+| `stampbot_github_api_requests_total` | Counter | `operation`, `status` | GitHub client operations. |
+| `stampbot_github_api_request_duration_seconds` | Histogram | `operation` | GitHub client duration. |
+| `stampbot_github_api_rate_limit_remaining` | Gauge | `installation_id` | Remaining core API quota. |
+| `stampbot_github_api_rate_limit_limit` | Gauge | `installation_id` | Core API quota ceiling. |
+| `stampbot_repo_config_loads_total` | Counter | `status` | Policy loads: `found`, `default`, or `error`. |
 | `stampbot_errors_total` | Counter | `error_type` | Application error categories. |
 
-## Distribution Interfaces
+## Client behavior
 
-Stampbot is distributed as:
+GitHub requests use a 30-second timeout. The client configures up to three total
+retries with exponential backoff for HTTP `500`, `502`, `503`, and `504`.
 
-- Source code from this GitHub repository.
-- Container images from GitHub Container Registry and Docker Hub release workflows.
-- A Helm chart published as an OCI artifact under `ghcr.io/dannysauer/charts/stampbot`.
+Errors returned in logs are scrubbed for common GitHub token formats. Operators
+must still remove repository, customer, and credential data before sharing logs.
 
-See [INSTALLATION.md](../INSTALLATION.md), [deploy-gcp-cloudrun.md](deploy-gcp-cloudrun.md),
-and [charts/stampbot/README.md](../charts/stampbot/README.md) for deployment procedures.
+## Distribution
+
+| Artifact | Location |
+| --- | --- |
+| Source | <https://github.com/dannysauer/stampbot> |
+| Container | `ghcr.io/dannysauer/stampbot` and `docker.io/stampbot/stampbot` |
+| Helm chart | `oci://ghcr.io/dannysauer/charts/stampbot` |
+
+Use [Install Stampbot](../INSTALLATION.md) for deployment choices and
+[Verify a release](release-verification.md) before promoting an artifact.

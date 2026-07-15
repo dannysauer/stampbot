@@ -1,29 +1,34 @@
-# Code of Conduct
+# Code of conduct
 
-## Our Standards
+Stampbot's project spaces should be respectful, useful, and safe to
+participate in.
 
-Stampbot project spaces are expected to be professional, respectful, and focused on the
-project. Contributors should:
+## Expected conduct
 
-- use welcoming and inclusive language
-- respect different experience levels and viewpoints
-- accept constructive feedback gracefully
-- keep discussions relevant to Stampbot and its users
-- avoid harassment, insults, discrimination, or disclosure of private information
+Contributors and maintainers should:
 
-## Scope
+- use welcoming and inclusive language;
+- respect different experience levels and points of view;
+- give specific, constructive feedback;
+- keep discussion relevant to the project; and
+- protect private information shared during support or review.
 
-This code of conduct applies to public project spaces, including GitHub Issues, pull
-requests, reviews, discussions, and project-related communication.
+Harassment, discrimination, insults, threats, and deliberate disclosure of
+private information aren't acceptable.
 
-## Reporting
+## Where it applies
 
-Report conduct concerns to the maintainer through a GitHub Issue when the concern can be
-public. If the report includes private, sensitive, or security-relevant information, use the
-private reporting process in [SECURITY.md](SECURITY.md).
+This policy applies to Stampbot issues, pull requests, reviews, discussions,
+and other project-related communication.
+
+## Report a concern
+
+Use a GitHub issue when the concern can safely be public. If it includes
+private, safety-sensitive, or security-related information, use the private
+process in [SECURITY.md](SECURITY.md) and identify it as a conduct report.
 
 ## Enforcement
 
-The maintainer may edit or remove comments, close issues or pull requests, block abusive
-accounts from further participation, or contact GitHub Support when behavior violates this
-code of conduct or GitHub's Terms of Service.
+The maintainer may edit or remove content, close a thread, reject a
+contribution, block an account, or contact GitHub Support. The response will
+depend on the behavior, its impact, and whether it continues after a warning.

@@ -1,110 +1,139 @@
 # Architecture
 
-Stampbot is a GitHub App implemented with FastAPI. It receives GitHub webhook events,
-evaluates repository policy, and creates or dismisses only Stampbot's own pull request
-reviews.
+Stampbot sits between GitHub webhooks and GitHub's pull request review API. It
+has no database and owns no merge state.
 
-## Request Flow
+Think of it as another reviewer at the table. It can raise its hand, withdraw
+that hand, and explain why. It can't press the Merge button.
 
-The following diagram shows the normal webhook path from GitHub to Stampbot's
-GitHub API writes:
+## From webhook to review
+
+This diagram shows the main request path and the point where repository policy
+enters it.
 
 ```mermaid
 flowchart LR
-    github["GitHub webhook delivery"]
-    webhook["FastAPI POST /webhook"]
-    signature["Verify X-Hub-Signature-256"]
-    handler["WebhookHandler.handle_event()"]
+    github["GitHub webhook"]
+    http["POST /webhook"]
+    signature["Verify HMAC signature"]
+    router["Route event"]
     policy["Load repository policy"]
-    client["GitHubAppClient installation token"]
-    output["GitHub PR review or comment API"]
-    timeline["Pull request timeline"]
-    telemetry["Metrics, logs, and traces"]
+    decision{"Policy allows action?"}
+    token["Create installation client"]
+    review["Write review or comment"]
+    telemetry["Logs, metrics, traces"]
 
-    github --> webhook
-    webhook --> signature
-    signature --> handler
-    handler --> policy
-    policy --> client
-    client --> output
-    output --> timeline
-    handler --> telemetry
+    github --> http
+    http --> signature
+    signature --> router
+    router --> policy
+    policy --> decision
+    decision -->|yes| token
+    token --> review
+    decision -->|no| telemetry
+    router --> telemetry
+    review --> telemetry
 ```
 
-In text form, GitHub sends a signed webhook to `/webhook`; Stampbot verifies the
-signature, routes the event, loads repository policy, authenticates as the GitHub
-App installation, writes only its own review/comment outputs, and emits
-operational telemetry.
+GitHub signs the raw body with the App's webhook secret. The HTTP layer rejects
+an invalid signature before it parses or routes the event. Valid requests then
+move to `WebhookHandler`.
 
-The webhook handler supports:
+The handler loads policy for the target repository and decides whether the
+event calls for an approval, dismissal, help comment, or no action. When it
+needs GitHub, `GitHubAppClient` exchanges an App JWT for an installation token.
+That token carries the installation's repository scope.
 
-- `ping` events for GitHub App health checks
-- `pull_request` events for label-driven approval and dismissal
-- `issue_comment` events for ChatOps commands such as `@stampbot stamp`
+The response to GitHub only says what Stampbot did with the event. The visible
+result lives on the pull request timeline.
 
-## Approval State Model
+## Approval lifecycle
 
-The following state diagram summarizes how Stampbot treats a pull request across
-label, ChatOps, and new-commit events:
+Stampbot tracks its state through GitHub reviews rather than local storage.
+This keeps replicas independent, but it also makes GitHub the final source of
+truth.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Ignored: event is unsupported or policy does not match
-    [*] --> Eligible: label or ChatOps command matches policy
-    Eligible --> Approved: policy passes and GitHub review succeeds
-    Eligible --> Ignored: filters or permissions fail
-    Approved --> Dismissed: approval label removed or unapprove command accepted
-    Approved --> Stale: new commits arrive and reapprove is false
-    Approved --> Eligible: new commits arrive and reapprove is true
-    Stale --> Eligible: approval label still applies and reapprove becomes true
-    Dismissed --> Eligible: approval label or approve command returns
-    Ignored --> [*]
+    [*] --> Unapproved
+    Unapproved --> Approved: matching label event or authorized approve command
+    Approved --> Dismissed: approval label removed or authorized unapprove command
+    Approved --> Stale: pull request head changes
+    Stale --> Approved: reapprove enabled or authorized approve command
+    Dismissed --> Approved: later matching event or authorized approve command
 ```
 
-In text form, Stampbot ignores unsupported events, approves only when policy and
-permissions pass, dismisses only its own approval when policy no longer applies,
-and reapproves after new commits only when repository configuration opts in.
+In plain text:
 
-## Main Components
+- A matching `opened`, `reopened`, or `labeled` event can create approval.
+- Eligibility filters apply to label-driven approval.
+- Removing any configured approval label dismisses active Stampbot approvals.
+- A new head commit leaves the old review behind. `reapprove` decides whether a
+  `synchronize` event can add a fresh one.
+- An authorized ChatOps command can approve the current head or dismiss active
+  Stampbot reviews.
 
-- `stampbot/main.py`: FastAPI application, HTTP endpoints, webhook signature entry point
-- `stampbot/webhook_handler.py`: event routing, label policy, ChatOps handling
-- `stampbot/github_client.py`: GitHub App JWT creation, installation tokens, API calls
-- `stampbot/config.py`: application and repository configuration loading
-- `stampbot/metrics.py`: Prometheus metrics
-- `stampbot/telemetry.py`: OpenTelemetry setup
-- `charts/stampbot/`: Kubernetes deployment chart
+The diagram describes Stampbot's reviews. GitHub may apply separate branch
+rules, dismissal settings, and merge requirements.
 
-See [reference.md](reference.md) for public HTTP routes and
-[configuration.md](configuration.md) for settings, permissions, and repository policy.
+## Where policy comes from
 
-## Configuration Model
+For each webhook, Stampbot looks in this order:
 
-Application configuration comes from environment variables and local configuration files.
-Repository approval policy comes from `stampbot.toml` in the target repository, or from an
-organization `.github` repository fallback.
+1. `stampbot.toml` on the target repository's default branch;
+2. `stampbot.toml` in the owner's `.github` repository, when the target belongs
+   to an organization; and
+3. the defaults loaded by the running Stampbot service.
 
-Environment variables have the highest application configuration precedence. Repository
-policy is evaluated per webhook event so different repositories can use different labels,
-commands, permission thresholds, and eligibility filters.
+There are two different failure paths. If GitHub can't return a policy file,
+Stampbot logs the read failure and uses its defaults. If it reads a file but
+can't parse or validate it, Stampbot stops automation for that event. On a new
+pull request, it also leaves a review comment with the validation error.
 
-## Trust Boundaries
+That difference is deliberate in the current implementation. Operators who
+need a stricter fallback should set conservative service defaults and monitor
+`stampbot_repo_config_loads_total`.
 
-Stampbot treats GitHub webhook payloads as untrusted until the HMAC-SHA256 signature has
-been verified with the configured webhook secret.
+## Components and ownership
 
-Stampbot authenticates to GitHub as a GitHub App by signing a short-lived JWT with the
-configured private key and exchanging that JWT for installation access tokens. Installation
-tokens are scoped by GitHub to the repositories where the app is installed.
+| Component | Responsibility |
+| --- | --- |
+| `stampbot/main.py` | FastAPI routes, body limits, signature entry point, setup pages, and HTTP telemetry |
+| `stampbot/webhook_handler.py` | Event routing, policy decisions, ChatOps parsing, and approval lifecycle |
+| `stampbot/github_client.py` | App authentication, installation clients, retries, and GitHub API calls |
+| `stampbot/config.py` | Service settings, repository defaults, TOML parsing, and policy validation |
+| `stampbot/metrics.py` | Prometheus metric definitions |
+| `stampbot/telemetry.py` | Optional OpenTelemetry export and span helpers |
+| `charts/stampbot/` | Kubernetes packaging and runtime policy |
 
-Repository configuration is read from the repository being acted on. Contributors who can
-change a repository's default branch configuration can affect that repository's Stampbot
-policy.
+The [interface reference](reference.md) describes the public surface. The
+[configuration reference](configuration.md) describes the values that feed
+these components.
 
-## External Outputs
+## Trust boundaries
 
-Stampbot can create pull request approval reviews, dismiss its own reviews, post ChatOps
-help comments, expose health responses, expose Prometheus metrics, and emit structured
-logs/traces. Stampbot does not merge pull requests.
+The webhook body is untrusted until HMAC-SHA256 verification succeeds.
+Stampbot compares signatures in constant time and caps the body at 1 MiB.
 
-Operational triage for these outputs is in [operations.md](operations.md).
+Repository policy is trusted at the same level as the target repository's
+default branch. Anyone who can change that file can change when Stampbot
+approves in that repository.
+
+The App private key and webhook secret cross a more sensitive boundary. They
+belong in a secret store, never in `stampbot.toml` or source control.
+Installation tokens are short-lived and scoped by GitHub, but they still need
+the least permissions listed in the [configuration reference](configuration.md#github-app-permissions).
+
+`/setup` returns generated credentials during the manifest flow. Keep setup
+disabled after provisioning. `/metrics` has no application-level
+authentication, so protect it at the ingress or service boundary when the
+service is public.
+
+## Deliberate boundaries
+
+Stampbot creates and dismisses only reviews made by its own App identity. It
+doesn't merge, edit branch protection, grant repository access, or pretend to
+be a native `CODEOWNERS` entry.
+
+Those limits keep the approval decision visible. They also leave final control
+with GitHub's branch rules and the people who own the repository.

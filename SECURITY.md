@@ -1,25 +1,37 @@
-# Security Policy
+# Security policy
 
-## Supported Versions
+## Supported releases
 
-Stampbot is released continuously from `main`. Security fixes are provided in the latest
-release only.
+Stampbot fixes security defects in the latest release. Older app and chart
+versions don't receive separate backports.
 
-## Reporting a Vulnerability
+## Report a vulnerability
 
-Please report suspected vulnerabilities privately through GitHub Security Advisories:
+Use a private
+[GitHub Security Advisory](https://github.com/dannysauer/stampbot/security/advisories/new).
+Don't open a public issue.
 
-https://github.com/dannysauer/stampbot/security/advisories/new
+Include what you can verify:
 
-Do not open a public issue for suspected vulnerabilities. Include the affected version,
-steps to reproduce, impact, and any suggested remediation when possible.
+- affected app or chart version;
+- deployment mode;
+- prerequisites and reproduction steps;
+- security impact and exposed boundary; and
+- a suggested fix or mitigation, if you have one.
 
-## Security Checks
+Remove real tokens, private keys, webhook secrets, customer data, and private
+repository content. A minimal synthetic reproduction is preferable.
 
-This repository uses GitHub CodeQL, Trivy container scanning, Dependabot alerts, secret
-scanning with push protection, OpenSSF Scorecard, release signing, SBOMs, VEX documents,
-and SLSA provenance for new release artifacts.
+The project doesn't promise a fixed response or disclosure time. The maintainer
+will use the private advisory to confirm impact and coordinate a safe public
+release.
 
-Security requirements are documented in [docs/security-requirements.md](docs/security-requirements.md).
-Release verification is documented in [docs/release-verification.md](docs/release-verification.md).
-Operational troubleshooting is documented in [docs/operations.md](docs/operations.md).
+## Security posture
+
+The [security requirements](docs/security-requirements.md) describe the
+properties code changes must preserve. CI also runs CodeQL, secret detection,
+fuzzing, dependency checks, OpenSSF Scorecard, and container scanning.
+
+Published signatures and attestations vary by release. Check the actual asset
+list and follow [Verify a Stampbot release](docs/release-verification.md)
+instead of assuming an artifact exists.

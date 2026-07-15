@@ -1,74 +1,84 @@
-# Helm Chart CI Test Cases
+# Helm integration cases
 
-This directory contains values files for Helm chart integration tests. Each file defines a test case that is automatically discovered and run in CI.
+This directory supplies values for clean-install and upgrade tests in
+`.github/workflows/ci.yml`. Each install case gets its own kind cluster.
 
-## How It Works
+## How discovery works
 
-1. CI discovers all `*-values.yaml` files in this directory
-2. Each file becomes a test case (e.g., `default-values.yaml` → test case `default`)
-3. Test cases run in parallel, each in its own kind cluster
-4. The chart is installed with the values file, the pod is waited on for
-   readiness, and the release is verified with `helm test` (the chart-shipped
-   `test-connection` and `test-webhook` hooks)
+CI finds every `*-values.yaml` file and removes the suffix to get the case name.
+For example, `networkpolicy-values.yaml` becomes `networkpolicy`.
 
-## Adding a New Test Case
+For each case, CI:
 
-1. Create a new file: `<name>-values.yaml`
-2. Add the values you want to test
-3. (Optional) Add a `<name>-setup.sh` hook for prerequisites — see below
-4. Commit and push - CI will automatically pick it up
+1. builds the working-tree Stampbot image;
+2. creates a kind cluster and a namespace;
+3. creates the fake `stampbot-github` test Secret;
+4. runs an optional matching `NAME-setup.sh`;
+5. installs the chart with `NAME-values.yaml`;
+6. waits for the Pod and Deployment;
+7. runs the chart's `helm test` hooks; and
+8. prints workload and test-Pod logs on failure.
 
-## Setup hooks (prerequisites)
+The cases run in parallel. One failure doesn't stop the others.
 
-If a case needs something installed in the cluster before `helm install` (for
-example a CRD that one of the chart's templates depends on), ship a
-`<name>-setup.sh` alongside the values file. The install job auto-discovers it
-and runs it after the kind cluster and test secret exist but before the chart
-is installed. Cases without a hook are installed directly.
+## Add a case
 
-Example: `servicemonitor-setup.sh` installs the Prometheus Operator
-`ServiceMonitor` CRD so the chart's ServiceMonitor can be applied. Only the CRD
-is installed (not the operator) — the case validates that the resource renders
-and applies cleanly, not that scraping works end to end.
+Create `NAME-values.yaml` with:
 
-## Requirements for Test Cases
+- `replicaCount: 1`;
+- the local `stampbot:ci-test` image and `pullPolicy: Never`;
+- `podDisruptionBudget.enabled: false`;
+- `github.existingSecret: stampbot-github`; and
+- `autoscaling.enabled: false` unless autoscaling is the feature under test.
 
-All test cases must:
-- Set `github.existingSecret: stampbot-github` (CI creates this secret)
-- Use `replicaCount: 1` for faster tests
-- Disable `podDisruptionBudget` (single replica doesn't need it)
-- Disable `autoscaling` **unless autoscaling is the feature under test** — a
-  case may override these defaults for the specific feature it exercises (the
-  `autoscaling` case enables the HPA, for instance).
+Change only the values needed to exercise the new branch. A case should make
+its boundary explicit: installing an object isn't the same as proving that its
+controller performs useful work.
 
-## Current Test Cases
+Run the chart checks before pushing:
 
-| File | Description |
-|------|-------------|
-| `default-values.yaml` | Minimal configuration with defaults |
-| `ingress-values.yaml` | Ingress object created (no controller asserted) |
-| `autoscaling-values.yaml` | HorizontalPodAutoscaler enabled (object installs; no metrics-server) |
-| `networkpolicy-values.yaml` | NetworkPolicy enabled (renders/installs; kindnet does not enforce) |
-| `servicemonitor-values.yaml` | ServiceMonitor enabled (CRD installed via `servicemonitor-setup.sh`) |
+```bash
+make helm-test
+```
 
-## Upgrade testing
+CI discovers the new file without a workflow edit.
 
-A separate `helm-upgrade-test` job installs a previously **released** chart and
-then `helm upgrade`s it to the working-tree chart, re-running `helm test` after
-the upgrade. This catches upgrade-only breakage that a clean install never sees:
-immutable-field changes (Service `clusterIP`, selector labels), removed/renamed
-values, and broken hook ordering.
+## Add a setup hook
 
-The upgrade-from versions are computed dynamically from `chart-v*` git tags —
-the latest patch of the current chart minor line plus the previous up-to-two
-minor lines — so the set tracks new releases automatically. The released chart
-runs on the locally built image (via `--set image.*`), so the test isolates the
-*chart* upgrade rather than image availability.
+When a feature needs a CRD or another prerequisite before Helm can install it,
+add executable `NAME-setup.sh` beside the values file. CI runs the hook after
+creating the cluster and test Secret.
 
-### Not an install case: External Secrets
+Pin anything the hook downloads. Wait for a CRD to become Established before
+installing a custom resource.
 
-External Secrets (`externalSecrets.enabled`) is intentionally **not** an install
-case. The deployment would mount a secret that only a running External Secrets
-Operator (plus a real secret backend) can materialize, so the pod could never
-become Ready in a self-contained kind run. The chart's ExternalSecret template
-is instead validated by `helm-unittest` (`tests/externalsecret_test.yaml`).
+`servicemonitor-setup.sh` is the current example. It installs only the pinned
+ServiceMonitor CRD, not the Prometheus Operator. The case proves that the
+resource validates and applies; it doesn't prove that Prometheus scrapes it.
+
+## Current coverage
+
+| Case | What it proves | What it doesn't prove |
+| --- | --- | --- |
+| `default` | The minimal single-replica release installs and passes chart tests. | Production scaling or external routing. |
+| `ingress` | The Ingress renders and applies. | An ingress controller, DNS, or TLS. |
+| `autoscaling` | The HPA installs and points at the Deployment. | Scaling, because kind has no metrics server. |
+| `networkpolicy` | The NetworkPolicy renders without blocking readiness in this cluster. | Enforcement, because kindnet doesn't enforce NetworkPolicy. |
+| `servicemonitor` | The ServiceMonitor validates against its real CRD. | End-to-end scraping. |
+
+External Secrets isn't a clean-install case. Without an operator and a real
+backend, the generated Secret never appears and the Pod can't become ready.
+`tests/externalsecret_test.yaml` covers that template instead.
+
+## Upgrade coverage
+
+The upgrade matrix reads `chart-vX.Y.Z` tags. It selects the latest patch from
+the newest three major/minor lines.
+
+For each selected version, CI installs the published chart and points it at the
+locally built image. It then upgrades to the working-tree chart and reruns the
+chart tests.
+
+Keeping the image constant isolates chart compatibility. These cases catch
+immutable field changes, renamed or removed values, selector drift, and broken
+hook ordering that a clean install can miss.

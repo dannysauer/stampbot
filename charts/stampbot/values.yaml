@@ -1,15 +1,17 @@
 # Copyright 2026 Danny Sauer
 # SPDX-License-Identifier: Apache-2.0
 
-# Default values for stampbot Helm chart.
-# See https://github.com/dannysauer/stampbot for documentation.
+# Default values for the Stampbot Helm chart.
+# See https://github.com/dannysauer/stampbot/tree/main/charts/stampbot for the full guide.
 
+# replicaCount -- Number of Pods when autoscaling.enabled is false.
 # @schema
 # type: integer
 # minimum: 1
 # @schema
 replicaCount: 2
 
+# image -- Stampbot container image.
 # @schema
 # type: object
 # properties:
@@ -22,11 +24,16 @@ replicaCount: 2
 #     type: string
 # @schema
 image:
+  # image.repository -- Container registry and repository.
   repository: ghcr.io/dannysauer/stampbot
+  # image.pullPolicy -- Kubernetes image pull policy.
   pullPolicy: IfNotPresent
-  tag: ""  # Defaults to chart appVersion
-  digest: ""  # Optional sha256 digest; when set, renders repository@digest and ignores tag
+  # image.tag -- Container tag. An empty value uses the chart appVersion.
+  tag: ""
+  # image.digest -- Optional sha256 digest. A digest takes precedence over image.tag.
+  digest: ""
 
+# imagePullSecrets -- Secret references used to pull the container image.
 # @schema
 # type: array
 # items:
@@ -34,30 +41,37 @@ image:
 # @schema
 imagePullSecrets: []
 
+# nameOverride -- Override the chart name portion of generated resource names.
 # @schema
 # type: string
 # @schema
 nameOverride: ""
 
+# fullnameOverride -- Replace the generated resource fullname.
 # @schema
 # type: string
 # @schema
 fullnameOverride: ""
 
+# serviceAccount -- Workload ServiceAccount settings.
 serviceAccount:
+  # serviceAccount.create -- Create a ServiceAccount for Stampbot.
   create: true
+  # serviceAccount.annotations -- Annotations added to the ServiceAccount.
   annotations: {}
+  # serviceAccount.name -- Existing or explicit ServiceAccount name.
   name: ""
 
-# Annotations for the Deployment resource itself (e.g., ArgoCD sync waves, Reloader)
+# deploymentAnnotations -- Annotations added to the Deployment object.
 deploymentAnnotations: {}
 
-# Annotations for pod template (applied to each pod)
+# podAnnotations -- Annotations added to the Pod template.
 podAnnotations:
   prometheus.io/scrape: "true"
   prometheus.io/port: "8000"
   prometheus.io/path: "/metrics"
 
+# podSecurityContext -- Pod-level security context.
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 1000
@@ -65,6 +79,7 @@ podSecurityContext:
   seccompProfile:
     type: RuntimeDefault
 
+# securityContext -- Stampbot container security context.
 securityContext:
   allowPrivilegeEscalation: false
   capabilities:
@@ -72,31 +87,48 @@ securityContext:
       - ALL
   readOnlyRootFilesystem: true
 
+# service -- Kubernetes Service settings.
 service:
+  # service.type -- Kubernetes Service type.
   type: ClusterIP
+  # service.port -- Port exposed by the Service.
   port: 80
+  # service.targetPort -- Stampbot container port.
   targetPort: 8000
+  # service.annotations -- Annotations added to the Service.
   annotations: {}
 
-# Metrics are served on the main HTTP port (default 8000).
+# metrics -- Prometheus discovery settings. Stampbot always serves /metrics.
 metrics:
+  # metrics.enabled -- Permit ServiceMonitor creation; this does not disable the endpoint.
   enabled: true
+  # metrics.serviceMonitor -- Prometheus Operator ServiceMonitor settings.
   serviceMonitor:
+    # metrics.serviceMonitor.enabled -- Create a ServiceMonitor.
     enabled: false
+    # metrics.serviceMonitor.interval -- Prometheus scrape interval.
     interval: 30s
+    # metrics.serviceMonitor.scrapeTimeout -- Per-scrape timeout.
     scrapeTimeout: 10s
 
+# ingress -- Kubernetes Ingress settings.
 ingress:
+  # ingress.enabled -- Create an Ingress.
   enabled: false
+  # ingress.className -- Ingress controller class.
   className: ""
+  # ingress.annotations -- Annotations added to the Ingress.
   annotations: {}
+  # ingress.hosts -- Host and path rules.
   hosts:
     - host: stampbot.local
       paths:
         - path: /
           pathType: Prefix
+  # ingress.tls -- TLS entries for the Ingress.
   tls: []
 
+# resources -- Stampbot container requests and limits.
 resources:
   limits:
     cpu: 500m
@@ -105,14 +137,21 @@ resources:
     cpu: 100m
     memory: 128Mi
 
+# autoscaling -- Horizontal Pod Autoscaler settings.
 autoscaling:
+  # autoscaling.enabled -- Create an HPA. The HPA ignores replicaCount.
   enabled: true
+  # autoscaling.minReplicas -- Minimum HPA replica count.
   minReplicas: 2
+  # autoscaling.maxReplicas -- Maximum HPA replica count.
   maxReplicas: 10
+  # autoscaling.targetCPUUtilizationPercentage -- Average CPU utilization target.
   targetCPUUtilizationPercentage: 80
-  # Custom metrics for HPA
+  # autoscaling.customMetrics -- Raw autoscaling/v2 custom metric settings.
   customMetrics:
+    # autoscaling.customMetrics.enabled -- Add the custom metric list to the HPA.
     enabled: false
+    # autoscaling.customMetrics.metrics -- Raw autoscaling/v2 metric specifications.
     metrics:
       - type: Pods
         pods:
@@ -122,20 +161,28 @@ autoscaling:
             type: AverageValue
             averageValue: "100"
 
+# vpa -- Vertical Pod Autoscaler settings.
 vpa:
+  # vpa.enabled -- Create a VerticalPodAutoscaler.
   enabled: false
-  updateMode: "Auto"  # Options: "Off", "Initial", "Recreate", "Auto"
+  # vpa.updateMode -- VPA mode: Off, Initial, Recreate, or Auto.
+  updateMode: "Auto"
+  # vpa.minAllowed -- Minimum CPU and memory recommendation.
   minAllowed:
     cpu: 50m
     memory: 64Mi
+  # vpa.maxAllowed -- Maximum CPU and memory recommendation.
   maxAllowed:
     cpu: 1000m
     memory: 1Gi
 
+# nodeSelector -- Node labels required by Stampbot Pods.
 nodeSelector: {}
 
+# tolerations -- Tolerations added to Stampbot Pods.
 tolerations: []
 
+# affinity -- Affinity and anti-affinity rules for Stampbot Pods.
 affinity:
   podAntiAffinity:
     preferredDuringSchedulingIgnoredDuringExecution:
@@ -149,44 +196,59 @@ affinity:
                   - stampbot
           topologyKey: kubernetes.io/hostname
 
+# config -- Stampbot process settings injected into the Deployment.
 config:
+  # config.logLevel -- STAMPBOT_LOG_LEVEL.
   logLevel: INFO
+  # config.otelEnabled -- STAMPBOT_OTEL_ENABLED.
   otelEnabled: false
+  # config.otelEndpoint -- STAMPBOT_OTEL_ENDPOINT when tracing is enabled.
   otelEndpoint: ""
+  # config.otelServiceName -- STAMPBOT_OTEL_SERVICE_NAME.
   otelServiceName: stampbot
 
-# Setup mode configuration
-# When enabled, allows creating GitHub App via /setup endpoint
-# Disable in production after initial setup
+# setup -- GitHub App setup-flow settings.
 setup:
-  enabled: false  # Disable /setup in production by default
-  baseUrl: ""     # Override auto-detected base URL (e.g., https://stampbot.example.com)
+  # setup.enabled -- Enable /setup. Keep this false after provisioning.
+  enabled: false
+  # setup.baseUrl -- Public Stampbot origin used for callback and webhook URLs.
+  baseUrl: ""
 
+# github -- GitHub App credential source.
 github:
+  # github.appId -- Inline App ID. Prefer github.existingSecret in production.
   appId: ""
-  # Private key can be provided via:
-  # 1. Direct value (not recommended for production)
-  # 2. existingSecret with key "private-key"
-  # 3. AWS Secrets Manager (see awsSecretsManager section)
+  # github.privateKey -- Inline PEM private key. Prefer github.existingSecret in production.
   privateKey: ""
+  # github.webhookSecret -- Inline webhook secret. Prefer github.existingSecret in production.
   webhookSecret: ""
+  # github.existingSecret -- Secret with STAMPBOT_APP_ID, STAMPBOT_PRIVATE_KEY, and STAMPBOT_WEBHOOK_SECRET.
   existingSecret: ""
 
-# AWS Secrets Manager integration (for EKS)
+# awsSecretsManager -- IRSA annotation settings for a Helm-created ServiceAccount.
 awsSecretsManager:
+  # awsSecretsManager.enabled -- Add the IRSA role annotation.
   enabled: false
+  # awsSecretsManager.secretName -- Reserved; current templates do not read this value.
   secretName: "stampbot/github-credentials"
+  # awsSecretsManager.region -- Reserved; set the AWS region on the SecretStore.
   region: "us-east-1"
-  # IAM role for service account (IRSA)
+  # awsSecretsManager.roleArn -- IAM role ARN. Required when awsSecretsManager.enabled is true.
   roleArn: ""
 
-# External Secrets Operator integration
+# externalSecrets -- External Secrets Operator settings.
 externalSecrets:
+  # externalSecrets.enabled -- Create an ExternalSecret for Stampbot credentials.
   enabled: false
+  # externalSecrets.secretStore -- Existing SecretStore or ClusterSecretStore reference.
   secretStore:
+    # externalSecrets.secretStore.name -- Store resource name.
     name: aws-secrets-manager
+    # externalSecrets.secretStore.kind -- SecretStore or ClusterSecretStore.
     kind: SecretStore
+  # externalSecrets.refreshInterval -- ExternalSecret refresh interval.
   refreshInterval: 1h
+  # externalSecrets.data -- Target Secret keys and their remote references.
   data:
     - secretKey: STAMPBOT_APP_ID
       remoteRef:
@@ -201,26 +263,35 @@ externalSecrets:
         key: stampbot/github-credentials
         property: webhook_secret
 
-# OpenTelemetry configuration
+# opentelemetry -- Reserved values. Use config.otelEnabled, config.otelEndpoint, and config.otelServiceName.
 opentelemetry:
+  # opentelemetry.enabled -- Reserved; current templates do not read this value.
   enabled: false
+  # opentelemetry.endpoint -- Reserved; current templates do not read this value.
   endpoint: "http://otel-collector:4317"
+  # opentelemetry.serviceName -- Reserved; current templates do not read this value.
   serviceName: stampbot
 
-# Pod disruption budget
+# podDisruptionBudget -- PodDisruptionBudget settings.
 podDisruptionBudget:
+  # podDisruptionBudget.enabled -- Create a PodDisruptionBudget.
   enabled: true
+  # podDisruptionBudget.minAvailable -- Minimum available Stampbot Pods.
   minAvailable: 1
 
-# Network policy
+# networkPolicy -- NetworkPolicy settings. Replace the example rules for your cluster.
 networkPolicy:
+  # networkPolicy.enabled -- Create a NetworkPolicy.
   enabled: false
+  # networkPolicy.policyTypes -- Policy directions controlled by this resource.
   policyTypes:
     - Ingress
     - Egress
+  # networkPolicy.ingress -- Raw networking.k8s.io/v1 ingress rules.
   ingress:
     - from:
       - namespaceSelector: {}
+  # networkPolicy.egress -- Raw networking.k8s.io/v1 egress rules.
   egress:
     - to:
       - namespaceSelector: {}
@@ -228,13 +299,13 @@ networkPolicy:
       - podSelector: {}
     - ports:
       - protocol: TCP
-        port: 443  # GitHub API
+        port: 443
       - protocol: TCP
-        port: 53   # DNS
+        port: 53
       - protocol: UDP
-        port: 53   # DNS
+        port: 53
 
-# Grafana dashboard ConfigMap (for Grafana sidecar)
+# grafanaDashboard -- Bundled Grafana dashboard ConfigMap settings.
 # @schema
 # type: object
 # properties:
@@ -246,9 +317,10 @@ networkPolicy:
 #     type: object
 # @schema
 grafanaDashboard:
+  # grafanaDashboard.enabled -- Create the dashboard ConfigMap.
   enabled: false
-  # Labels to add to the ConfigMap (e.g., for Grafana sidecar discovery)
+  # grafanaDashboard.labels -- Labels used by the Grafana sidecar to discover the dashboard.
   labels:
     grafana_dashboard: "1"
-  # Annotations to add to the ConfigMap
+  # grafanaDashboard.annotations -- Annotations added to the dashboard ConfigMap.
   annotations: {}

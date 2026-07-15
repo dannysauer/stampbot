@@ -1,178 +1,231 @@
-# Release Verification
+# Verify a Stampbot release
 
-Stampbot publishes app releases from tags like `v1.2.3` and chart releases from tags
-like `chart-v1.2.3`.
+Use this guide before promoting an app image or Helm chart. Run the commands in
+a new, empty directory.
 
-Use these commands from a clean directory. Install `cosign`, `slsa-verifier`, `gh`, and
-optionally `crane` from `go-containerregistry`.
+The examples use app `1.11.0` and chart `0.13.3` because those published assets
+were checked while this page was rewritten on 2026-07-14.
 
-## Release Surfaces
+## Install the tools
 
-| Surface | Location | Workflow |
-| --- | --- | --- |
-| App release assets | GitHub release `vVERSION` | `.github/workflows/release.yml` |
-| GHCR image | `ghcr.io/dannysauer/stampbot:VERSION` | `.github/workflows/release.yml` |
-| Docker Hub image | `docker.io/stampbot/stampbot:VERSION` | `.github/workflows/release.yml` |
-| Helm chart package | GitHub release `chart-vVERSION` | `.github/workflows/chart-release.yml` |
-| Helm chart OCI artifact | `oci://ghcr.io/dannysauer/charts/stampbot` | `.github/workflows/chart-release.yml` |
+You need:
 
-The release workflow attaches SBOM and VEX attestations to the GHCR image digest. Use the
-GHCR image when verifying attestations. Docker Hub receives the same release tags from the
-multi-registry image build, but the attestation examples below target GHCR.
+- `gh` to inspect and download GitHub releases;
+- `cosign` to verify Sigstore bundles;
+- `crane` to resolve a container digest; and
+- `helm` to pull and inspect the OCI chart.
 
-## Download App Release Assets
+Install `slsa-verifier` only when the release actually contains an
+`.intoto.jsonl` provenance file.
+
+Set the versions:
 
 ```bash
-VERSION=1.2.3
-gh release download "v${VERSION}" \
-  --repo dannysauer/stampbot \
-  --pattern 'sbom.spdx.json*' \
-  --pattern "stampbot-${VERSION}.vex.json*" \
-  --pattern "stampbot-${VERSION}.intoto.jsonl"
+APP_VERSION=1.11.0
+CHART_VERSION=0.13.3
+REPOSITORY=dannysauer/stampbot
 ```
 
-App release assets:
+## Inspect before downloading
 
-| Asset | Purpose |
+List the app assets:
+
+```bash
+gh release view "v${APP_VERSION}" \
+  --repo "${REPOSITORY}" \
+  --json tagName,publishedAt,assets \
+  --jq '{tag: .tagName, published: .publishedAt, assets: [.assets[].name]}'
+```
+
+List the chart assets:
+
+```bash
+gh release view "chart-v${CHART_VERSION}" \
+  --repo "${REPOSITORY}" \
+  --json tagName,publishedAt,assets \
+  --jq '{tag: .tagName, published: .publishedAt, assets: [.assets[].name]}'
+```
+
+For the example releases, you should find:
+
+| Release | Published assets |
 | --- | --- |
-| `sbom.spdx.json` | SPDX JSON software bill of materials. |
-| `sbom.spdx.json.sigstore.json` | Sigstore bundle for the SBOM blob. |
-| `stampbot-VERSION.vex.json` | OpenVEX document. |
-| `stampbot-VERSION.vex.json.sigstore.json` | Sigstore bundle for the VEX blob. |
-| `stampbot-VERSION.intoto.jsonl` | SLSA provenance for release assets. |
+| App `v1.11.0` | `sbom.spdx.json`, its `.sigstore.json` bundle, `stampbot-1.11.0.vex.json`, and its bundle |
+| Chart `chart-v0.13.3` | `stampbot-0.13.3.tgz` and its `.sigstore.json` bundle |
 
-## Verify Signed App Assets
+Stop if the asset list differs from the verification path you plan to use.
+
+## Verify the app release blobs
+
+Download the software bill of materials (SBOM), OpenVEX document, and their
+bundles:
 
 ```bash
-VERSION=1.2.3
+mkdir app-release
+gh release download "v${APP_VERSION}" \
+  --repo "${REPOSITORY}" \
+  --dir app-release \
+  --pattern 'sbom.spdx.json*' \
+  --pattern "stampbot-${APP_VERSION}.vex.json*"
+```
 
+Verify the SBOM:
+
+```bash
 cosign verify-blob \
-  --bundle sbom.spdx.json.sigstore.json \
-  --certificate-identity-regexp 'https://github.com/dannysauer/stampbot/.github/workflows/.*@refs/heads/main' \
+  --bundle app-release/sbom.spdx.json.sigstore.json \
+  --certificate-identity-regexp 'https://github.com/dannysauer/stampbot/.github/workflows/release.yml@refs/heads/main' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  sbom.spdx.json
+  app-release/sbom.spdx.json
+```
 
+Verify the OpenVEX document:
+
+```bash
 cosign verify-blob \
-  --bundle "stampbot-${VERSION}.vex.json.sigstore.json" \
-  --certificate-identity-regexp 'https://github.com/dannysauer/stampbot/.github/workflows/.*@refs/heads/main' \
+  --bundle "app-release/stampbot-${APP_VERSION}.vex.json.sigstore.json" \
+  --certificate-identity-regexp 'https://github.com/dannysauer/stampbot/.github/workflows/release.yml@refs/heads/main' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  "stampbot-${VERSION}.vex.json"
+  "app-release/stampbot-${APP_VERSION}.vex.json"
 ```
 
-## Verify App Release SLSA Provenance
+Each command should end with `Verified OK`. The certificate identity is pinned
+to Stampbot's release workflow on `main`.
+
+## Pin the app image
+
+Resolve the GHCR tag to an immutable digest:
 
 ```bash
-VERSION=1.2.3
-
-slsa-verifier verify-artifact sbom.spdx.json \
-  --provenance-path "stampbot-${VERSION}.intoto.jsonl" \
-  --source-uri github.com/dannysauer/stampbot \
-  --source-tag "v${VERSION}"
-
-slsa-verifier verify-artifact "stampbot-${VERSION}.vex.json" \
-  --provenance-path "stampbot-${VERSION}.intoto.jsonl" \
-  --source-uri github.com/dannysauer/stampbot \
-  --source-tag "v${VERSION}"
+IMAGE=ghcr.io/dannysauer/stampbot
+DIGEST="$(crane digest "${IMAGE}:${APP_VERSION}")"
+printf '%s\n' "${IMAGE}@${DIGEST}"
 ```
 
-## Verify Container Image Digest
-
-Resolve the immutable GHCR image digest:
-
-```bash
-VERSION=1.2.3
-IMAGE="ghcr.io/dannysauer/stampbot"
-DIGEST="$(crane digest "${IMAGE}:${VERSION}")"
-echo "${IMAGE}@${DIGEST}"
-```
-
-The release workflow does not publish a standalone image signature. Verify the SBOM and
-VEX attestations attached to the image:
-
-```bash
-cosign verify-attestation "${IMAGE}@${DIGEST}" \
-  --type spdxjson \
-  --certificate-identity-regexp 'https://github.com/dannysauer/stampbot/.github/workflows/release.yml@refs/heads/main' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-
-cosign verify-attestation "${IMAGE}@${DIGEST}" \
-  --type openvex \
-  --certificate-identity-regexp 'https://github.com/dannysauer/stampbot/.github/workflows/release.yml@refs/heads/main' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-```
-
-Pin the digest in Helm values:
+Use that digest in Helm:
 
 ```yaml
 image:
   repository: ghcr.io/dannysauer/stampbot
-  digest: sha256:REPLACE_WITH_VERIFIED_DIGEST
+  digest: REPLACE_WITH_THE_RESOLVED_DIGEST
 ```
 
-When `image.digest` is set, the chart renders `repository@digest` and ignores
-`image.tag`.
+Replace `REPLACE_WITH_THE_RESOLVED_DIGEST` with the value printed above,
+including its `sha256:` prefix.
 
-## Download Chart Release Assets
+Pinning prevents a tag change from altering the deployed bytes. It doesn't, by
+itself, prove who built those bytes.
+
+## Understand the current image-verification gap
+
+As of 2026-07-14, `cosign tree ghcr.io/dannysauer/stampbot:1.11.0` reports no
+supply-chain security artifacts. The release also has no standalone image
+signature.
+
+The signed SBOM and OpenVEX blobs can be authenticated, but their blob
+signatures don't bind the GHCR digest to the release workflow. If your policy
+requires image identity or provenance, don't treat a digest pin as a substitute.
+Build from the tagged source in a trusted builder, or wait for a release that
+publishes a verifiable image signature or attestation.
+
+Check a newer image rather than assuming the gap remains:
 
 ```bash
-VERSION=1.2.3
-gh release download "chart-v${VERSION}" \
-  --repo dannysauer/stampbot \
-  --pattern "stampbot-${VERSION}.tgz*" \
-  --pattern "stampbot-chart-${VERSION}.intoto.jsonl"
+cosign tree "${IMAGE}:${APP_VERSION}"
 ```
 
-Chart release assets:
+## Verify the chart release blob
 
-| Asset | Purpose |
-| --- | --- |
-| `stampbot-VERSION.tgz` | Packaged Helm chart. |
-| `stampbot-VERSION.tgz.sigstore.json` | Sigstore bundle for the packaged chart. |
-| `stampbot-chart-VERSION.intoto.jsonl` | SLSA provenance for the packaged chart. |
-
-## Verify Chart Package
+Download the chart and its bundle:
 
 ```bash
-VERSION=1.2.3
+mkdir chart-release
+gh release download "chart-v${CHART_VERSION}" \
+  --repo "${REPOSITORY}" \
+  --dir chart-release \
+  --pattern "stampbot-${CHART_VERSION}.tgz*"
+```
 
+Verify it:
+
+```bash
 cosign verify-blob \
-  --bundle "stampbot-${VERSION}.tgz.sigstore.json" \
-  --certificate-identity-regexp 'https://github.com/dannysauer/stampbot/.github/workflows/.*@refs/heads/main' \
+  --bundle "chart-release/stampbot-${CHART_VERSION}.tgz.sigstore.json" \
+  --certificate-identity-regexp 'https://github.com/dannysauer/stampbot/.github/workflows/chart-release.yml@refs/heads/main' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  "stampbot-${VERSION}.tgz"
-
-slsa-verifier verify-artifact "stampbot-${VERSION}.tgz" \
-  --provenance-path "stampbot-chart-${VERSION}.intoto.jsonl" \
-  --source-uri github.com/dannysauer/stampbot \
-  --source-tag "chart-v${VERSION}"
+  "chart-release/stampbot-${CHART_VERSION}.tgz"
 ```
 
-Inspect the chart before installation:
+Inspect the package before installation:
 
 ```bash
-helm show chart "stampbot-${VERSION}.tgz"
-helm show values "stampbot-${VERSION}.tgz"
-helm template stampbot "stampbot-${VERSION}.tgz" \
+helm show chart "chart-release/stampbot-${CHART_VERSION}.tgz"
+helm show values "chart-release/stampbot-${CHART_VERSION}.tgz"
+helm template stampbot "chart-release/stampbot-${CHART_VERSION}.tgz" \
   --set github.existingSecret=stampbot-github
 ```
 
-## Verify OCI Chart Pull
+## Compare the OCI chart
+
+Pull the same version from GHCR:
 
 ```bash
-VERSION=1.2.3
+mkdir oci-chart
 helm pull oci://ghcr.io/dannysauer/charts/stampbot \
-  --version "${VERSION}"
-
-sha256sum "stampbot-${VERSION}.tgz"
+  --version "${CHART_VERSION}" \
+  --destination oci-chart
 ```
 
-Compare the downloaded package hash to the hash covered by the chart SLSA provenance.
+Compare the package hashes:
 
-## Verification Checklist
+```bash
+sha256sum \
+  "chart-release/stampbot-${CHART_VERSION}.tgz" \
+  "oci-chart/stampbot-${CHART_VERSION}.tgz"
+```
 
-- The GitHub release tag is the expected `vVERSION` or `chart-vVERSION`.
-- `cosign verify-blob` succeeds for downloaded release assets.
-- `slsa-verifier verify-artifact` succeeds against the matching source tag.
-- The GHCR image digest is recorded and used for deployment.
-- `cosign verify-attestation` succeeds for both `spdxjson` and `openvex`.
-- `helm template` renders with your production values before upgrade.
+Matching hashes extend the verified GitHub blob to the bytes pulled from the OCI
+registry. A mismatch means you must not install the OCI package as though it
+were the verified release asset.
+
+## Verify provenance only when it exists
+
+The example releases don't contain `stampbot-1.11.0.intoto.jsonl` or
+`stampbot-chart-0.13.3.intoto.jsonl`. The workflow source defines provenance
+jobs, but a workflow definition isn't an artifact.
+
+If a future app release lists a matching provenance file, download it and run:
+
+```bash
+slsa-verifier verify-artifact app-release/sbom.spdx.json \
+  --provenance-path "app-release/stampbot-${APP_VERSION}.intoto.jsonl" \
+  --source-uri github.com/dannysauer/stampbot \
+  --source-tag "v${APP_VERSION}"
+```
+
+For a future chart release:
+
+```bash
+slsa-verifier verify-artifact "chart-release/stampbot-${CHART_VERSION}.tgz" \
+  --provenance-path "chart-release/stampbot-chart-${CHART_VERSION}.intoto.jsonl" \
+  --source-uri github.com/dannysauer/stampbot \
+  --source-tag "chart-v${CHART_VERSION}"
+```
+
+Don't run these commands against a guessed filename. Confirm the provenance
+asset in the GitHub release first.
+
+## Record the decision
+
+Before promotion, record:
+
+- app and chart tags;
+- GitHub release URLs and publish times;
+- verified blob identities;
+- GHCR image digest;
+- OCI chart hash comparison;
+- image-signature or attestation result; and
+- any policy exception for missing image identity or provenance.
+
+That record says what you verified. It should also say what the release didn't
+make possible.
