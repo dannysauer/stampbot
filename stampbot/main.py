@@ -18,6 +18,7 @@ from fastapi.responses import (
     PlainTextResponse,
     RedirectResponse,
 )
+from starlette.routing import Match
 
 from stampbot.config import is_configured, settings
 from stampbot.github_client import _sanitize_error
@@ -53,6 +54,7 @@ APP_VERSION = "0.1.0"
 
 # Security limits
 MAX_WEBHOOK_BODY_SIZE = 1024 * 1024  # 1MB - GitHub webhooks are typically much smaller
+UNMATCHED_ENDPOINT = "unmatched"
 
 
 @asynccontextmanager
@@ -102,6 +104,41 @@ instrument_fastapi(app)
 set_app_info(APP_VERSION)
 
 
+def _metric_endpoint_label(request: Request) -> str:
+    """Return a bounded Prometheus endpoint label for a request.
+
+    Route templates are defined by the application, so labels such as
+    ``/widgets/{widget_id}`` have bounded cardinality even when the path
+    parameter is attacker controlled. Requests that do not match a registered
+    route share one fallback label instead of exposing their raw URL paths.
+
+    Args:
+        request: Incoming HTTP request.
+
+    Returns:
+        The matched route template or the unmatched-route fallback.
+    """
+    current_route = request.scope.get("route")
+    current_path = getattr(current_route, "path", None)
+    if isinstance(current_path, str):
+        return current_path
+
+    partial_match: str | None = None
+    for route in request.app.routes:
+        match, child_scope = route.matches(request.scope)
+        matched_route = child_scope.get("route", route)
+        route_path = getattr(matched_route, "path", None)
+        if not isinstance(route_path, str):
+            continue
+        if match is Match.FULL:
+            return route_path
+        if match is Match.PARTIAL and partial_match is None:
+            # A path match with the wrong method will become a 405 response.
+            partial_match = route_path
+
+    return partial_match or UNMATCHED_ENDPOINT
+
+
 @app.middleware("http")
 async def metrics_middleware(request: Request, call_next: Any) -> Response:
     """Middleware to track HTTP metrics.
@@ -114,7 +151,7 @@ async def metrics_middleware(request: Request, call_next: Any) -> Response:
         HTTP response from downstream handler.
     """
     method = request.method
-    endpoint = request.url.path
+    endpoint = _metric_endpoint_label(request)
 
     # Track in-progress requests
     http_requests_in_progress.labels(method=method, endpoint=endpoint).inc()

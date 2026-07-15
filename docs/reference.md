@@ -130,6 +130,13 @@ request.
 | `stampbot_repo_config_loads_total` | Counter | `status` | Policy loads: `found`, `default`, or `error`. |
 | `stampbot_errors_total` | Counter | `error_type` | Application error categories. |
 
+The HTTP metrics use the matched FastAPI route template for `endpoint` (for
+example, `/widgets/{widget_id}`), not the request's raw URL path. Requests that
+do not match a registered route share the `unmatched` label. For
+method-not-allowed responses, the label still uses the matching route template
+and the status is `405`. This keeps label cardinality bounded while preserving
+useful per-route signals.
+
 ## Client behavior
 
 GitHub requests use a 30-second timeout. The client configures up to three total
