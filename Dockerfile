@@ -8,7 +8,8 @@ WORKDIR /app
 # Copy dependency files for layer caching
 COPY constraints.txt requirements.txt ./
 
-# Install pinned pip first (CVE-2026-1703 fix), then dependencies
+# Install security-patched, pinned pip first, then dependencies. The runtime
+# stage copies this upgraded pip installation from the builder.
 RUN --mount=type=cache,target=/root/.cache/pip \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     pip install --no-cache-dir --require-hashes -r constraints.txt && \
