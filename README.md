@@ -22,6 +22,14 @@ trusted label or maintainer ChatOps command to satisfy pull request approval req
 It watches GitHub pull request webhooks, checks repository-specific policy, and creates or
 dismisses Stampbot's own pull request approval review.
 
+Stampbot's review can count toward the ordinary approval total, but GitHub cannot make the App
+a native `CODEOWNERS` owner. [Extra CODEOWNERS](https://github.com/stampbot/extra-codeowners)
+fills that gap. Keep people and teams in `CODEOWNERS`. Delegate named paths to Stampbot in
+Extra CODEOWNERS policy, then require the separate `Extra CODEOWNERS / approval` check.
+
+Before you replace GitHub's native code-owner rule, read the companion App's
+[current safety boundary](https://extra-codeowners.readthedocs.io/en/latest/reference/checks/#eventual-consistency).
+
 ## Features
 
 - **Label-based Auto-Approval**: Automatically approve PRs when specific labels are added
