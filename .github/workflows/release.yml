@@ -354,10 +354,13 @@ jobs:
   deploy-cloudrun:
     name: Deploy to Cloud Run
     needs: [determine-version, build-and-publish-image, publish-app-release]
-    if: needs.determine-version.outputs.should_release == 'true' && vars.GCP_SERVICE_ACCOUNT != ''
+    if: needs.determine-version.outputs.should_release == 'true' && vars.GOOGLE_PUBLISHING_ENABLED == '1'
     uses: ./.github/workflows/deploy-cloudrun.yml
     with:
       image_tag: ${{ needs.determine-version.outputs.version }}
+    secrets:
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
     permissions:
       contents: read
       id-token: write

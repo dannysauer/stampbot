@@ -13,7 +13,7 @@ You need:
 
 - a Google Cloud project with billing enabled;
 - `gcloud` authenticated as an administrator for that project;
-- admin access to this GitHub repository's Actions variables;
+- admin access to this GitHub repository's Actions secrets and variables;
 - Stampbot App ID, private key, and webhook secret; and
 - a published Stampbot image version.
 
@@ -23,7 +23,7 @@ Set the names used below:
 PROJECT_ID=example-project
 REGION=us-central1
 SERVICE_NAME=stampbot
-REPOSITORY=dannysauer/stampbot
+REPOSITORY=OWNER/REPOSITORY
 APP_VERSION=1.11.0
 DEPLOYER_NAME=github-actions-deployer
 RUNTIME_NAME=stampbot-runtime
@@ -114,19 +114,46 @@ gcloud iam service-accounts add-iam-policy-binding "${DEPLOYER_SA}" \
 The repository condition matters. A pool-wide grant would let unrelated
 identities in the pool attempt to use the deployer.
 
-## Set GitHub Actions variables
+## Configure GitHub Actions
 
-Open **Settings > Secrets and variables > Actions > Variables** in the GitHub
-repository.
+Keep publishing disabled while you configure and verify the deployment:
+
+```bash
+gh variable set GOOGLE_PUBLISHING_ENABLED \
+  --repo "${REPOSITORY}" \
+  --body 0
+```
+
+The gate is fail-closed. The release and manual deployment workflows run the
+Cloud Run deployment only when this variable is exactly `1`. An unset value or
+any other value, including `true`, leaves publishing disabled.
+
+Open **Settings > Secrets and variables > Actions > Secrets** in the GitHub
+repository and create these repository secrets:
+
+| Secret | Value |
+| --- | --- |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | The Workload Identity provider's full resource name |
+| `GCP_SERVICE_ACCOUNT` | The deployer service account identity |
+
+Treat both values as sensitive operational identifiers. Do not put their
+values in issues, pull requests, workflow logs, or documentation. If you use
+the GitHub CLI, `gh secret set SECRET_NAME --repo "${REPOSITORY}"` prompts for a
+value without placing it on the command line.
+
+Open **Settings > Secrets and variables > Actions > Variables** and create or
+update these repository variables:
 
 | Variable | Value |
 | --- | --- |
-| `GCP_WORKLOAD_IDENTITY_PROVIDER` | `projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github-pool/providers/github-provider` |
-| `GCP_SERVICE_ACCOUNT` | The value of `DEPLOYER_SA` |
+| `GOOGLE_PUBLISHING_ENABLED` | `0` while disabled; change to `1` only after verification |
 | `CLOUDRUN_REGION` | The value of `REGION`; optional, defaults to `us-central1` |
 | `CLOUDRUN_SERVICE_NAME` | The value of `SERVICE_NAME`; optional, defaults to `stampbot` |
 
-Replace `PROJECT_NUMBER` in the provider value with the numeric project number.
+GitHub keeps repository secrets associated with a transferred repository, but
+Google federation conditions based on the `owner/repository` claim do not
+follow GitHub redirects. Keep publishing disabled during a transfer, update
+the external federation trust, and verify it before enabling publishing again.
 
 ## Store runtime credentials
 
@@ -198,7 +225,32 @@ custom domain, update both the App and `STAMPBOT_BASE_URL`.
 
 ## Test the deployment workflow
 
-Trigger the checked-in workflow with the same image version:
+First, verify the fail-closed gate while `GOOGLE_PUBLISHING_ENABLED` is `0`:
+
+```bash
+gh workflow run deploy-cloudrun.yml \
+  --repo "${REPOSITORY}" \
+  --field image_tag="${APP_VERSION}"
+```
+
+The workflow run should show the `Deploy to Cloud Run` job as skipped. No
+Google authentication or deployment step should run.
+
+When billing, federation, secrets, and the initial service configuration have
+all been approved and verified, enable publishing:
+
+```bash
+gh variable set GOOGLE_PUBLISHING_ENABLED \
+  --repo "${REPOSITORY}" \
+  --body 1
+
+test "$(gh variable get GOOGLE_PUBLISHING_ENABLED \
+  --repo "${REPOSITORY}" \
+  --json value \
+  --jq .value)" = 1
+```
+
+Trigger the checked-in workflow again with the same image version:
 
 ```bash
 gh workflow run deploy-cloudrun.yml \
@@ -209,6 +261,9 @@ gh workflow run deploy-cloudrun.yml \
 The workflow authenticates through federation and deploys
 `docker.io/stampbot/stampbot:APP_VERSION`. It doesn't rewrite the service's
 secret, runtime-account, or environment configuration.
+
+To disable publishing again, set `GOOGLE_PUBLISHING_ENABLED` back to `0`. The
+gate applies to automatic releases, manual runs, and reusable-workflow calls.
 
 ## Verify the service
 
