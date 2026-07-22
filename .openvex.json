@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
   "author": "Danny Sauer <github@dannysauer.com>",
-  "timestamp": "2026-07-15T11:22:38Z",
-  "version": 41,
+  "timestamp": "2026-07-22T11:42:04Z",
+  "version": 42,
   "statements": [
     {
       "vulnerability": {
@@ -613,6 +613,21 @@
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
       "impact_statement": "The assessed Debian runtime image includes perl-base 5.40.1-6, but Stampbot's Python application and entrypoints do not invoke Perl or call Perl pack or unpack. The affected S_measure_struct path is therefore not in Stampbot's execution path."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-57433",
+        "name": "CVE-2026-57433",
+        "description": "Storable versions before 3.41 for Perl have a signed integer overflow  ..."
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/perl-base"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The assessed Debian runtime image includes perl-base 5.40.1-6, but Stampbot's container entrypoint, health check, and application code do not invoke Perl or the Storable module. CVE-2026-57433 requires a crafted blob to reach Storable thaw or retrieve, and no identified Stampbot execution path reaches those functions."
     }
   ]
 }
