@@ -105,8 +105,8 @@ GitHub sends a signed webhook. Stampbot verifies the signature before parsing
 the body, loads policy from GitHub, and acts through the App installation that
 received the event. GitHub remains the source of truth for review state.
 
-Stampbot is not a native code owner. GitHub Apps can't appear in `CODEOWNERS`.
-For path-level bot ownership, use
+Stampbot is not a native code owner. GitHub does not treat an App's bot account
+as a valid `CODEOWNERS` owner. For path-level bot ownership, use
 [Extra CODEOWNERS](https://github.com/stampbot/extra-codeowners) and read its
 [safety boundary](https://extra-codeowners.readthedocs.io/en/latest/reference/checks/#eventual-consistency)
 before replacing GitHub's native code-owner review rule.
