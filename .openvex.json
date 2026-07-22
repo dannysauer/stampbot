@@ -626,8 +626,8 @@
         }
       ],
       "status": "not_affected",
-      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
-      "impact_statement": "The vulnerability in the Storable module affects deserialization of crafted SX_HOOK records. However, the application does not process untrusted input, does not deserialize user-provided data, and does not use the Storable module in a way that could be influenced by an adversary. Therefore, the vulnerability is not exploitable in this context."
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The assessed Debian runtime image includes perl-base 5.40.1-6, but Stampbot's container entrypoint, health check, and application code do not invoke Perl or the Storable module. CVE-2026-57433 requires a crafted blob to reach Storable thaw or retrieve, and no identified Stampbot execution path reaches those functions."
     }
   ]
 }
