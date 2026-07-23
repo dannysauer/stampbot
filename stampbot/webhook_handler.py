@@ -739,6 +739,7 @@ class WebhookHandler:
                         org_repo_full_name,
                         "stampbot.toml",
                         None,
+                        missing_repository_is_optional=True,
                     )
                     if org_content:
                         return self._parse_repo_config(

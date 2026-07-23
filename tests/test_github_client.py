@@ -779,8 +779,58 @@ class TestGetRepoFile:
 
             assert error.value is first
 
+    def test_get_repo_file_propagates_bad_ref_not_found(self):
+        """Test a missing target ref cannot look like an absent policy file."""
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth"),
+            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
+            patch("stampbot.github_client.Github") as mock_github_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            mock_integration = Mock()
+            mock_token = Mock()
+            mock_token.token = TEST_TOKEN
+            mock_integration.get_access_token.return_value = mock_token
+            mock_integration_cls.return_value = mock_integration
+
+            first = GithubException(404, {"message": "Not Found"}, None)
+            mock_repo = Mock()
+            mock_repo.get_contents.side_effect = [
+                first,
+                GithubException(404, {"message": "Not Found"}, None),
+            ]
+            mock_github = Mock()
+            mock_github.get_repo.return_value = mock_repo
+            mock_github_cls.return_value = mock_github
+
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+            with pytest.raises(GithubException) as error:
+                client.get_repo_file(
+                    123456,
+                    "owner/repo",
+                    "stampbot.toml",
+                    ref="deleted-branch",
+                )
+
+            assert error.value is first
+            assert mock_repo.get_contents.call_args_list == [
+                call("stampbot.toml", ref="deleted-branch"),
+                call("", ref="deleted-branch"),
+            ]
+
     def test_get_repo_file_propagates_repository_not_found(self):
-        """Test a repository-level 404 never becomes a missing policy file."""
+        """Test a missing or inaccessible target repo never becomes missing policy."""
         with (
             patch("stampbot.github_client.is_configured", return_value=True),
             patch("stampbot.github_client.settings") as mock_settings,
@@ -814,6 +864,126 @@ class TestGetRepoFile:
                 client.get_repo_file(123456, "owner/repo", "stampbot.toml")
 
             assert error.value is failure
+
+    def test_get_repo_file_accepts_missing_optional_repository(self):
+        """Test an optional fallback repository may be absent from an installation."""
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth"),
+            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
+            patch("stampbot.github_client.Github") as mock_github_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            mock_integration = Mock()
+            mock_token = Mock()
+            mock_token.token = TEST_TOKEN
+            mock_integration.get_access_token.return_value = mock_token
+            mock_integration_cls.return_value = mock_integration
+
+            failure = GithubException(404, {"message": "Not Found"}, None)
+            mock_github = Mock()
+            mock_github.get_repo.side_effect = failure
+            mock_github_cls.return_value = mock_github
+
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+            result = client.get_repo_file(
+                123456,
+                "owner/.github",
+                "stampbot.toml",
+                missing_repository_is_optional=True,
+            )
+
+            assert result is None
+
+    def test_optional_repository_does_not_hide_token_exchange_not_found(self):
+        """Test optional scope begins only after Stampbot gets an installation client."""
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth"),
+            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            failure = GithubException(404, {"message": "Not Found"}, None)
+            mock_integration = Mock()
+            mock_integration.get_access_token.side_effect = failure
+            mock_integration_cls.return_value = mock_integration
+
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+            with pytest.raises(GithubException) as error:
+                client.get_repo_file(
+                    123456,
+                    "owner/.github",
+                    "stampbot.toml",
+                    missing_repository_is_optional=True,
+                )
+
+            assert error.value is failure
+
+    def test_optional_repository_does_not_hide_unconfirmed_file_not_found(self):
+        """Test optional scope does not weaken policy-file read failures."""
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth"),
+            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
+            patch("stampbot.github_client.Github") as mock_github_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            mock_integration = Mock()
+            mock_token = Mock()
+            mock_token.token = TEST_TOKEN
+            mock_integration.get_access_token.return_value = mock_token
+            mock_integration_cls.return_value = mock_integration
+
+            first = GithubException(404, {"message": "Not Found"}, None)
+            mock_repo = Mock()
+            mock_repo.get_contents.side_effect = [
+                first,
+                GithubException(404, {"message": "Not Found"}, None),
+            ]
+            mock_github = Mock()
+            mock_github.get_repo.return_value = mock_repo
+            mock_github_cls.return_value = mock_github
+
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+            with pytest.raises(GithubException) as error:
+                client.get_repo_file(
+                    123456,
+                    "owner/.github",
+                    "stampbot.toml",
+                    missing_repository_is_optional=True,
+                )
+
+            assert error.value is first
 
     @pytest.mark.parametrize(
         "failure",

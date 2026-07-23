@@ -123,7 +123,9 @@ class RepoConfig:
         self.auto_approve_on_label = auto_approve_on_label
         self.reapprove = reapprove
         self.chatops_enabled = chatops_enabled
-        self.chatops_required_permission = chatops_required_permission
+        self.chatops_required_permission = self._validate_required_permission(
+            chatops_required_permission
+        )
         self.approve_commands = self._validate_command_list(
             approve_commands,
             "approve_commands",
@@ -159,6 +161,27 @@ class RepoConfig:
         if any(not isinstance(command, str) for command in commands):
             raise ValueError(f"{setting} must contain only strings")
         return list(commands)
+
+    @staticmethod
+    def _validate_required_permission(permission: object) -> str:
+        """Require the ChatOps permission threshold to be a supported value.
+
+        Args:
+            permission: Parsed application or repository setting.
+
+        Returns:
+            The validated permission name.
+
+        Raises:
+            ValueError: If the permission is not one of GitHub's repository levels.
+        """
+        if not isinstance(permission, str) or permission not in REPO_PERMISSION_LEVELS:
+            raise ValueError(
+                "Invalid chatops_required_permission: "
+                f"{permission}. "
+                f"Valid values: {', '.join(REPO_PERMISSION_LEVELS)}"
+            )
+        return permission
 
     @staticmethod
     def _compile_title_patterns(patterns: list[str]) -> list[Any]:
@@ -374,14 +397,6 @@ class RepoConfig:
         # Merge: repo settings override defaults
         merged = {**defaults, **repo_settings}
 
-        required_permission = merged.get("chatops_required_permission", "maintain")
-        if required_permission not in REPO_PERMISSION_LEVELS:
-            raise ValueError(
-                "Invalid chatops_required_permission: "
-                f"{required_permission}. "
-                f"Valid values: {', '.join(REPO_PERMISSION_LEVELS)}"
-            )
-
         title_patterns = merged.get("required_title_patterns", [])
 
         return cls(
@@ -389,7 +404,10 @@ class RepoConfig:
             auto_approve_on_label=merged.get("auto_approve_on_label", True),
             reapprove=merged.get("reapprove", False),
             chatops_enabled=merged.get("chatops_enabled", True),
-            chatops_required_permission=required_permission,
+            chatops_required_permission=merged.get(
+                "chatops_required_permission",
+                "maintain",
+            ),
             approve_commands=merged.get("approve_commands", ["approve", "stamp"]),
             unapprove_commands=merged.get("unapprove_commands", ["unapprove", "unstamp"]),
             required_labels=merged.get("required_labels", []),

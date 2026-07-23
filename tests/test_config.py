@@ -82,10 +82,20 @@ def test_repo_config_default_or_config_error_preserves_valid_defaults():
     [
         ("approve_commands", "approve", "must be a list of strings"),
         ("unapprove_commands", ["unapprove", 1], "must contain only strings"),
+        (
+            "chatops_required_permission",
+            "owner",
+            "Invalid chatops_required_permission",
+        ),
+        (
+            "chatops_required_permission",
+            ["maintain"],
+            "Invalid chatops_required_permission",
+        ),
     ],
 )
 def test_repo_config_default_or_config_error_fails_closed(setting, value, message):
-    """Test invalid command defaults produce a non-authorizing config."""
+    """Test invalid service defaults produce a non-authorizing config."""
     service_defaults = MagicMock(spec=[setting])
     setattr(service_defaults, setting, value)
 

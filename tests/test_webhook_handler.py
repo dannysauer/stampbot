@@ -6,6 +6,7 @@ import time
 from unittest.mock import MagicMock, patch
 
 import pytest
+from github.GithubException import GithubException
 
 from tests.conftest import load_fixture
 
@@ -700,10 +701,19 @@ async def test_org_github_repo_config_fallback(webhook_handler, mock_github_clie
     payload["repository"]["owner"] = {"login": "acme", "type": "Organization"}
     payload["pull_request"]["labels"] = [{"name": "org-approve"}]
 
-    def get_repo_file_side_effect(_installation_id, repo_full_name, _file_path, _ref):
+    def get_repo_file_side_effect(
+        _installation_id,
+        repo_full_name,
+        _file_path,
+        _ref,
+        *,
+        missing_repository_is_optional=False,
+    ):
         if repo_full_name == "acme/widgets":
+            assert missing_repository_is_optional is False
             return None
         if repo_full_name == "acme/.github":
+            assert missing_repository_is_optional is True
             return 'approval_labels = ["org-approve"]'
         return None
 
@@ -727,8 +737,16 @@ async def test_org_github_repo_config_missing_uses_defaults(webhook_handler, moc
     payload["repository"]["default_branch"] = "main"
     payload["repository"]["owner"] = {"login": "acme", "type": "Organization"}
 
-    def get_repo_file_side_effect(_installation_id, repo_full_name, _file_path, _ref):
+    def get_repo_file_side_effect(
+        _installation_id,
+        repo_full_name,
+        _file_path,
+        _ref,
+        *,
+        missing_repository_is_optional=False,
+    ):
         if repo_full_name in ("acme/widgets", "acme/.github"):
+            assert missing_repository_is_optional is (repo_full_name == "acme/.github")
             return None
         return None
 
@@ -741,6 +759,64 @@ async def test_org_github_repo_config_missing_uses_defaults(webhook_handler, moc
         call_args[0][1] == "acme/.github" and call_args[0][3] is None
         for call_args in mock_github_client.get_repo_file.call_args_list
     )
+
+
+@pytest.mark.asyncio
+async def test_target_repo_not_found_fails_closed(webhook_handler, mock_github_client):
+    """Test a target-repository 404 never advances to service defaults."""
+    payload = load_fixture("pr_opened_with_autoapprove_label")
+    mock_github_client.get_repo_file.side_effect = GithubException(
+        404,
+        {"message": "Not Found"},
+        None,
+    )
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result == {"status": "error", "message": "Invalid repository configuration"}
+    mock_github_client.approve_pr.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        GithubException(403, {"message": "Forbidden"}, None),
+        GithubException(500, {"message": "Server Error"}, None),
+        TimeoutError("GitHub read timed out"),
+    ],
+)
+async def test_org_policy_read_failure_fails_closed(
+    webhook_handler,
+    mock_github_client,
+    failure,
+):
+    """Test only a missing optional organization repository permits defaults."""
+    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload["repository"]["full_name"] = "acme/widgets"
+    payload["repository"]["owner"] = {"login": "acme", "type": "Organization"}
+
+    def get_repo_file_side_effect(
+        _installation_id,
+        repo_full_name,
+        _file_path,
+        _ref,
+        *,
+        missing_repository_is_optional=False,
+    ):
+        if repo_full_name == "acme/widgets":
+            assert missing_repository_is_optional is False
+            return None
+        assert repo_full_name == "acme/.github"
+        assert missing_repository_is_optional is True
+        raise failure
+
+    mock_github_client.get_repo_file.side_effect = get_repo_file_side_effect
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result == {"status": "error", "message": "Invalid repository configuration"}
+    mock_github_client.approve_pr.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -762,6 +838,29 @@ async def test_missing_repo_config_with_invalid_service_defaults_fails_closed(
     review_body = mock_github_client.create_pr_review_comment.call_args.args[3]
     assert "Invalid service default configuration" in review_body
     assert "approve_commands must be a list of strings" in review_body
+    mock_github_client.approve_pr.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_invalid_service_default_permission_fails_closed(
+    webhook_handler,
+    mock_github_client,
+):
+    """Test an unknown service-wide ChatOps permission blocks automation."""
+    payload = load_fixture("pr_opened_with_autoapprove_label")
+    service_defaults = MagicMock(spec=["chatops_required_permission"])
+    service_defaults.chatops_required_permission = "owner"
+
+    with patch("stampbot.config.settings") as mock_settings:
+        mock_settings.get.return_value = service_defaults
+        mock_settings.defaults = service_defaults
+
+        result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result == {"status": "error", "message": "Invalid repository configuration"}
+    review_body = mock_github_client.create_pr_review_comment.call_args.args[3]
+    assert "Invalid service default configuration" in review_body
+    assert "Invalid chatops_required_permission" in review_body
     mock_github_client.approve_pr.assert_not_called()
 
 
