@@ -161,12 +161,17 @@ repository permission.
 
 ## Missing and invalid policy
 
-An absent policy file moves lookup to the next source. A GitHub read failure
-also falls back to the service defaults and increments the configuration-load
-error metric.
+An absent policy file moves lookup to the next source. The `OWNER/.github`
+repository is optional: when it doesn't exist or the App installation doesn't
+include it, GitHub returns a repository-level `404` and Stampbot uses service
+defaults.
 
-Readable but invalid policy fails closed for that event. On a newly opened pull
-request, Stampbot leaves a review comment with the validation error. Other pull
+A failure reading the target repository's policy stops automation for that
+event. Once GitHub makes the organization repository available to the App, a
+failure reading its policy does too. A readable but invalid policy also stops
+automation. Each failure increments the configuration-load error metric. On a
+newly opened pull request, Stampbot leaves a review comment: validation failures
+name the invalid setting, while read failures use a generic message. Other pull
 request and ChatOps events return an error without changing a review.
 
 A title-pattern timeout is different: the policy parsed successfully, but that
@@ -177,7 +182,7 @@ pull request is ineligible. Stampbot creates no approval.
 | Permission | Level | Used for | Failure behavior |
 | --- | --- | --- | --- |
 | Pull requests | Read and write | Read state, create reviews, and dismiss Stampbot reviews. | Review lookup, approval, or dismissal fails. |
-| Contents | Read-only | Read repository and organization policy. | Stampbot tries the next policy source. |
+| Contents | Read-only | Read repository and organization policy. | A missing file advances lookup. An unavailable optional `OWNER/.github` repository advances to service defaults. Other read failures stop automation for the event. |
 | Metadata | Read-only | Read required repository metadata. | The installation can't operate normally. |
 | Issues | Read-only | Receive and inspect pull request issue comments. | Issue-comment ChatOps is unavailable. |
 | Members | Read-only | Check organization team membership. | Team filters find no match. |

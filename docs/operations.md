@@ -140,8 +140,15 @@ print("stampbot.toml is valid")
 PY
 ```
 
-A GitHub read failure uses service defaults and records a policy-load error. A
-readable but invalid file stops automation for that event.
+A missing policy file moves lookup to the next source. GitHub also returns a
+repository-level `404` when `OWNER/.github` doesn't exist or the App installation
+doesn't include it. Stampbot treats that optional repository as unavailable and
+uses service defaults.
+
+A failure reading the target repository's policy stops automation for that
+event. Once GitHub makes the organization repository available to the App, a
+failure reading its policy does too. A readable but invalid file also stops
+automation. Stampbot records these failures as policy-load errors.
 
 ## Diagnose label approval
 

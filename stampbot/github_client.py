@@ -11,7 +11,9 @@ from pathlib import Path
 from typing import TypedDict
 
 from github import Auth, Github, GithubIntegration
+from github.ContentFile import ContentFile
 from github.GithubException import GithubException
+from github.Repository import Repository
 from urllib3.util.retry import Retry
 
 from stampbot.config import is_configured, settings
@@ -55,6 +57,26 @@ def _sanitize_error(error: Exception) -> str:
     """
     error_str = str(error)
     return _TOKEN_PATTERN.sub("[REDACTED]", error_str)
+
+
+def _get_repo_contents(
+    repo: Repository,
+    path: str,
+    ref: str | None,
+) -> list[ContentFile] | ContentFile:
+    """Call PyGithub without passing ``None`` as an explicit Git ref."""
+    if ref is None:
+        return repo.get_contents(path)
+    return repo.get_contents(path, ref=ref)
+
+
+def _can_read_repo_root(repo: Repository, ref: str | None) -> bool:
+    """Confirm that a file 404 did not conceal a repository, auth, or ref failure."""
+    try:
+        root = _get_repo_contents(repo, "", ref)
+    except Exception:
+        return False
+    return isinstance(root, list)
 
 
 class GitHubAppClient:
@@ -452,6 +474,8 @@ class GitHubAppClient:
         repo_full_name: str,
         file_path: str,
         ref: str | None = None,
+        *,
+        missing_repository_is_optional: bool = False,
     ) -> str | None:
         """Get file content from repository.
 
@@ -460,11 +484,15 @@ class GitHubAppClient:
             repo_full_name: Repository full name (owner/repo)
             file_path: Path to file in repository
             ref: Git reference (branch, tag, commit). Defaults to default branch
+            missing_repository_is_optional: Treat a repository-level 404 as not
+                found. This is only for optional fallback repositories.
 
         Returns:
             File content as string, or None if not found
         """
         start_time = time.time()
+        repo: Repository | None = None
+        repository_lookup_started = False
 
         with create_span(
             "github.get_file",
@@ -477,9 +505,10 @@ class GitHubAppClient:
         ) as span:
             try:
                 client = self._get_installation_client(installation_id)
+                repository_lookup_started = True
                 repo = client.get_repo(repo_full_name)
 
-                content = repo.get_contents(file_path, ref=ref)  # type: ignore[arg-type]
+                content = _get_repo_contents(repo, file_path, ref)
                 if isinstance(content, list):
                     duration = time.time() - start_time
                     github_api_request_duration_seconds.labels(operation="get_file").observe(
@@ -501,23 +530,81 @@ class GitHubAppClient:
 
                 return content.decoded_content.decode("utf-8")
 
-            except Exception as e:
+            except GithubException as e:
                 duration = time.time() - start_time
                 github_api_request_duration_seconds.labels(operation="get_file").observe(duration)
-                github_api_requests_total.labels(operation="get_file", status="not_found").inc()
+                repository_is_optionally_missing = (
+                    e.status == 404
+                    and repository_lookup_started
+                    and repo is None
+                    and missing_repository_is_optional
+                )
+                file_is_confirmed_missing = (
+                    e.status == 404 and repo is not None and _can_read_repo_root(repo, ref)
+                )
+                if repository_is_optionally_missing or file_is_confirmed_missing:
+                    github_api_requests_total.labels(operation="get_file", status="not_found").inc()
 
-                add_span_attributes(span, {"github.result": "not_found"})
-                set_span_ok(span)  # Not finding a file is not an error
+                    add_span_attributes(span, {"github.result": "not_found"})
+                    set_span_ok(span)
 
-                logger.debug(
-                    f"Could not fetch {file_path} from {repo_full_name}: {_sanitize_error(e)}",
+                    if repository_is_optionally_missing:
+                        logger.debug(
+                            "Optional policy repository %s was not found",
+                            repo_full_name,
+                            extra={
+                                "repo": repo_full_name,
+                                "file_path": file_path,
+                                "installation_id": installation_id,
+                            },
+                        )
+                    else:
+                        logger.debug(
+                            "Policy file %s was not found in %s",
+                            file_path,
+                            repo_full_name,
+                            extra={
+                                "repo": repo_full_name,
+                                "file_path": file_path,
+                                "installation_id": installation_id,
+                            },
+                        )
+                    return None
+
+                github_api_requests_total.labels(operation="get_file", status="error").inc()
+                add_span_attributes(span, {"github.result": "error"})
+                set_span_error(span, e)
+                logger.warning(
+                    "GitHub could not read %s from %s (status %s)",
+                    file_path,
+                    repo_full_name,
+                    e.status,
                     extra={
                         "repo": repo_full_name,
                         "file_path": file_path,
                         "installation_id": installation_id,
                     },
                 )
-                return None
+                raise
+
+            except Exception as e:
+                duration = time.time() - start_time
+                github_api_request_duration_seconds.labels(operation="get_file").observe(duration)
+                github_api_requests_total.labels(operation="get_file", status="error").inc()
+                add_span_attributes(span, {"github.result": "error"})
+                set_span_error(span, e)
+                logger.warning(
+                    "GitHub could not read %s from %s (%s)",
+                    file_path,
+                    repo_full_name,
+                    type(e).__name__,
+                    extra={
+                        "repo": repo_full_name,
+                        "file_path": file_path,
+                        "installation_id": installation_id,
+                    },
+                )
+                raise
 
     def find_bot_reviews(
         self,

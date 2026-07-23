@@ -83,15 +83,16 @@ For every event, Stampbot looks for policy in this order:
    repositories; and
 3. defaults from the running service.
 
-The first file wins. Repository and organization files are not merged.
+The first file wins. Repository and organization files are not merged. A
+missing file moves lookup to the next source.
 
-A missing file moves lookup to the next source. A GitHub read failure currently
-falls back to service defaults and records a load error. A readable but invalid
-file stops automation for that event.
-
-That distinction is historical and visible, not magical. Operators who need a
-strict fallback should choose conservative service defaults and alert on
-`stampbot_repo_config_loads_total{status="error"}`.
+The organization repository is optional. GitHub returns a repository-level
+`404` when `OWNER/.github` doesn't exist or the App installation doesn't include
+it; Stampbot continues to service defaults in either case. A failure reading
+the target repository's policy stops automation for that event. Once GitHub
+makes the organization repository available to the App, a failure reading its
+policy does too. A readable but invalid file also stops automation. Operators
+should alert on `stampbot_repo_config_loads_total{status="error"}`.
 
 Repository title patterns cross a smaller boundary inside this flow. A
 maintainer supplies the expression, while any pull request author may supply

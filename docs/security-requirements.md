@@ -36,13 +36,17 @@ GitHub branch rules remain the final enforcement boundary.
 - Treat user and team allowlists as alternatives within the author category.
 - Keep ChatOps authorization separate from label-driven filters.
 - Stop automation for readable but invalid TOML.
+- Stop automation when GitHub cannot complete a target-repository policy read.
+- Stop automation when GitHub exposes a fallback repository but cannot complete
+  its policy read.
 - Reject unknown permission names and invalid command lists.
 - Bound title length, pattern count, pattern length, and match time.
 - Run title matching outside the asyncio event loop.
 - Reject the event when matching times out or the regex engine fails.
 
-A GitHub policy-read failure may use service defaults only while that behavior
-remains documented and visible in logs and metrics.
+Service defaults may apply after GitHub finds no applicable policy file. They
+also apply when the optional `OWNER/.github` repository doesn't exist or isn't
+part of the App installation.
 
 ## Protect credentials and setup
 

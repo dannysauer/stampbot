@@ -123,9 +123,17 @@ class RepoConfig:
         self.auto_approve_on_label = auto_approve_on_label
         self.reapprove = reapprove
         self.chatops_enabled = chatops_enabled
-        self.chatops_required_permission = chatops_required_permission
-        self.approve_commands = approve_commands
-        self.unapprove_commands = unapprove_commands
+        self.chatops_required_permission = self._validate_required_permission(
+            chatops_required_permission
+        )
+        self.approve_commands = self._validate_command_list(
+            approve_commands,
+            "approve_commands",
+        )
+        self.unapprove_commands = self._validate_command_list(
+            unapprove_commands,
+            "unapprove_commands",
+        )
         self.required_labels = required_labels or []
         title_patterns = required_title_patterns if required_title_patterns is not None else []
         self._compiled_title_patterns = self._compile_title_patterns(title_patterns)
@@ -133,6 +141,47 @@ class RepoConfig:
         self.allowed_users = allowed_users or []
         self.allowed_teams = allowed_teams or []
         self.config_error = config_error
+
+    @staticmethod
+    def _validate_command_list(commands: object, setting: str) -> list[str]:
+        """Require one command setting to be a list containing only strings.
+
+        Args:
+            commands: Parsed application or repository setting.
+            setting: Setting name used in the validation error.
+
+        Returns:
+            A detached copy of the validated command list.
+
+        Raises:
+            ValueError: If the setting is not a list of strings.
+        """
+        if not isinstance(commands, list):
+            raise ValueError(f"{setting} must be a list of strings")
+        if any(not isinstance(command, str) for command in commands):
+            raise ValueError(f"{setting} must contain only strings")
+        return list(commands)
+
+    @staticmethod
+    def _validate_required_permission(permission: object) -> str:
+        """Require the ChatOps permission threshold to be a supported value.
+
+        Args:
+            permission: Parsed application or repository setting.
+
+        Returns:
+            The validated permission name.
+
+        Raises:
+            ValueError: If the permission is not one of GitHub's repository levels.
+        """
+        if not isinstance(permission, str) or permission not in REPO_PERMISSION_LEVELS:
+            raise ValueError(
+                "Invalid chatops_required_permission: "
+                f"{permission}. "
+                f"Valid values: {', '.join(REPO_PERMISSION_LEVELS)}"
+            )
+        return permission
 
     @staticmethod
     def _compile_title_patterns(patterns: list[str]) -> list[Any]:
@@ -171,17 +220,34 @@ class RepoConfig:
 
         return compiled_patterns
 
-    def with_config_error(self, message: str) -> RepoConfig:
-        """Attach a config error to the repo config.
+    @classmethod
+    def fail_closed(cls, message: str) -> RepoConfig:
+        """Return a valid config object that cannot authorize automation.
+
+        This fallback deliberately uses code-defined values rather than
+        application settings. The attached config error causes webhook
+        handlers to stop before evaluating any of the policy fields.
 
         Args:
-            message: Error message to attach
+            message: Configuration error that caused the fallback.
 
         Returns:
-            RepoConfig with config_error set
+            Structurally valid built-in configuration with config_error set.
         """
-        self.config_error = message
-        return self
+        return cls(
+            approval_labels=["autoapprove", "stamp"],
+            auto_approve_on_label=True,
+            reapprove=False,
+            chatops_enabled=True,
+            chatops_required_permission="maintain",
+            approve_commands=["approve", "stamp"],
+            unapprove_commands=["unapprove", "unstamp"],
+            required_labels=[],
+            required_title_patterns=[],
+            allowed_users=[],
+            allowed_teams=[],
+            config_error=message or "Invalid configuration",
+        )
 
     def is_pr_eligible(
         self,
@@ -331,14 +397,6 @@ class RepoConfig:
         # Merge: repo settings override defaults
         merged = {**defaults, **repo_settings}
 
-        required_permission = merged.get("chatops_required_permission", "maintain")
-        if required_permission not in REPO_PERMISSION_LEVELS:
-            raise ValueError(
-                "Invalid chatops_required_permission: "
-                f"{required_permission}. "
-                f"Valid values: {', '.join(REPO_PERMISSION_LEVELS)}"
-            )
-
         title_patterns = merged.get("required_title_patterns", [])
 
         return cls(
@@ -346,7 +404,10 @@ class RepoConfig:
             auto_approve_on_label=merged.get("auto_approve_on_label", True),
             reapprove=merged.get("reapprove", False),
             chatops_enabled=merged.get("chatops_enabled", True),
-            chatops_required_permission=required_permission,
+            chatops_required_permission=merged.get(
+                "chatops_required_permission",
+                "maintain",
+            ),
             approve_commands=merged.get("approve_commands", ["approve", "stamp"]),
             unapprove_commands=merged.get("unapprove_commands", ["unapprove", "unstamp"]),
             required_labels=merged.get("required_labels", []),
@@ -376,3 +437,15 @@ class RepoConfig:
             allowed_users=defaults["allowed_users"],
             allowed_teams=defaults["allowed_teams"],
         )
+
+    @classmethod
+    def default_or_config_error(cls) -> RepoConfig:
+        """Return configured defaults, failing closed if they are invalid.
+
+        Returns:
+            Configured defaults, or a built-in config carrying config_error.
+        """
+        try:
+            return cls.default()
+        except ValueError as e:
+            return cls.fail_closed(f"Invalid service default configuration: {e}")

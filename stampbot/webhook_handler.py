@@ -177,7 +177,7 @@ class WebhookHandler:
 
             if repo_config.config_error:
                 logger.warning(
-                    "Invalid stampbot.toml in %s: %s",
+                    "Invalid Stampbot configuration for %s: %s",
                     repo_full_name,
                     repo_config.config_error,
                     extra={"repo": repo_full_name, "error": repo_config.config_error},
@@ -197,9 +197,9 @@ class WebhookHandler:
                         repo_full_name,
                         pr_number,
                         (
-                            "Stampbot configuration error in `stampbot.toml`:\n\n"
+                            "Stampbot configuration error:\n\n"
                             f"{repo_config.config_error}\n\n"
-                            "Please fix the file to re-enable automation."
+                            "Please fix the configuration to re-enable automation."
                         ),
                     )
 
@@ -739,11 +739,33 @@ class WebhookHandler:
                         org_repo_full_name,
                         "stampbot.toml",
                         None,
+                        missing_repository_is_optional=True,
                     )
                     if org_content:
                         return self._parse_repo_config(
                             span, org_content, source_repo=org_repo_full_name
                         )
+
+                repo_config = RepoConfig.default_or_config_error()
+                if repo_config.config_error:
+                    error = ValueError(repo_config.config_error)
+                    repo_config_loads_total.labels(status="error").inc()
+                    logger.warning(
+                        "Invalid service default configuration for %s: %s",
+                        repo_full_name,
+                        repo_config.config_error,
+                        extra={"repo": repo_full_name, "error": repo_config.config_error},
+                    )
+                    add_span_attributes(
+                        span,
+                        {
+                            "config.result": "error",
+                            "config.error": repo_config.config_error,
+                            "config.source_repo": "service_defaults",
+                        },
+                    )
+                    set_span_error(span, error)
+                    return repo_config
 
                 repo_config_loads_total.labels(status="default").inc()
                 logger.info(
@@ -754,19 +776,21 @@ class WebhookHandler:
                 )
                 add_span_attributes(span, {"config.result": "default"})
                 set_span_ok(span)
-                return RepoConfig.default()
+                return repo_config
 
             except Exception as e:
                 repo_config_loads_total.labels(status="error").inc()
                 logger.warning(
-                    "Error loading config from %s: %s, using defaults",
+                    "Error loading config from %s: %s, disabling automation",
                     repo_full_name,
                     e,
                     extra={"repo": repo_full_name, "error": str(e)},
                 )
                 add_span_attributes(span, {"config.result": "error"})
                 set_span_error(span, e)
-                return RepoConfig.default()
+                return RepoConfig.fail_closed(
+                    "Unable to load Stampbot configuration; automation is disabled"
+                )
 
     def _parse_repo_config(
         self,
@@ -797,7 +821,7 @@ class WebhookHandler:
                 },
             )
             set_span_error(span, e)
-            return RepoConfig.default().with_config_error(str(e))
+            return RepoConfig.fail_closed(str(e))
 
         repo_config_loads_total.labels(status="found").inc()
         add_span_attributes(
