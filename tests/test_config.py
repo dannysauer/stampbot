@@ -50,6 +50,58 @@ def test_repo_config_default():
     assert len(config.unapprove_commands) > 0
 
 
+def test_repo_config_fail_closed_does_not_read_service_defaults():
+    """Test fail-closed config is independent of invalid service settings."""
+    with patch("stampbot.config.settings") as mock_settings:
+        mock_settings.get.side_effect = AssertionError("service settings must not be read")
+
+        config = RepoConfig.fail_closed("invalid service configuration")
+
+    assert config.config_error == "invalid service configuration"
+    assert config.approve_commands == ["approve", "stamp"]
+    assert config.unapprove_commands == ["unapprove", "unstamp"]
+
+
+def test_repo_config_fail_closed_requires_no_trusted_error_input():
+    """Test even an empty error cannot accidentally enable the fallback."""
+    config = RepoConfig.fail_closed("")
+
+    assert config.config_error == "Invalid configuration"
+
+
+def test_repo_config_default_or_config_error_preserves_valid_defaults():
+    """Test valid configured defaults remain active."""
+    config = RepoConfig.default_or_config_error()
+
+    assert config.config_error is None
+    assert config.approve_commands == ["approve", "stamp"]
+
+
+@pytest.mark.parametrize(
+    ("setting", "value", "message"),
+    [
+        ("approve_commands", "approve", "must be a list of strings"),
+        ("unapprove_commands", ["unapprove", 1], "must contain only strings"),
+    ],
+)
+def test_repo_config_default_or_config_error_fails_closed(setting, value, message):
+    """Test invalid command defaults produce a non-authorizing config."""
+    service_defaults = MagicMock(spec=[setting])
+    setattr(service_defaults, setting, value)
+
+    with patch("stampbot.config.settings") as mock_settings:
+        mock_settings.get.return_value = service_defaults
+        mock_settings.defaults = service_defaults
+
+        config = RepoConfig.default_or_config_error()
+
+    assert config.config_error is not None
+    assert "Invalid service default configuration" in config.config_error
+    assert message in config.config_error
+    assert config.approve_commands == ["approve", "stamp"]
+    assert config.unapprove_commands == ["unapprove", "unstamp"]
+
+
 def test_get_setting_returns_value():
     """Test get_setting returns setting value."""
     with patch("stampbot.config.settings") as mock_settings:
@@ -118,6 +170,41 @@ def test_repo_config_invalid_permission():
     toml_content = 'chatops_required_permission = "invalid"'
     with pytest.raises(ValueError, match="Invalid chatops_required_permission"):
         RepoConfig.from_toml(toml_content)
+
+
+@pytest.mark.parametrize("setting", ["approve_commands", "unapprove_commands"])
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ('"approve"', "must be a list of strings"),
+        ("[1]", "must contain only strings"),
+    ],
+)
+def test_repo_config_rejects_invalid_command_lists(setting, value, message):
+    """Test ChatOps command settings fail closed unless they are string lists."""
+    with pytest.raises(ValueError, match=message):
+        RepoConfig.from_toml(f"{setting} = {value}")
+
+
+def test_repo_config_detaches_valid_command_lists():
+    """Test a caller cannot mutate command settings through its input lists."""
+    approve_commands = ["approve"]
+    unapprove_commands = ["unapprove"]
+
+    config = RepoConfig(
+        approval_labels=[],
+        auto_approve_on_label=True,
+        reapprove=False,
+        chatops_enabled=True,
+        chatops_required_permission="maintain",
+        approve_commands=approve_commands,
+        unapprove_commands=unapprove_commands,
+    )
+    approve_commands.append("stamp")
+    unapprove_commands.append("unstamp")
+
+    assert config.approve_commands == ["approve"]
+    assert config.unapprove_commands == ["unapprove"]
 
 
 def test_repo_config_get_defaults_with_settings_override():

@@ -3,9 +3,10 @@
 
 """Tests for GitHub client module."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import pytest
+from github.GithubException import GithubException
 
 TEST_PEM_KEY = "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----"
 TEST_TOKEN = "test-token"  # noqa: S105
@@ -641,9 +642,15 @@ class TestGetRepoFile:
             from stampbot.github_client import GitHubAppClient
 
             client = GitHubAppClient()
-            result = client.get_repo_file(123456, "owner/repo", "stampbot.toml")
+            result = client.get_repo_file(
+                123456,
+                "owner/repo",
+                "stampbot.toml",
+                ref="main",
+            )
 
             assert result == "file content"
+            mock_repo.get_contents.assert_called_once_with("stampbot.toml", ref="main")
 
     def test_get_repo_file_returns_none_for_directory(self):
         """Test that get_repo_file returns None when path is a directory."""
@@ -682,8 +689,8 @@ class TestGetRepoFile:
 
             assert result is None
 
-    def test_get_repo_file_returns_none_on_error(self):
-        """Test that get_repo_file returns None when file not found."""
+    def test_get_repo_file_returns_none_on_not_found(self):
+        """Test that a clean GitHub not-found result advances policy lookup."""
         with (
             patch("stampbot.github_client.is_configured", return_value=True),
             patch("stampbot.github_client.settings") as mock_settings,
@@ -703,7 +710,10 @@ class TestGetRepoFile:
             mock_integration_cls.return_value = mock_integration
 
             mock_repo = Mock()
-            mock_repo.get_contents.side_effect = Exception("File not found")
+            mock_repo.get_contents.side_effect = [
+                GithubException(404, {"message": "Not Found"}, None),
+                [],
+            ]
             mock_github = Mock()
             mock_github.get_repo.return_value = mock_repo
             mock_github_cls.return_value = mock_github
@@ -717,6 +727,136 @@ class TestGetRepoFile:
             result = client.get_repo_file(123456, "owner/repo", "nonexistent.toml")
 
             assert result is None
+            assert mock_repo.get_contents.call_args_list == [
+                call("nonexistent.toml"),
+                call(""),
+            ]
+
+    @pytest.mark.parametrize(
+        "root_result",
+        [
+            GithubException(404, {"message": "Not Found"}, None),
+            GithubException(403, {"message": "Forbidden"}, None),
+            TimeoutError("GitHub root read timed out"),
+            Mock(),
+        ],
+    )
+    def test_get_repo_file_propagates_unconfirmed_not_found(self, root_result):
+        """Test a contents 404 fails closed unless the same ref remains readable."""
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth"),
+            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
+            patch("stampbot.github_client.Github") as mock_github_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            mock_integration = Mock()
+            mock_token = Mock()
+            mock_token.token = TEST_TOKEN
+            mock_integration.get_access_token.return_value = mock_token
+            mock_integration_cls.return_value = mock_integration
+
+            mock_repo = Mock()
+            first = GithubException(404, {"message": "Not Found"}, None)
+            mock_repo.get_contents.side_effect = [first, root_result]
+            mock_github = Mock()
+            mock_github.get_repo.return_value = mock_repo
+            mock_github_cls.return_value = mock_github
+
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+            with pytest.raises(GithubException) as error:
+                client.get_repo_file(123456, "owner/repo", "stampbot.toml")
+
+            assert error.value is first
+
+    def test_get_repo_file_propagates_repository_not_found(self):
+        """Test a repository-level 404 never becomes a missing policy file."""
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth"),
+            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
+            patch("stampbot.github_client.Github") as mock_github_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            mock_integration = Mock()
+            mock_token = Mock()
+            mock_token.token = TEST_TOKEN
+            mock_integration.get_access_token.return_value = mock_token
+            mock_integration_cls.return_value = mock_integration
+
+            failure = GithubException(404, {"message": "Not Found"}, None)
+            mock_github = Mock()
+            mock_github.get_repo.side_effect = failure
+            mock_github_cls.return_value = mock_github
+
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+            with pytest.raises(GithubException) as error:
+                client.get_repo_file(123456, "owner/repo", "stampbot.toml")
+
+            assert error.value is failure
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            GithubException(403, {"message": "Forbidden"}, None),
+            GithubException(500, {"message": "Error"}, None),
+            TimeoutError("GitHub read timed out"),
+        ],
+    )
+    def test_get_repo_file_propagates_read_failures(self, failure):
+        """Test non-404 policy failures reach the handler's fail-closed path."""
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth"),
+            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
+            patch("stampbot.github_client.Github") as mock_github_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            mock_integration = Mock()
+            mock_token = Mock()
+            mock_token.token = TEST_TOKEN
+            mock_integration.get_access_token.return_value = mock_token
+            mock_integration_cls.return_value = mock_integration
+
+            mock_repo = Mock()
+            mock_repo.get_contents.side_effect = failure
+            mock_github = Mock()
+            mock_github.get_repo.return_value = mock_repo
+            mock_github_cls.return_value = mock_github
+
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+            with pytest.raises(type(failure), match=str(failure)):
+                client.get_repo_file(123456, "owner/repo", "stampbot.toml")
 
 
 class TestFindBotReviews:

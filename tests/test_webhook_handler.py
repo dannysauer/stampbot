@@ -3,7 +3,7 @@
 import asyncio
 import threading
 import time
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -744,6 +744,28 @@ async def test_org_github_repo_config_missing_uses_defaults(webhook_handler, moc
 
 
 @pytest.mark.asyncio
+async def test_missing_repo_config_with_invalid_service_defaults_fails_closed(
+    webhook_handler, mock_github_client
+):
+    """Test invalid service defaults block a PR when no repo config exists."""
+    payload = load_fixture("pr_opened_with_autoapprove_label")
+    service_defaults = MagicMock(spec=["approve_commands"])
+    service_defaults.approve_commands = "approve"
+
+    with patch("stampbot.config.settings") as mock_settings:
+        mock_settings.get.return_value = service_defaults
+        mock_settings.defaults = service_defaults
+
+        result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result == {"status": "error", "message": "Invalid repository configuration"}
+    review_body = mock_github_client.create_pr_review_comment.call_args.args[3]
+    assert "Invalid service default configuration" in review_body
+    assert "approve_commands must be a list of strings" in review_body
+    mock_github_client.approve_pr.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_chatops_disabled_in_config(webhook_handler, mock_github_client):
     """Test chatops commands ignored when disabled in config."""
     payload = load_fixture("issue_comment_approve")
@@ -799,6 +821,28 @@ async def test_invalid_repo_config_blocks_chatops(webhook_handler, mock_github_c
 
     assert result["status"] == "error"
     mock_github_client.user_has_permission.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_invalid_repo_and_service_configs_use_builtin_fail_closed_config(
+    webhook_handler, mock_github_client
+):
+    """Test repo errors do not re-read invalid service defaults for fallback."""
+    payload = load_fixture("pr_opened_with_autoapprove_label")
+    mock_github_client.get_repo_file.return_value = 'chatops_required_permission = "invalid"'
+    service_defaults = MagicMock(spec=["approve_commands"])
+    service_defaults.approve_commands = "approve"
+
+    with patch("stampbot.config.settings") as mock_settings:
+        mock_settings.get.return_value = service_defaults
+        mock_settings.defaults = service_defaults
+
+        result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result == {"status": "error", "message": "Invalid repository configuration"}
+    review_body = mock_github_client.create_pr_review_comment.call_args.args[3]
+    assert "Invalid chatops_required_permission" in review_body
+    mock_github_client.approve_pr.assert_not_called()
 
 
 # =============================================================================
@@ -967,18 +1011,61 @@ async def test_pr_comment_no_command_after_mention(webhook_handler, mock_github_
 
 
 @pytest.mark.asyncio
-async def test_get_repo_config_exception(webhook_handler, mock_github_client):
-    """Test _get_repo_config handles exceptions gracefully."""
+async def test_get_repo_config_exception_fails_closed(webhook_handler, mock_github_client):
+    """Test config fetch failures disable automation with valid defaults."""
     payload = load_fixture("pr_opened_with_autoapprove_label")
 
-    # Make get_repo_file raise an exception
     mock_github_client.get_repo_file.side_effect = Exception("Network error")
 
-    # Should still work, using defaults
     result = await webhook_handler.handle_event("pull_request", payload)
 
-    # With defaults, autoapprove label should trigger approval
-    assert result["status"] == "success"
+    assert result == {"status": "error", "message": "Invalid repository configuration"}
+    review_body = mock_github_client.create_pr_review_comment.call_args.args[3]
+    assert "Unable to load Stampbot configuration" in review_body
+    assert "Network error" not in review_body
+    mock_github_client.approve_pr.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_repo_config_exception_with_invalid_service_defaults_fails_closed(
+    webhook_handler, mock_github_client
+):
+    """Test fetch failures cannot escape invalid service defaults as a 500."""
+    payload = load_fixture("pr_opened_with_autoapprove_label")
+    mock_github_client.get_repo_file.side_effect = Exception("Network error")
+    service_defaults = MagicMock(spec=["unapprove_commands"])
+    service_defaults.unapprove_commands = ["unapprove", 1]
+
+    with patch("stampbot.config.settings") as mock_settings:
+        mock_settings.get.return_value = service_defaults
+        mock_settings.defaults = service_defaults
+
+        result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result == {"status": "error", "message": "Invalid repository configuration"}
+    review_body = mock_github_client.create_pr_review_comment.call_args.args[3]
+    assert "Unable to load Stampbot configuration" in review_body
+    assert "Network error" not in review_body
+    mock_github_client.approve_pr.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_non_validation_error_reading_service_defaults_fails_closed(
+    webhook_handler, mock_github_client
+):
+    """Test unexpected settings failures cannot escape the safe fallback."""
+    payload = load_fixture("pr_opened_with_autoapprove_label")
+
+    with patch("stampbot.config.settings") as mock_settings:
+        mock_settings.get.side_effect = RuntimeError("settings backend failed")
+
+        result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result == {"status": "error", "message": "Invalid repository configuration"}
+    review_body = mock_github_client.create_pr_review_comment.call_args.args[3]
+    assert "Unable to load Stampbot configuration" in review_body
+    assert "settings backend failed" not in review_body
+    mock_github_client.approve_pr.assert_not_called()
 
 
 @pytest.mark.asyncio

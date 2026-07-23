@@ -92,8 +92,9 @@ Stampbot checks policy in this order:
 3. service-wide defaults.
 
 The organization fallback applies only to organization-owned repositories. A
-missing file continues lookup. A GitHub read failure records an error and uses
-service defaults. A readable but invalid file stops automation for that event.
+missing file continues lookup. Service defaults apply only after every
+applicable file lookup returns a clean “not found” result. A GitHub read failure
+or a readable but invalid file stops automation for that event.
 
 See [Configuration reference](configuration.md#repository-policy) for every
 field and validation rule.

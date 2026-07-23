@@ -85,12 +85,10 @@ For every event, Stampbot looks for policy in this order:
 
 The first file wins. Repository and organization files are not merged.
 
-A missing file moves lookup to the next source. A GitHub read failure currently
-falls back to service defaults and records a load error. A readable but invalid
-file stops automation for that event.
-
-That distinction is historical and visible, not magical. Operators who need a
-strict fallback should choose conservative service defaults and alert on
+A missing file moves lookup to the next source. Service defaults apply only
+after every applicable file lookup returns “not found.” If GitHub cannot
+complete a policy read, or if a readable policy is invalid, Stampbot stops
+automation for that event. Operators should alert on
 `stampbot_repo_config_loads_total{status="error"}`.
 
 Repository title patterns cross a smaller boundary inside this flow. A

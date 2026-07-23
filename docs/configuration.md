@@ -161,13 +161,14 @@ repository permission.
 
 ## Missing and invalid policy
 
-An absent policy file moves lookup to the next source. A GitHub read failure
-also falls back to the service defaults and increments the configuration-load
-error metric.
+An absent policy file moves lookup to the next source. Service defaults apply
+only after every applicable file lookup returns a clean “not found” result.
 
-Readable but invalid policy fails closed for that event. On a newly opened pull
-request, Stampbot leaves a review comment with the validation error. Other pull
-request and ChatOps events return an error without changing a review.
+A GitHub read failure or readable but invalid policy fails closed for that
+event and increments the configuration-load error metric. On a newly opened
+pull request, Stampbot leaves a review comment: validation failures name the
+invalid setting, while read failures use a generic message. Other pull request
+and ChatOps events return an error without changing a review.
 
 A title-pattern timeout is different: the policy parsed successfully, but that
 pull request is ineligible. Stampbot creates no approval.
@@ -177,7 +178,7 @@ pull request is ineligible. Stampbot creates no approval.
 | Permission | Level | Used for | Failure behavior |
 | --- | --- | --- | --- |
 | Pull requests | Read and write | Read state, create reviews, and dismiss Stampbot reviews. | Review lookup, approval, or dismissal fails. |
-| Contents | Read-only | Read repository and organization policy. | Stampbot tries the next policy source. |
+| Contents | Read-only | Read repository and organization policy. | A missing file advances lookup; any other read failure stops automation for the event. |
 | Metadata | Read-only | Read required repository metadata. | The installation can't operate normally. |
 | Issues | Read-only | Receive and inspect pull request issue comments. | Issue-comment ChatOps is unavailable. |
 | Members | Read-only | Check organization team membership. | Team filters find no match. |
