@@ -47,7 +47,7 @@ def test_finalization_uses_captured_numeric_release_identity() -> None:
     for workflow in (APP_WORKFLOW, CHART_WORKFLOW):
         assert "id: create-release" in workflow
         assert (
-            "uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b" in workflow
+            "uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228" in workflow
         )
         assert "release_id: ${{ steps.create-release.outputs.id }}" in workflow
         assert "release_upload_url: ${{ steps.create-release.outputs.upload_url }}" in workflow
