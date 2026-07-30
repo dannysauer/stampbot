@@ -36,7 +36,7 @@ repos:
 
   # Conventional commit message validation
   - repo: https://github.com/alessandrojcm/commitlint-pre-commit-hook
-    rev: v9.25.0
+    rev: v9.26.0
     hooks:
       - id: commitlint
         stages: [commit-msg]
@@ -51,7 +51,7 @@ repos:
 
   # Ruff - fast Python linter and formatter
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.15
+    rev: v0.16.0
     hooks:
       # Run formatter first
       - id: ruff-format
@@ -82,7 +82,7 @@ repos:
 
   # Renovate config validation
   - repo: https://github.com/renovatebot/pre-commit-hooks
-    rev: 43.207.3
+    rev: 43.285.1
     hooks:
       - id: renovate-config-validator
 
