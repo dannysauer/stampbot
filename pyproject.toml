@@ -25,7 +25,7 @@ classifiers = [
 [tool.poetry.dependencies]
 python = ">=3.11,<3.15"
 fastapi = "0.141.1"
-uvicorn = {extras = ["standard"], version = "0.52.0"}
+uvicorn = {extras = ["standard"], version = "0.52.1"}
 pydantic = "2.13.4"
 pydantic-settings = "2.14.2"
 dynaconf = "3.3.4"
@@ -47,7 +47,7 @@ regex = "2026.7.19"
 pytest = "9.1.1"
 pytest-cov = "7.1.0"
 pytest-asyncio = "1.4.0"
-ruff = "0.16.0"
+ruff = "0.16.1"
 mypy = "2.3.0"
 types-toml = "0.10.8.20260518"
 pre-commit = "4.6.1"
