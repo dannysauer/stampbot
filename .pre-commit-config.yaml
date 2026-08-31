@@ -51,7 +51,7 @@ repos:
 
   # Ruff - fast Python linter and formatter
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.0
+    rev: v0.16.5
     hooks:
       # Run formatter first
       - id: ruff-format
@@ -82,7 +82,7 @@ repos:
 
   # Renovate config validation
   - repo: https://github.com/renovatebot/pre-commit-hooks
-    rev: 43.285.1
+    rev: 44.52.1
     hooks:
       - id: renovate-config-validator
 
