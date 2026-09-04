@@ -579,7 +579,25 @@ class GitHubAppClient:
 
                 # Get the review and dismiss it
                 review = pr.get_review(review_id)
-                review.dismiss(message)
+                try:
+                    review.dismiss(message)
+                except GithubException as e:
+                    if e.status != 422:
+                        raise
+                    # GitHub refuses to dismiss a review that is already
+                    # dismissed. Two replicas cleaning up the same duplicate
+                    # reach this on purpose, so it is the outcome we wanted.
+                    logger.info(
+                        "Review %d on PR #%d in %s was already dismissed",
+                        review_id,
+                        pr_number,
+                        repo_full_name,
+                        extra={
+                            "repo": repo_full_name,
+                            "pr_number": pr_number,
+                            "review_id": review_id,
+                        },
+                    )
 
                 duration = time.time() - start_time
                 github_api_request_duration_seconds.labels(operation="dismiss").observe(duration)
@@ -757,82 +775,6 @@ class GitHubAppClient:
                     },
                 )
                 raise
-
-    def find_bot_reviews(
-        self,
-        installation_id: int,
-        repo_full_name: str,
-        pr_number: int,
-    ) -> list[int]:
-        """Find all reviews created by this bot on a PR.
-
-        Args:
-            installation_id: GitHub App installation ID
-            repo_full_name: Repository full name (owner/repo)
-            pr_number: Pull request number
-
-        Returns:
-            List of review IDs created by the bot
-        """
-        start_time = time.time()
-
-        with create_span(
-            "github.find_bot_reviews",
-            {
-                "github.repo": repo_full_name,
-                "github.pr_number": pr_number,
-                "github.installation_id": installation_id,
-            },
-        ) as span:
-            try:
-                client = self._get_installation_client(installation_id)
-                repo = client.get_repo(repo_full_name)
-                pr = repo.get_pull(pr_number)
-                bot_user = self._bot_login()
-
-                # Find all reviews by bot that are approvals
-                bot_review_ids = []
-                for review in pr.get_reviews():
-                    if review.user.login == bot_user and review.state == "APPROVED":
-                        bot_review_ids.append(review.id)
-
-                duration = time.time() - start_time
-                github_api_request_duration_seconds.labels(operation="find_reviews").observe(
-                    duration
-                )
-                github_api_requests_total.labels(operation="find_reviews", status="success").inc()
-
-                self._update_rate_limit_metrics(client, installation_id)
-
-                add_span_attributes(
-                    span, {"github.reviews_found": len(bot_review_ids), "github.bot_user": bot_user}
-                )
-                set_span_ok(span)
-
-                return bot_review_ids
-
-            except Exception as e:
-                duration = time.time() - start_time
-                github_api_request_duration_seconds.labels(operation="find_reviews").observe(
-                    duration
-                )
-                github_api_requests_total.labels(operation="find_reviews", status="failure").inc()
-
-                set_span_error(span, e)
-
-                logger.error(
-                    "Failed to find bot reviews for PR #%s in %s: %s",
-                    pr_number,
-                    repo_full_name,
-                    _sanitize_error(e),
-                    extra={
-                        "repo": repo_full_name,
-                        "pr_number": pr_number,
-                        "installation_id": installation_id,
-                        "error": _sanitize_error(e),
-                    },
-                )
-                return []
 
     def find_bot_approval_reviews(
         self,

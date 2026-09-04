@@ -157,11 +157,11 @@ automation. Stampbot records these failures as policy-load errors.
 | Symptom | Check |
 | --- | --- |
 | A labeled pull request is not approved | A current label appears in `approval_labels`, and every configured filter category passes. |
-| A pull request shows a dismissed Stampbot approval marked `Duplicate Stampbot approval` | Expected when GitHub delivered `opened` and `labeled` to two replicas at once. One active approval remains. `stampbot_pr_dismissals_total{trigger_type="duplicate"}` counts these. |
+| A pull request shows a dismissed Stampbot approval marked `Duplicate Stampbot approval` | Expected when GitHub delivered two events for one new head to different replicas at once. Normally one active approval remains; if two do, check `stampbot_pr_dismissals_total{trigger_type="duplicate",status="failure"}` and the replica logs. |
 | An approval label is reported missing | Create that label or remove it from policy. |
 | A policy edit has no effect | Wait `STAMPBOT_REPO_CONFIG_CACHE_SECONDS` (default 300) or restart the replicas. A corrected file replaces an invalid one immediately, because errors are never cached. |
 | Removing one approval label dismisses the review | This is current behavior, even when another approval label remains. |
-| A new commit is not approved | `reapprove` defaults to `false`. |
+| A new commit is not approved | `reapprove` defaults to `false`. Add an approval label again or comment `@stampbot approve` to approve the new head. |
 | A repeated event creates no review | An active Stampbot approval already covers the current head. |
 | `synchronize` does nothing with `reapprove = true` | A prior App review and a configured approval label must both exist. |
 | Title evaluation fails safely | Simplify the expression or split it. Each pattern has a 10 ms budget. |

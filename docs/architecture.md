@@ -63,7 +63,7 @@ stateDiagram-v2
     Unapproved --> Approved: matching label or authorized command
     Approved --> Dismissed: label removed or unapprove command
     Approved --> Stale: head commit changes
-    Stale --> Approved: reapprove enabled or authorized command
+    Stale --> Approved: reapprove enabled, label event, or authorized command
     Dismissed --> Approved: later matching event or command
 ```
 
@@ -78,7 +78,8 @@ The same flow in words:
 - Every configured eligibility category must pass before that approval.
 - Removing any configured approval label dismisses active Stampbot approvals.
 - A new head makes an old approval stale. `reapprove` decides whether a
-  `synchronize` event may create a fresh review.
+  `synchronize` event may create a fresh review; a later `labeled` or
+  `reopened` event, or a command, may do so regardless.
 - An authorized ChatOps command may approve the current head or dismiss active
   Stampbot reviews.
 

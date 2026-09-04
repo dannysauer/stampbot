@@ -45,8 +45,9 @@ permission can write `@stampbot approve` or `@stampbot unapprove`; label filters
 don't apply to that command.
 
 Removing an approval label dismisses Stampbot's active reviews. A new commit
-doesn't receive another approval unless `reapprove = true` or an authorized
-maintainer asks for one.
+makes the old approval stale. Stampbot approves the new head when
+`reapprove = true`, when an approval label is added again, or when an
+authorized maintainer asks for one.
 
 The [configuration reference](docs/configuration.md) lists every key, limit,
 default, and fallback.

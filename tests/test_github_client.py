@@ -660,6 +660,74 @@ class TestDismissApproval:
             assert result is True
             mock_review.dismiss.assert_called_once()
 
+    def test_dismiss_approval_already_dismissed_is_success(self):
+        """Test GitHub's 422 for an already dismissed review counts as done."""
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth"),
+            patch("stampbot.github_client.GithubIntegration"),
+            patch("stampbot.github_client.Github") as mock_github_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            mock_review = Mock()
+            mock_review.dismiss.side_effect = GithubException(
+                422, {"message": "Can not dismiss a dismissed pull request review"}, None
+            )
+            mock_pr = Mock()
+            mock_pr.get_review.return_value = mock_review
+            mock_repo = Mock()
+            mock_repo.get_pull.return_value = mock_pr
+            mock_github = Mock()
+            mock_github.get_repo.return_value = mock_repo
+            mock_github_cls.return_value = mock_github
+
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+
+            assert client.dismiss_approval(123456, "owner/repo", 42, 789, "Duplicate") is True
+
+    def test_dismiss_approval_other_github_error_fails(self):
+        """Test a GitHub error other than an already dismissed review still fails."""
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth"),
+            patch("stampbot.github_client.GithubIntegration"),
+            patch("stampbot.github_client.Github") as mock_github_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            mock_review = Mock()
+            mock_review.dismiss.side_effect = GithubException(403, {"message": "Forbidden"}, None)
+            mock_pr = Mock()
+            mock_pr.get_review.return_value = mock_review
+            mock_repo = Mock()
+            mock_repo.get_pull.return_value = mock_pr
+            mock_github = Mock()
+            mock_github.get_repo.return_value = mock_repo
+            mock_github_cls.return_value = mock_github
+
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+
+            assert client.dismiss_approval(123456, "owner/repo", 42, 789, "Duplicate") is False
+
     def test_dismiss_approval_failure(self):
         """Test approval dismissal failure."""
         with (
@@ -1172,102 +1240,6 @@ class TestGetRepoFile:
                 client.get_repo_file(123456, "owner/repo", "stampbot.toml")
 
 
-class TestFindBotReviews:
-    """Tests for find_bot_reviews method."""
-
-    def test_find_bot_reviews_success(self):
-        """Test successful bot review finding."""
-        with (
-            patch("stampbot.github_client.is_configured", return_value=True),
-            patch("stampbot.github_client.settings") as mock_settings,
-            patch("stampbot.github_client.Auth.AppAuth"),
-            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
-            patch("stampbot.github_client.Github") as mock_github_cls,
-            patch("stampbot.github_client.create_span") as mock_span,
-        ):
-            mock_settings.app_id = 12345
-            mock_settings.private_key = TEST_PEM_KEY
-            mock_settings.otel_enabled = False
-
-            mock_integration = Mock()
-            mock_token = Mock()
-            mock_token.token = TEST_TOKEN
-            mock_integration.get_access_token.return_value = mock_token
-            mock_integration.get_app.return_value = Mock(slug="stampbot")
-            mock_integration_cls.return_value = mock_integration
-
-            # Create mock reviews
-            bot_review = Mock()
-            bot_review.user.login = "stampbot[bot]"
-            bot_review.state = "APPROVED"
-            bot_review.id = 123
-
-            other_review = Mock()
-            other_review.user.login = "other-user"
-            other_review.state = "APPROVED"
-            other_review.id = 456
-
-            mock_pr = Mock()
-            mock_pr.get_reviews.return_value = [bot_review, other_review]
-            mock_repo = Mock()
-            mock_repo.get_pull.return_value = mock_pr
-            mock_github = Mock()
-            mock_github.get_repo.return_value = mock_repo
-            mock_github.get_rate_limit.return_value = Mock(core=Mock(remaining=4500, limit=5000))
-            mock_github_cls.return_value = mock_github
-
-            mock_span.return_value.__enter__ = Mock(return_value=None)
-            mock_span.return_value.__exit__ = Mock(return_value=False)
-
-            from stampbot.github_client import GitHubAppClient
-
-            client = GitHubAppClient()
-            result = client.find_bot_reviews(123456, "owner/repo", 42)
-
-            assert result == [123]
-
-            # The App slug is read once and reused for later review scans.
-            client.find_bot_reviews(123456, "owner/repo", 43)
-            mock_integration.get_app.assert_called_once_with()
-            # One client bound for the exchange, then one per operation.
-            assert mock_github_cls.call_count == 3
-            mock_github.get_rate_limit.assert_not_called()
-
-    def test_find_bot_reviews_returns_empty_on_error(self):
-        """Test that find_bot_reviews returns empty list on error."""
-        with (
-            patch("stampbot.github_client.is_configured", return_value=True),
-            patch("stampbot.github_client.settings") as mock_settings,
-            patch("stampbot.github_client.Auth.AppAuth"),
-            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
-            patch("stampbot.github_client.Github") as mock_github_cls,
-            patch("stampbot.github_client.create_span") as mock_span,
-        ):
-            mock_settings.app_id = 12345
-            mock_settings.private_key = TEST_PEM_KEY
-            mock_settings.otel_enabled = False
-
-            mock_integration = Mock()
-            mock_token = Mock()
-            mock_token.token = TEST_TOKEN
-            mock_integration.get_access_token.return_value = mock_token
-            mock_integration_cls.return_value = mock_integration
-
-            mock_github = Mock()
-            mock_github.get_repo.side_effect = Exception("API Error")
-            mock_github_cls.return_value = mock_github
-
-            mock_span.return_value.__enter__ = Mock(return_value=None)
-            mock_span.return_value.__exit__ = Mock(return_value=False)
-
-            from stampbot.github_client import GitHubAppClient
-
-            client = GitHubAppClient()
-            result = client.find_bot_reviews(123456, "owner/repo", 42)
-
-            assert result == []
-
-
 class TestFindBotApprovalReviews:
     """Tests for find_bot_approval_reviews method."""
 
@@ -1340,6 +1312,13 @@ class TestFindBotApprovalReviews:
                 {"id": 123, "state": "APPROVED", "commit_id": "headsha"},
                 {"id": 124, "state": "DISMISSED", "commit_id": "oldsha"},
             ]
+
+            # The App slug is read once and reused for later review scans, and
+            # each operation builds its own client on the shared credentials.
+            client.find_bot_approval_reviews(123456, "owner/repo", 43)
+            mock_integration.get_app.assert_called_once_with()
+            assert mock_github_cls.call_count == 3
+            mock_github.get_rate_limit.assert_not_called()
 
     def test_find_bot_approval_reviews_returns_empty_on_error(self):
         """Test that find_bot_approval_reviews returns empty list on error."""

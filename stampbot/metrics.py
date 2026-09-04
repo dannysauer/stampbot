@@ -106,7 +106,10 @@ pr_approval_duration_seconds = Histogram(
 pr_dismissals_total = Counter(
     "stampbot_pr_dismissals_total",
     "Total PR approval dismissals attempted",
-    ["trigger_type", "status"],  # trigger: label_removed, chatops; status: success, failure
+    [
+        "trigger_type",
+        "status",
+    ],  # trigger: label_removed, chatops, duplicate; status: success, failure
 )
 
 pr_dismissal_duration_seconds = Histogram(

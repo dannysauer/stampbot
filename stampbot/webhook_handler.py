@@ -15,7 +15,7 @@ from fastapi.concurrency import run_in_threadpool
 from opentelemetry.trace import Span
 
 from stampbot.config import RepoConfig, repo_config_cache_seconds, settings
-from stampbot.github_client import BotReview, github_client
+from stampbot.github_client import BotReview, _sanitize_error, github_client
 from stampbot.logger import get_logger
 from stampbot.metrics import (
     chatops_commands_total,
@@ -549,6 +549,43 @@ class WebhookHandler:
 
         return not self._has_current_active_approval(reviews, head_sha)
 
+    def _active_approvals_for_head(
+        self,
+        reviews: list[BotReview],
+        head_sha: str | None,
+        *,
+        proven_only: bool = False,
+    ) -> list[int]:
+        """Return the IDs of Stampbot approvals that cover the current head, oldest first.
+
+        By default an approval whose commit GitHub did not report, or a head
+        Stampbot does not know, counts as covering the head: Stampbot never
+        assumes an approval is stale without proof, so it never approves twice
+        on a guess. ``proven_only`` inverts that bias for destructive use: only
+        an approval whose commit is known to equal a known head qualifies, so
+        nothing is dismissed on a guess either.
+
+        Args:
+            reviews: Bot review states.
+            head_sha: Current PR head SHA.
+            proven_only: Require a known commit that equals a known head.
+
+        Returns:
+            Sorted review IDs. GitHub assigns review IDs in creation order.
+        """
+
+        def covers_head(review: BotReview) -> bool:
+            commit = review.get("commit_id")
+            if proven_only:
+                return bool(head_sha) and commit == head_sha
+            return not head_sha or not commit or commit == head_sha
+
+        return sorted(
+            review["id"]
+            for review in reviews
+            if review["state"] == "APPROVED" and covers_head(review)
+        )
+
     def _has_current_active_approval(
         self,
         reviews: list[BotReview],
@@ -561,18 +598,9 @@ class WebhookHandler:
             head_sha: Current PR head SHA.
 
         Returns:
-            True when an active approval exists for the current head, or when
-            GitHub did not provide enough commit information to prove staleness.
+            True when an active approval covers the current head.
         """
-        for review in reviews:
-            if review["state"] != "APPROVED":
-                continue
-
-            review_commit = review.get("commit_id")
-            if not head_sha or not review_commit or review_commit == head_sha:
-                return True
-
-        return False
+        return bool(self._active_approvals_for_head(reviews, head_sha))
 
     async def _handle_pr_comment(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Handle PR comment events for chatops.
@@ -916,27 +944,13 @@ class WebhookHandler:
             },
         ) as span:
             if not skip_existing_check:
-                if head_sha:
-                    existing_reviews = await run_in_threadpool(
-                        github_client.find_bot_approval_reviews,
-                        installation_id,
-                        repo_full_name,
-                        pr_number,
-                    )
-                    existing_approvals = [
-                        review["id"]
-                        for review in existing_reviews
-                        if self._has_current_active_approval([review], head_sha)
-                    ]
-                else:
-                    # Check for existing active approval to avoid duplicates
-                    existing_approvals = await run_in_threadpool(
-                        github_client.find_bot_reviews,
-                        installation_id,
-                        repo_full_name,
-                        pr_number,
-                    )
-
+                reviews = await run_in_threadpool(
+                    github_client.find_bot_approval_reviews,
+                    installation_id,
+                    repo_full_name,
+                    pr_number,
+                )
+                existing_approvals = self._active_approvals_for_head(reviews, head_sha)
                 if existing_approvals:
                     logger.info(
                         "PR #%d in %s already has active approval for current head, skipping",
@@ -980,90 +994,23 @@ class WebhookHandler:
             if not success:
                 errors_total.labels(error_type="approval_failed").inc()
             else:
-                await self._dismiss_duplicate_approvals(
-                    span, installation_id, repo_full_name, pr_number, head_sha
+                # Another replica may have approved the same head in the same
+                # second. Keep the oldest approval; the outcome of this cleanup
+                # never changes the result of the approval that was posted.
+                await self._dismiss_approvals(
+                    installation_id,
+                    repo_full_name,
+                    pr_number,
+                    "Duplicate Stampbot approval",
+                    "duplicate",
+                    head_sha=head_sha,
+                    keep_oldest=True,
                 )
 
             add_span_attributes(span, {"approval.result": status})
             set_span_ok(span)
 
             return success
-
-    async def _dismiss_duplicate_approvals(
-        self,
-        span: Span | None,
-        installation_id: int,
-        repo_full_name: str,
-        pr_number: int,
-        head_sha: str | None,
-    ) -> None:
-        """Leave one active Stampbot approval on the current head.
-
-        Every replica that approved runs this and reaches the same answer,
-        because all of them keep the approval with the lowest review ID.
-        Failures are logged and never turn a posted approval into an error.
-
-        Args:
-            span: Active tracing span (None if tracing disabled)
-            installation_id: GitHub App installation ID
-            repo_full_name: Repository full name
-            pr_number: PR number
-            head_sha: Current PR head SHA; approvals of other heads are stale, not duplicates
-        """
-        try:
-            reviews = await run_in_threadpool(
-                github_client.find_bot_approval_reviews,
-                installation_id,
-                repo_full_name,
-                pr_number,
-            )
-            duplicates = self._duplicate_approvals(reviews, head_sha)
-            add_span_attributes(span, {"approval.duplicates": len(duplicates)})
-            for review_id in duplicates:
-                logger.info(
-                    "Dismissing duplicate Stampbot approval %d on PR #%d in %s",
-                    review_id,
-                    pr_number,
-                    repo_full_name,
-                    extra={"repo": repo_full_name, "pr_number": pr_number, "review_id": review_id},
-                )
-                dismissed = await run_in_threadpool(
-                    github_client.dismiss_approval,
-                    installation_id,
-                    repo_full_name,
-                    pr_number,
-                    review_id,
-                    "Duplicate Stampbot approval",
-                )
-                pr_dismissals_total.labels(
-                    trigger_type="duplicate",
-                    status="success" if dismissed else "failure",
-                ).inc()
-        except Exception as e:
-            logger.warning(
-                "Could not check PR #%d in %s for duplicate approvals: %s",
-                pr_number,
-                repo_full_name,
-                e,
-                extra={"repo": repo_full_name, "pr_number": pr_number, "error": str(e)},
-            )
-
-    def _duplicate_approvals(self, reviews: list[BotReview], head_sha: str | None) -> list[int]:
-        """Return the IDs of every active approval of the head except the oldest.
-
-        Args:
-            reviews: Bot review states.
-            head_sha: Current PR head SHA.
-
-        Returns:
-            Review IDs to dismiss, oldest first.
-        """
-        active = sorted(
-            review["id"]
-            for review in reviews
-            if self._has_current_active_approval([review], head_sha)
-        )
-        return active[1:]
 
     async def _dismiss_approvals(
         self,
@@ -1072,18 +1019,25 @@ class WebhookHandler:
         pr_number: int,
         message: str,
         trigger_type: str,
+        *,
+        head_sha: str | None = None,
+        keep_oldest: bool = False,
     ) -> bool:
-        """Dismiss bot approvals on a PR.
+        """Dismiss active Stampbot approvals on a PR.
 
         Args:
             installation_id: GitHub App installation ID
             repo_full_name: Repository full name
             pr_number: PR number
             message: Dismissal message
-            trigger_type: What triggered the dismissal (label_removed, chatops)
+            trigger_type: What triggered the dismissal (label_removed, chatops, duplicate)
+            head_sha: Only approvals covering this head are dismissed. None means every
+                active approval.
+            keep_oldest: Leave the oldest matching approval in place, which turns the
+                call into duplicate cleanup.
 
         Returns:
-            True if successful
+            True if every selected approval was dismissed, or none needed dismissal.
         """
         with create_span(
             "webhook.dismiss_approvals",
@@ -1096,25 +1050,30 @@ class WebhookHandler:
             start_time = time.time()
 
             try:
-                # Find all bot reviews
-                review_ids = await run_in_threadpool(
-                    github_client.find_bot_reviews,
+                reviews = await run_in_threadpool(
+                    github_client.find_bot_approval_reviews,
                     installation_id,
                     repo_full_name,
                     pr_number,
                 )
+                if keep_oldest:
+                    # Duplicate cleanup only touches approvals proven to be of
+                    # this head, and leaves the oldest of them in place.
+                    review_ids = self._active_approvals_for_head(
+                        reviews, head_sha, proven_only=True
+                    )[1:]
+                else:
+                    review_ids = self._active_approvals_for_head(reviews, head_sha)
 
                 add_span_attributes(span, {"dismissal.reviews_found": len(review_ids)})
 
                 if not review_ids:
-                    logger.info(
-                        "No bot approvals found on PR #%d",
+                    logger.debug(
+                        "No Stampbot approvals to dismiss on PR #%d",
                         pr_number,
                         extra={"repo": repo_full_name, "pr_number": pr_number},
                     )
-                    duration = time.time() - start_time
-                    pr_dismissal_duration_seconds.observe(duration)
-                    pr_dismissals_total.labels(trigger_type=trigger_type, status="success").inc()
+                    pr_dismissal_duration_seconds.observe(time.time() - start_time)
                     add_span_attributes(span, {"dismissal.result": "no_reviews"})
                     set_span_ok(span)
                     return True
@@ -1150,11 +1109,11 @@ class WebhookHandler:
 
                 logger.error(
                     "Error dismissing approvals: %s",
-                    e,
+                    _sanitize_error(e),
                     extra={
                         "repo": repo_full_name,
                         "pr_number": pr_number,
-                        "error": str(e),
+                        "error": _sanitize_error(e),
                     },
                 )
                 errors_total.labels(error_type="dismiss_failed").inc()

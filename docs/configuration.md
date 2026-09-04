@@ -117,7 +117,7 @@ so a corrected file applies on the next event.
 | --- | --- | --- | --- |
 | `approval_labels` | list of strings | `["autoapprove", "stamp"]` | Labels that trigger approval. Removing any configured approval label can dismiss active Stampbot approvals. |
 | `auto_approve_on_label` | boolean | `true` | Enables label-driven approval and dismissal on label removal. |
-| `reapprove` | boolean | `false` | Lets a `synchronize` event approve a new head when an approval label remains. |
+| `reapprove` | boolean | `false` | Lets a `synchronize` event approve a new head when an approval label remains. With `false`, a new head is approved only by a later `labeled` or `reopened` event or a ChatOps command. |
 | `chatops_enabled` | boolean | `true` | Enables `@stampbot` commands in pull request issue and review comments. |
 | `chatops_required_permission` | enum | `maintain` | Minimum permission for approve and unapprove commands: `none`, `read`, `triage`, `write`, `maintain`, or `admin`. |
 | `approve_commands` | list of strings | `["approve", "stamp"]` | Words that create approval after `@stampbot`. |

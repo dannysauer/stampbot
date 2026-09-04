@@ -25,7 +25,7 @@ def test_policy_read_failure_boundaries_are_documented() -> None:
         ),
         "docs/operations.md": (
             "Stampbot treats that optional repository as unavailable and uses service defaults.",
-            "Expected when GitHub delivered `opened` and `labeled` to two replicas at once.",
+            "Expected when GitHub delivered two events for one new head to different replicas",
             "A failure reading the target repository's policy stops automation for that event.",
             "Once GitHub makes the organization repository available to the App, "
             "a failure reading its policy does too.",

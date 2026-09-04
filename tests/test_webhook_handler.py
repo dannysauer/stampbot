@@ -24,7 +24,6 @@ def mock_github_client():
         mock.create_pr_review_comment.return_value = True
         mock.create_issue_comment.return_value = True
         mock.dismiss_approval.return_value = True
-        mock.find_bot_reviews.return_value = []
         mock.find_bot_approval_reviews.return_value = []
         mock.get_pr_head_sha.return_value = "current-head"
         mock.repo_has_label.return_value = True
@@ -92,7 +91,6 @@ def _remember_approval(mock_github_client, review_id=777, commit_id="abc123def45
         mock_github_client.find_bot_approval_reviews.return_value = [
             {"id": review_id, "state": "APPROVED", "commit_id": commit_id}
         ]
-        mock_github_client.find_bot_reviews.return_value = [review_id]
         return True
 
     mock_github_client.approve_pr.side_effect = approve_and_remember
@@ -167,7 +165,7 @@ async def test_pr_duplicate_check_failure_keeps_approval(webhook_handler, mock_g
     ("reviews", "head_sha", "expected"),
     [
         ([], "head", []),
-        ([{"id": 1, "state": "APPROVED", "commit_id": "head"}], "head", []),
+        ([{"id": 1, "state": "APPROVED", "commit_id": "head"}], "head", [1]),
         (
             [
                 {"id": 3, "state": "APPROVED", "commit_id": "head"},
@@ -175,7 +173,7 @@ async def test_pr_duplicate_check_failure_keeps_approval(webhook_handler, mock_g
                 {"id": 2, "state": "APPROVED", "commit_id": "head"},
             ],
             "head",
-            [2, 3],
+            [1, 2, 3],
         ),
         (
             [
@@ -183,7 +181,7 @@ async def test_pr_duplicate_check_failure_keeps_approval(webhook_handler, mock_g
                 {"id": 2, "state": "APPROVED", "commit_id": "head"},
             ],
             "head",
-            [],
+            [2],
         ),
         (
             [
@@ -191,7 +189,7 @@ async def test_pr_duplicate_check_failure_keeps_approval(webhook_handler, mock_g
                 {"id": 2, "state": "APPROVED", "commit_id": "head"},
             ],
             None,
-            [2],
+            [1, 2],
         ),
         (
             [
@@ -199,13 +197,57 @@ async def test_pr_duplicate_check_failure_keeps_approval(webhook_handler, mock_g
                 {"id": 2, "state": "APPROVED", "commit_id": "head"},
             ],
             "head",
-            [],
+            [2],
         ),
     ],
 )
-def test_duplicate_approvals(webhook_handler, reviews, head_sha, expected):
-    """Test every active approval of the head except the oldest counts as a duplicate."""
-    assert webhook_handler._duplicate_approvals(reviews, head_sha) == expected
+def test_active_approvals_for_head(webhook_handler, reviews, head_sha, expected):
+    """Test which approvals count as covering the head, oldest first."""
+    assert webhook_handler._active_approvals_for_head(reviews, head_sha) == expected
+
+
+@pytest.mark.parametrize(
+    ("reviews", "head_sha", "expected"),
+    [
+        ([{"id": 1, "state": "APPROVED", "commit_id": "head"}], None, []),
+        ([{"id": 1, "state": "APPROVED", "commit_id": None}], "head", []),
+        (
+            [
+                {"id": 2, "state": "APPROVED", "commit_id": "head"},
+                {"id": 1, "state": "APPROVED", "commit_id": None},
+                {"id": 3, "state": "APPROVED", "commit_id": "head"},
+            ],
+            "head",
+            [2, 3],
+        ),
+    ],
+)
+def test_active_approvals_for_head_proven_only(webhook_handler, reviews, head_sha, expected):
+    """Test duplicate cleanup never selects an approval on a guess."""
+    assert (
+        webhook_handler._active_approvals_for_head(reviews, head_sha, proven_only=True) == expected
+    )
+
+
+@pytest.mark.asyncio
+async def test_chatops_approve_without_head_skips_duplicate_cleanup(
+    webhook_handler, mock_github_client
+):
+    """Test no dismissal happens when the head is unknown, even with several approvals."""
+    payload = load_fixture("issue_comment_approve")
+    mock_github_client.get_pr_head_sha.return_value = None
+    mock_github_client.find_bot_approval_reviews.side_effect = [
+        [],
+        [
+            {"id": 1, "state": "APPROVED", "commit_id": "a"},
+            {"id": 2, "state": "APPROVED", "commit_id": "b"},
+        ],
+    ]
+
+    result = await webhook_handler.handle_event("issue_comment", payload)
+
+    assert result["status"] == "success"
+    mock_github_client.dismiss_approval.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -230,7 +272,8 @@ async def test_pr_reopened_with_autoapprove_label(webhook_handler, mock_github_c
     result = await webhook_handler.handle_event("pull_request", payload)
 
     assert result["status"] == "success"
-    mock_github_client.find_bot_approval_reviews.assert_called()
+    # Once before approving, once afterwards to look for duplicates.
+    assert mock_github_client.find_bot_approval_reviews.call_count == 2
     mock_github_client.approve_pr.assert_called_once()
 
 
@@ -422,7 +465,6 @@ async def test_pr_labeled_unrelated_label_reapproves_dismissed_review(
 
     assert result["status"] == "success"
     mock_github_client.approve_pr.assert_called_once()
-    mock_github_client.find_bot_reviews.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -457,7 +499,6 @@ async def test_pr_synchronize_reapprove_enabled_for_stale_review(
 
     assert result["status"] == "success"
     mock_github_client.approve_pr.assert_called_once()
-    mock_github_client.find_bot_reviews.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -573,13 +614,16 @@ async def test_pr_labeled_stale_approval_does_not_block(webhook_handler, mock_gi
 async def test_pr_unlabeled_autoapprove(webhook_handler, mock_github_client):
     """Test removing autoapprove label dismisses approvals."""
     payload = load_fixture("pr_unlabeled_autoapprove")
-    mock_github_client.find_bot_reviews.return_value = [111, 222]  # Mock review IDs
+    mock_github_client.find_bot_approval_reviews.return_value = [
+        {"id": 111, "state": "APPROVED", "commit_id": "abc123def456"},
+        {"id": 222, "state": "APPROVED", "commit_id": "abc123def456"},
+    ]
 
     result = await webhook_handler.handle_event("pull_request", payload)
 
     assert result["status"] == "success"
     assert "dismissed" in result["message"].lower()
-    mock_github_client.find_bot_reviews.assert_called_once()
+    mock_github_client.find_bot_approval_reviews.assert_called_once()
     assert mock_github_client.dismiss_approval.call_count == 2
 
 
@@ -592,7 +636,6 @@ async def test_pr_unlabeled_ignored_when_auto_approve_disabled(webhook_handler, 
     result = await webhook_handler.handle_event("pull_request", payload)
 
     assert result["status"] == "ignored"
-    mock_github_client.find_bot_reviews.assert_not_called()
     mock_github_client.dismiss_approval.assert_not_called()
 
 
@@ -600,7 +643,7 @@ async def test_pr_unlabeled_ignored_when_auto_approve_disabled(webhook_handler, 
 async def test_pr_unlabeled_no_bot_reviews(webhook_handler, mock_github_client):
     """Test removing label when no bot reviews exist."""
     payload = load_fixture("pr_unlabeled_autoapprove")
-    mock_github_client.find_bot_reviews.return_value = []  # No reviews to dismiss
+    mock_github_client.find_bot_approval_reviews.return_value = []  # No reviews to dismiss
 
     result = await webhook_handler.handle_event("pull_request", payload)
 
@@ -617,6 +660,8 @@ async def test_pr_approval_failure(webhook_handler, mock_github_client):
     result = await webhook_handler.handle_event("pull_request", payload)
 
     assert result["status"] == "error"
+    # A failed approval leaves nothing to deduplicate.
+    assert mock_github_client.find_bot_approval_reviews.call_count == 1
     assert "failed" in result["message"].lower()
 
 
@@ -750,7 +795,6 @@ async def test_issue_comment_approve_skips_duplicate(webhook_handler, mock_githu
     assert result["status"] == "success"
     mock_github_client.get_pr_head_sha.assert_called_once()
     mock_github_client.find_bot_approval_reviews.assert_called_once()
-    mock_github_client.find_bot_reviews.assert_not_called()
     mock_github_client.approve_pr.assert_not_called()
 
 
@@ -769,7 +813,6 @@ async def test_issue_comment_approve_refreshes_stale_approval(webhook_handler, m
     mock_github_client.get_pr_head_sha.assert_called_once()
     # Once before approving, once afterwards to look for duplicates.
     assert mock_github_client.find_bot_approval_reviews.call_count == 2
-    mock_github_client.find_bot_reviews.assert_not_called()
     mock_github_client.approve_pr.assert_called_once()
 
 
@@ -780,12 +823,14 @@ async def test_issue_comment_approve_without_head_uses_any_active_approval(
     """Test the existing-approval check falls back to any active review when the head is unknown."""
     payload = load_fixture("issue_comment_approve")
     mock_github_client.get_pr_head_sha.return_value = None
-    mock_github_client.find_bot_reviews.return_value = [4242]
+    mock_github_client.find_bot_approval_reviews.return_value = [
+        {"id": 4242, "state": "APPROVED", "commit_id": "whatever"}
+    ]
 
     result = await webhook_handler.handle_event("issue_comment", payload)
 
     assert result["status"] == "success"
-    mock_github_client.find_bot_reviews.assert_called_once()
+    mock_github_client.find_bot_approval_reviews.assert_called_once()
     mock_github_client.approve_pr.assert_not_called()
 
 
@@ -801,18 +846,25 @@ async def test_pr_duplicate_dismissal_failure_is_counted(webhook_handler, mock_g
         ],
     ]
     mock_github_client.dismiss_approval.return_value = False
+    from stampbot.metrics import pr_dismissals_total
+
+    failures = pr_dismissals_total.labels(trigger_type="duplicate", status="failure")
+    before = failures._value.get()
 
     result = await webhook_handler.handle_event("pull_request", payload)
 
     assert result["status"] == "success"
     mock_github_client.dismiss_approval.assert_called_once()
+    assert failures._value.get() == before + 1
 
 
 @pytest.mark.asyncio
 async def test_issue_comment_unapprove(webhook_handler, mock_github_client):
     """Test @stampbot unapprove command."""
     payload = load_fixture("issue_comment_unapprove")
-    mock_github_client.find_bot_reviews.return_value = [111]
+    mock_github_client.find_bot_approval_reviews.return_value = [
+        {"id": 111, "state": "APPROVED", "commit_id": "abc123def456"}
+    ]
 
     result = await webhook_handler.handle_event("issue_comment", payload)
 
@@ -1524,8 +1576,7 @@ async def test_dismiss_approvals_exception(webhook_handler, mock_github_client):
     """Test _dismiss_approvals handles exceptions gracefully."""
     payload = load_fixture("pr_unlabeled_autoapprove")
 
-    # Make find_bot_reviews raise an exception
-    mock_github_client.find_bot_reviews.side_effect = Exception("API error")
+    mock_github_client.find_bot_approval_reviews.side_effect = Exception("API error")
 
     result = await webhook_handler.handle_event("pull_request", payload)
 
@@ -1589,7 +1640,6 @@ async def test_pr_unlabeled_non_approval_label(webhook_handler, mock_github_clie
 
     assert result["status"] == "ignored"
     assert "no action" in result["message"].lower()
-    mock_github_client.find_bot_reviews.assert_not_called()
     mock_github_client.dismiss_approval.assert_not_called()
 
 

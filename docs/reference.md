@@ -125,14 +125,21 @@ field and validation rule.
 Removing one configured approval label dismisses the review even when another
 configured approval label remains.
 
+A stale approval of an older head never blocks these rows; only an active
+approval of the current head does.
+
 GitHub sends `opened` and one `labeled` event for each label present when a
 pull request is created, and it can send them to different replicas within a
-second. Every one of those events may approve, because a missed approval costs
-more than a duplicate. After each approval Stampbot re-reads its reviews and
-dismisses every approval of the same head except the oldest, with the message
-`Duplicate Stampbot approval`. Those dismissals appear as
-`stampbot_pr_dismissals_total{trigger_type="duplicate"}`. Approvals of an
-older head are stale, not duplicates, and stay as GitHub left them.
+second. Every one of those events may approve. After each approval Stampbot
+re-reads its reviews and dismisses every approval of the same head except the
+oldest, with the message `Duplicate Stampbot approval`. Those dismissals appear
+as `stampbot_pr_dismissals_total{trigger_type="duplicate"}`. Approvals of an
+older head, or whose commit GitHub did not report, are never dismissed by this
+cleanup. If the cleanup fails, the webhook response still reports success, the
+extra approval stays, and the counter records `status="failure"`.
+
+On `opened`, after the review decision, Stampbot logs a warning for each
+configured approval label that does not exist in the repository.
 
 Title filtering accepts at most 20 patterns. Each pattern and the title are
 limited to 256 characters. Each pattern has a 10 ms match budget. Matching runs
