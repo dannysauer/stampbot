@@ -86,11 +86,16 @@ def test_get_logger():
     assert logger is not None
 
 
-def test_configure_logging_with_otel_enabled():
-    """Test configure_logging instruments logging when OTEL is enabled."""
+def test_configure_logging_leaves_trace_instrumentation_to_telemetry():
+    """Test configure_logging never instruments logging itself.
+
+    Trace fields are added by ``configure_telemetry`` after the tracer provider
+    exists, so the records carry the service name. Instrumenting here would
+    capture an empty service name for the life of the process.
+    """
     with (
         patch("stampbot.logger.settings") as mock_settings,
-        patch("stampbot.logger.LoggingInstrumentor") as mock_instrumentor,
+        patch("opentelemetry.instrumentation.logging.LoggingInstrumentor") as mock_instrumentor,
     ):
         mock_settings.log_format = "json"
         mock_settings.log_level = "INFO"
@@ -100,25 +105,6 @@ def test_configure_logging_with_otel_enabled():
 
         configure_logging()
 
-        # Verify LoggingInstrumentor was called
-        mock_instrumentor.return_value.instrument.assert_called_once_with(set_logging_format=True)
-
-
-def test_configure_logging_without_otel():
-    """Test configure_logging does not instrument when OTEL is disabled."""
-    with (
-        patch("stampbot.logger.settings") as mock_settings,
-        patch("stampbot.logger.LoggingInstrumentor") as mock_instrumentor,
-    ):
-        mock_settings.log_format = "json"
-        mock_settings.log_level = "INFO"
-        mock_settings.otel_enabled = False
-
-        from stampbot.logger import configure_logging
-
-        configure_logging()
-
-        # Verify LoggingInstrumentor was NOT called
         mock_instrumentor.return_value.instrument.assert_not_called()
 
 

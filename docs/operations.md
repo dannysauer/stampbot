@@ -37,7 +37,9 @@ all three required keys contain usable values.
 
 Open the GitHub App's **Advanced** settings, then open **Recent Deliveries**.
 Record the delivery ID, event, action, response status, and a redacted response
-body.
+body. Stampbot logs the same ID as `delivery_id` and records it on the trace as
+`github.delivery_id`, so one delivery can be followed from GitHub to Loki and
+Tempo.
 
 | Response | Meaning | Next check |
 | --- | --- | --- |
@@ -218,7 +220,7 @@ curl -fsS http://127.0.0.1:9090/metrics
 | `stampbot_http_requests_total` | Which route templates and statuses are active? |
 | `stampbot_webhook_signature_validations_total` | Are signature checks failing? |
 | `stampbot_webhook_events_total` | Which authenticated events reach the handler? |
-| `stampbot_repo_config_loads_total` | Is policy found, defaulted, or invalid? |
+| `stampbot_repo_config_loads_total` | Is policy found, defaulted, cached, or invalid? |
 | `stampbot_pr_approvals_total` | Are approval attempts succeeding? |
 | `stampbot_pr_dismissals_total` | Are dismissals succeeding? |
 | `stampbot_chatops_commands_total` | Are commands accepted, forbidden, or ignored? |
@@ -259,6 +261,11 @@ Kubernetes API token mounts and limits `/tmp` to 64 MiB by default.
 
 GitHub calls use a 30-second timeout. Stampbot retries server errors with
 exponential backoff; authorization and rate-limit failures need operator action.
+
+Each replica reuses one installation token until GitHub is about to expire it,
+and reads the remaining limit from response headers. A rising
+`stampbot_github_api_requests_total{operation="get_token"}` therefore points at
+restarts, new installations, or token failures rather than event volume.
 
 When the remaining limit is low:
 

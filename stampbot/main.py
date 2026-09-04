@@ -5,6 +5,7 @@
 
 import html
 import json
+import re
 import time
 import urllib.parse
 from collections.abc import AsyncIterator
@@ -55,6 +56,9 @@ configure_telemetry()
 
 # Security limits
 MAX_WEBHOOK_BODY_SIZE = 1024 * 1024  # 1MB - GitHub webhooks are typically much smaller
+# X-GitHub-Delivery is a GUID such as 72d3162e-cc78-11e3-81ab-4c9367dc0958.
+MAX_DELIVERY_ID_LENGTH = 64
+DELIVERY_ID_PATTERN = re.compile(r"[A-Za-z0-9-]+")
 UNMATCHED_ENDPOINT = "unmatched"
 SETUP_HTML_HEADERS = {
     "Cache-Control": "no-store",
@@ -397,11 +401,31 @@ async def ready() -> Response:
     )
 
 
+def _delivery_id_label(raw: str | None) -> str | None:
+    """Return a GitHub delivery GUID suitable for logs and span attributes.
+
+    GitHub sends a 36-character GUID. Anything else is dropped rather than
+    stored, since the value is only useful for matching GitHub's delivery log.
+
+    Args:
+        raw: Value of the ``X-GitHub-Delivery`` header, if present.
+
+    Returns:
+        The GUID, or None when the header is missing or malformed.
+    """
+    if not raw:
+        return None
+    if len(raw) > MAX_DELIVERY_ID_LENGTH or not DELIVERY_ID_PATTERN.fullmatch(raw):
+        return None
+    return raw
+
+
 @app.post("/webhook")
 async def webhook(
     request: Request,
     x_github_event: str = Header(None, alias="X-GitHub-Event"),
     x_hub_signature_256: str = Header(None, alias="X-Hub-Signature-256"),
+    x_github_delivery: str = Header(None, alias="X-GitHub-Delivery"),
 ) -> dict[str, Any]:
     """GitHub webhook endpoint.
 
@@ -409,6 +433,9 @@ async def webhook(
         request: FastAPI request.
         x_github_event: GitHub event type.
         x_hub_signature_256: Webhook signature.
+        x_github_delivery: GitHub delivery GUID, bound to logs and traces after
+            the signature is verified so a delivery in GitHub's log can be
+            matched to Stampbot's records.
 
     Returns:
         Response dictionary with status and message.
@@ -459,10 +486,18 @@ async def webhook(
         logger.error("Failed to parse webhook payload: %s", e)
         raise HTTPException(status_code=400, detail="Invalid JSON payload") from None
 
+    # The header is only trusted once the HMAC check has passed. Bound length
+    # keeps a malformed value out of log storage.
+    delivery_id = _delivery_id_label(x_github_delivery)
+    if delivery_id:
+        structlog.contextvars.bind_contextvars(delivery_id=delivery_id)
+
     # Handle event with timing
     try:
         start_time = time.time()
-        result = await webhook_handler.handle_event(x_github_event, payload)
+        result = await webhook_handler.handle_event(
+            x_github_event, payload, delivery_id=delivery_id
+        )
         duration = time.time() - start_time
 
         webhook_processing_duration_seconds.labels(event_type=x_github_event or "unknown").observe(

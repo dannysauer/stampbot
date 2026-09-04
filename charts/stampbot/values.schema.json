@@ -274,6 +274,10 @@
           "type": "string",
           "minLength": 1
         },
+        "repoConfigCacheSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
         "otelEnabled": {
           "type": "boolean"
         },

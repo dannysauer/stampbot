@@ -195,6 +195,26 @@ tests:
             name: STAMPBOT_LOG_LEVEL
             value: DEBUG
 
+  - it: should set the policy cache lifetime by default
+    template: deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: STAMPBOT_REPO_CONFIG_CACHE_SECONDS
+            value: "300"
+
+  - it: should allow disabling the policy cache
+    template: deployment.yaml
+    set:
+      config.repoConfigCacheSeconds: 0
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: STAMPBOT_REPO_CONFIG_CACHE_SECONDS
+            value: "0"
+
   - it: should set setup environment variables
     template: deployment.yaml
     set:

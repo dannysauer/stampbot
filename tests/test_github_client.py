@@ -3,7 +3,7 @@
 
 """Tests for GitHub client module."""
 
-from unittest.mock import Mock, call, patch
+from unittest.mock import Mock, PropertyMock, call, patch
 
 import pytest
 from github.GithubException import GithubException
@@ -304,21 +304,24 @@ class TestGetInstallationClient:
             assert result is not None
 
     def test_get_installation_client_failure(self):
-        """Test installation client creation failure."""
+        """Test a token exchange failure surfaces when the client is created."""
         with (
             patch("stampbot.github_client.is_configured", return_value=True),
             patch("stampbot.github_client.settings") as mock_settings,
-            patch("stampbot.github_client.Auth.AppAuth"),
-            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
+            patch("stampbot.github_client.Auth.AppAuth") as mock_auth_cls,
+            patch("stampbot.github_client.GithubIntegration"),
+            patch("stampbot.github_client.Github"),
             patch("stampbot.github_client.create_span") as mock_span,
         ):
             mock_settings.app_id = 12345
             mock_settings.private_key = TEST_PEM_KEY
             mock_settings.otel_enabled = False
 
-            mock_integration = Mock()
-            mock_integration.get_access_token.side_effect = Exception("Token exchange failed")
-            mock_integration_cls.return_value = mock_integration
+            installation_auth = Mock()
+            type(installation_auth).token = PropertyMock(
+                side_effect=Exception("Token exchange failed")
+            )
+            mock_auth_cls.return_value.get_installation_auth.return_value = installation_auth
 
             mock_span.return_value.__enter__ = Mock(return_value=None)
             mock_span.return_value.__exit__ = Mock(return_value=False)
@@ -329,24 +332,80 @@ class TestGetInstallationClient:
             with pytest.raises(Exception, match="Token exchange failed"):
                 client._get_installation_client(123456)
 
+            # A failed exchange must not leave a broken client in the cache.
+            assert 123456 not in client._installation_clients
+
+    def test_get_installation_client_is_shared_per_installation(self):
+        """Test one lazy client is built per installation and then reused."""
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth") as mock_auth_cls,
+            patch("stampbot.github_client.GithubIntegration"),
+            patch("stampbot.github_client.Github") as mock_github_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            mock_github_cls.side_effect = lambda **kwargs: Mock(name="github", init_kwargs=kwargs)
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+            first = client._get_installation_client(111)
+            second = client._get_installation_client(111)
+            other = client._get_installation_client(222)
+
+            assert first is second
+            assert other is not first
+            assert mock_github_cls.call_count == 2
+            assert mock_auth_cls.return_value.get_installation_auth.call_args_list == [
+                call(111),
+                call(222),
+            ]
+            kwargs = mock_github_cls.call_args_list[0].kwargs
+            assert kwargs["lazy"] is True
+            assert kwargs["timeout"] == 30
+            assert kwargs["auth"] is mock_auth_cls.return_value.get_installation_auth.return_value
+
 
 class TestUpdateRateLimitMetrics:
     """Tests for _update_rate_limit_metrics method."""
 
-    def test_update_rate_limit_metrics_success(self):
-        """Test successful rate limit metrics update."""
+    def test_update_rate_limit_metrics_reads_response_headers(self):
+        """Test the gauges come from the last response instead of GET /rate_limit."""
         from stampbot.github_client import GitHubAppClient
+        from stampbot.metrics import github_api_rate_limit_limit, github_api_rate_limit_remaining
 
         client = GitHubAppClient()
 
         mock_github_client = Mock()
-        mock_rate_limit = Mock()
-        mock_rate_limit.core.remaining = 4500
-        mock_rate_limit.core.limit = 5000
-        mock_github_client.get_rate_limit.return_value = mock_rate_limit
+        mock_github_client.rate_limiting = (4500, 5000)
 
-        # Should not raise
         client._update_rate_limit_metrics(mock_github_client, 123456)
+
+        mock_github_client.get_rate_limit.assert_not_called()
+        assert github_api_rate_limit_remaining.labels(installation_id="123456")._value.get() == 4500
+        assert github_api_rate_limit_limit.labels(installation_id="123456")._value.get() == 5000
+
+    def test_update_rate_limit_metrics_skips_unknown_values(self):
+        """Test PyGithub's -1 placeholders do not overwrite the gauges."""
+        from stampbot.github_client import GitHubAppClient
+        from stampbot.metrics import github_api_rate_limit_remaining
+
+        client = GitHubAppClient()
+        github_api_rate_limit_remaining.labels(installation_id="654321").set(42)
+
+        mock_github_client = Mock()
+        mock_github_client.rate_limiting = (-1, -1)
+
+        client._update_rate_limit_metrics(mock_github_client, 654321)
+
+        assert github_api_rate_limit_remaining.labels(installation_id="654321")._value.get() == 42
 
     def test_update_rate_limit_metrics_handles_exception(self):
         """Test that rate limit metrics errors are silently ignored."""
@@ -355,7 +414,7 @@ class TestUpdateRateLimitMetrics:
         client = GitHubAppClient()
 
         mock_github_client = Mock()
-        mock_github_client.get_rate_limit.side_effect = Exception("API Error")
+        mock_github_client.rate_limiting = "not a tuple"
 
         # Should not raise - errors are silently ignored
         client._update_rate_limit_metrics(mock_github_client, 123456)
@@ -905,13 +964,97 @@ class TestGetRepoFile:
 
             assert result is None
 
-    def test_optional_repository_does_not_hide_token_exchange_not_found(self):
-        """Test optional scope begins only after Stampbot gets an installation client."""
+    def test_get_repo_file_accepts_missing_optional_repository_with_lazy_client(self):
+        """Test a lazy client confirms the optional repository itself is missing."""
         with (
             patch("stampbot.github_client.is_configured", return_value=True),
             patch("stampbot.github_client.settings") as mock_settings,
             patch("stampbot.github_client.Auth.AppAuth"),
             patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
+            patch("stampbot.github_client.Github") as mock_github_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            mock_integration = Mock()
+            mock_integration_cls.return_value = mock_integration
+
+            # Lazy get_repo never raises. The file read and the root read both
+            # 404, and only the repository request proves the repo is absent.
+            mock_repo = Mock()
+            mock_repo.get_contents.side_effect = [
+                GithubException(404, {"message": "Not Found"}, None),
+                GithubException(404, {"message": "Not Found"}, None),
+            ]
+            mock_repo.complete.side_effect = GithubException(404, {"message": "Not Found"}, None)
+            mock_github = Mock()
+            mock_github.get_repo.return_value = mock_repo
+            mock_github_cls.return_value = mock_github
+
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+            result = client.get_repo_file(
+                123456,
+                "owner/.github",
+                "stampbot.toml",
+                missing_repository_is_optional=True,
+            )
+
+            assert result is None
+            mock_repo.complete.assert_called_once_with()
+
+    def test_get_repo_file_target_repository_404_never_checks_repository(self):
+        """Test the target repository never spends a request to become optional."""
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth"),
+            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
+            patch("stampbot.github_client.Github") as mock_github_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            mock_integration_cls.return_value = Mock()
+
+            first = GithubException(404, {"message": "Not Found"}, None)
+            mock_repo = Mock()
+            mock_repo.get_contents.side_effect = [
+                first,
+                GithubException(404, {"message": "Not Found"}, None),
+            ]
+            mock_github = Mock()
+            mock_github.get_repo.return_value = mock_repo
+            mock_github_cls.return_value = mock_github
+
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+            with pytest.raises(GithubException) as error:
+                client.get_repo_file(123456, "owner/repo", "stampbot.toml")
+
+            assert error.value is first
+            mock_repo.complete.assert_not_called()
+
+    def test_optional_repository_does_not_hide_token_exchange_not_found(self):
+        """Test optional scope begins only after Stampbot gets an installation client."""
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth") as mock_auth_cls,
+            patch("stampbot.github_client.GithubIntegration"),
+            patch("stampbot.github_client.Github"),
             patch("stampbot.github_client.create_span") as mock_span,
         ):
             mock_settings.app_id = 12345
@@ -919,9 +1062,9 @@ class TestGetRepoFile:
             mock_settings.otel_enabled = False
 
             failure = GithubException(404, {"message": "Not Found"}, None)
-            mock_integration = Mock()
-            mock_integration.get_access_token.side_effect = failure
-            mock_integration_cls.return_value = mock_integration
+            installation_auth = Mock()
+            type(installation_auth).token = PropertyMock(side_effect=failure)
+            mock_auth_cls.return_value.get_installation_auth.return_value = installation_auth
 
             mock_span.return_value.__enter__ = Mock(return_value=None)
             mock_span.return_value.__exit__ = Mock(return_value=False)
@@ -1082,6 +1225,13 @@ class TestFindBotReviews:
             result = client.find_bot_reviews(123456, "owner/repo", 42)
 
             assert result == [123]
+
+            # The App slug is read once and reused for later review scans.
+            client.find_bot_reviews(123456, "owner/repo", 43)
+            mock_integration.get_app.assert_called_once_with()
+            # The installation client is reused as well.
+            mock_github_cls.assert_called_once()
+            mock_github.get_rate_limit.assert_not_called()
 
     def test_find_bot_reviews_returns_empty_on_error(self):
         """Test that find_bot_reviews returns empty list on error."""
@@ -1636,6 +1786,8 @@ class TestRepoHasLabel:
             result = client.repo_has_label(123456, "owner/repo", "autoapprove")
 
             assert result is True
+            # A lazy label object only requests GitHub when completed.
+            mock_repo.get_label.return_value.complete.assert_called_once_with()
 
     def test_repo_has_label_not_found(self):
         """Test repo_has_label returns False when label is missing."""

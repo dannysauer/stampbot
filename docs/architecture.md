@@ -17,7 +17,7 @@ flowchart LR
     route["Route event"]
     policy["Load policy"]
     decision{"Action allowed?"}
-    installation["Create installation client"]
+    installation["Reuse installation client"]
     write["Write review or comment"]
     signals["Logs, metrics, traces"]
 
@@ -41,10 +41,15 @@ A valid request moves to `WebhookHandler`. The handler loads policy for the
 target repository and decides whether the event calls for approval, dismissal,
 a help comment, or no action.
 
-When a write is needed, `GitHubAppClient` signs an App JWT and exchanges it for
-an installation token. GitHub scopes that token to the installation. The
-visible result lands on the pull request timeline; the webhook response only
-describes what Stampbot did.
+When a write is needed, `GitHubAppClient` uses one client per installation.
+The first operation signs an App JWT and exchanges it for an installation token;
+later operations reuse that token until shortly before GitHub expires it. GitHub
+scopes the token to the installation. The visible result lands on the pull
+request timeline; the webhook response only describes what Stampbot did.
+
+Pull request actions that cannot change review state, such as `edited`,
+`closed`, and `review_requested`, return before any policy read or GitHub
+request.
 
 ## Review state
 
@@ -85,6 +90,11 @@ For every event, Stampbot looks for policy in this order:
 
 The first file wins. Repository and organization files are not merged. A
 missing file moves lookup to the next source.
+
+Each replica caches valid results, including "no file found", per installation,
+repository, and default branch for `STAMPBOT_REPO_CONFIG_CACHE_SECONDS`
+(default 300). Invalid policy and read failures bypass the cache, so the
+fail-closed paths below always re-read GitHub.
 
 The organization repository is optional. GitHub returns a repository-level
 `404` when `OWNER/.github` doesn't exist or the App installation doesn't include

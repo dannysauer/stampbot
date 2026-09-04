@@ -2,6 +2,22 @@
 
 from unittest.mock import Mock, patch
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def library_instrumentors():
+    """Keep the process-wide requests and logging instrumentors out of tests.
+
+    Yields:
+        Tuple of the patched RequestsInstrumentor and LoggingInstrumentor classes.
+    """
+    with (
+        patch("stampbot.telemetry.RequestsInstrumentor") as requests_instrumentor,
+        patch("stampbot.telemetry.LoggingInstrumentor") as logging_instrumentor,
+    ):
+        yield requests_instrumentor, logging_instrumentor
+
 
 def test_get_tracer():
     """Test getting a tracer instance."""
@@ -152,6 +168,49 @@ def test_configure_telemetry_success():
         mock_trace.set_tracer_provider.assert_called_once_with(mock_provider)
 
 
+def test_configure_telemetry_instruments_requests_and_logging(library_instrumentors):
+    """Test GitHub HTTP calls and log records are instrumented after the provider exists."""
+    requests_instrumentor, logging_instrumentor = library_instrumentors
+
+    with (
+        patch("stampbot.telemetry.settings") as mock_settings,
+        patch("stampbot.telemetry.Resource"),
+        patch("stampbot.telemetry.TracerProvider"),
+        patch("stampbot.telemetry.OTLPSpanExporter"),
+        patch("stampbot.telemetry.BatchSpanProcessor"),
+        patch("stampbot.telemetry.trace") as mock_trace,
+    ):
+        mock_settings.otel_enabled = True
+        mock_settings.otel_endpoint = "http://localhost:4317"
+        mock_settings.otel_service_name = "test-service"
+        mock_settings.get.return_value = False
+
+        from stampbot.telemetry import configure_telemetry
+
+        configure_telemetry()
+
+        requests_instrumentor.return_value.instrument.assert_called_once_with()
+        logging_instrumentor.return_value.instrument.assert_called_once_with(
+            set_logging_format=True
+        )
+        mock_trace.set_tracer_provider.assert_called_once()
+
+
+def test_configure_telemetry_disabled_does_not_instrument_libraries(library_instrumentors):
+    """Test disabled tracing leaves requests and logging untouched."""
+    requests_instrumentor, logging_instrumentor = library_instrumentors
+
+    with patch("stampbot.telemetry.settings") as mock_settings:
+        mock_settings.otel_enabled = False
+
+        from stampbot.telemetry import configure_telemetry
+
+        configure_telemetry()
+
+    requests_instrumentor.return_value.instrument.assert_not_called()
+    logging_instrumentor.return_value.instrument.assert_not_called()
+
+
 def test_configure_telemetry_plaintext_requires_opt_in():
     """Test plaintext OTLP is used only when explicitly enabled."""
     with (
@@ -259,7 +318,10 @@ def test_instrument_fastapi_success():
         mock_app = Mock()
         instrument_fastapi(mock_app)
 
-        mock_instrumentor.instrument_app.assert_called_once_with(mock_app)
+        # Probe endpoints are excluded so trace search shows webhook deliveries.
+        mock_instrumentor.instrument_app.assert_called_once_with(
+            mock_app, excluded_urls="/health$,/ready$"
+        )
 
 
 def test_instrument_fastapi_exception():

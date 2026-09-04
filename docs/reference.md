@@ -101,6 +101,11 @@ event. Once GitHub makes the organization repository available to the App, a
 failure reading its policy does too. A readable but invalid file also stops
 automation.
 
+Valid results, including a missing file, stay in memory per replica for
+`STAMPBOT_REPO_CONFIG_CACHE_SECONDS` (default 300). Invalid policy and read
+failures are never cached. `stampbot_repo_config_loads_total{status="cached"}`
+counts events served from that cache.
+
 See [Configuration reference](configuration.md#repository-policy) for every
 field and validation rule.
 
@@ -195,6 +200,20 @@ Tracing is disabled by default. When enabled, the OTLP gRPC exporter uses TLS.
 `STAMPBOT_OTEL_INSECURE=true` permits plaintext only for a non-HTTPS endpoint.
 An HTTPS endpoint cannot be downgraded.
 
+A webhook trace contains three layers:
+
+| Span | Source | Key attributes |
+| --- | --- | --- |
+| `POST /webhook` | FastAPI instrumentation | HTTP route, status, and client |
+| `webhook.*` | Stampbot | `webhook.event_type`, `webhook.action`, `webhook.result`, `github.repo`, `github.pr_number`, `github.delivery_id`, `config.cache` |
+| `github.*` | Stampbot | `github.installation_id`, `github.result`, `github.reviews_found` |
+| `GET`, `POST`, `PUT` | `requests` instrumentation | `http.url`, `http.status_code` for each GitHub API request |
+
+`github.delivery_id` is the `X-GitHub-Delivery` header, so a delivery in the
+GitHub App's **Recent Deliveries** page can be found in Tempo and Loki. The
+same value appears in log records as `delivery_id`. `GET /health` and
+`GET /ready` are not traced.
+
 `OTEL_EXPORTER_OTLP_CERTIFICATE` selects a PEM CA file for a private certificate
 authority. The Helm chart can mount that file from an existing Secret.
 
@@ -216,6 +235,17 @@ source-container build reports `0.0.0+unknown`. `make docker-build` defaults to
 
 GitHub requests use a 30-second timeout. The client permits up to three retries
 with exponential backoff for `500`, `502`, `503`, and `504` responses.
+
+Stampbot keeps one authenticated client per installation for up to an hour of
+idle time. The first operation for an installation exchanges the App JWT for an
+installation token; later operations reuse the token, and the client refreshes
+it shortly before GitHub expires it. `stampbot_github_api_requests_total
+{operation="get_token"}` therefore counts client creations, not operations.
+
+Repository and pull request objects are lazy. A GitHub operation requests only
+the resources it reads or writes, and the remaining rate limit comes from the
+`x-ratelimit-*` headers of those responses instead of a separate request. The
+App's bot login is read once per hour.
 
 Logs scrub common GitHub token formats. Operators still need to remove private
 repository and customer data before sharing logs.

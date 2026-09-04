@@ -910,6 +910,7 @@ fields through without a chart-specific sub-schema.
 | Value | Type and constraint | Default | Effect |
 | --- | --- | --- | --- |
 | `config.logLevel` | Non-empty string | `INFO` | Sets `STAMPBOT_LOG_LEVEL`. Use a standard Python logging level. |
+| `config.repoConfigCacheSeconds` | Integer, minimum 0 | `300` | Sets `STAMPBOT_REPO_CONFIG_CACHE_SECONDS`, the seconds a repository's parsed `stampbot.toml` stays in memory. A policy edit takes effect after this delay. `0` reads policy on every event. |
 | `config.otelEnabled` | Boolean | `false` | Enables Stampbot OpenTelemetry instrumentation. |
 | `config.otelEndpoint` | String | Empty | Sets the OTLP gRPC endpoint. An empty value prevents exporter creation. |
 | `config.otelServiceName` | Non-empty string | `stampbot` | Sets the OpenTelemetry service name. |

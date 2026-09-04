@@ -96,14 +96,144 @@ async def test_pr_opened_no_labels(webhook_handler, mock_github_client):
 
 @pytest.mark.asyncio
 async def test_pr_opened_missing_label_logs_warning(webhook_handler, mock_github_client):
-    """Test missing approval label triggers label check."""
+    """Test missing approval label triggers label check after the review decision."""
     payload = load_fixture("pr_opened_with_autoapprove_label")
     mock_github_client.repo_has_label.return_value = False
 
     result = await webhook_handler.handle_event("pull_request", payload)
 
     assert result["status"] == "success"
-    assert mock_github_client.repo_has_label.call_count == 2
+    # The label on the pull request exists by definition; only "stamp" is checked.
+    mock_github_client.repo_has_label.assert_called_once_with(12345, "octocat/hello-world", "stamp")
+    # The lookup runs after the approval so it never delays the review.
+    call_names = [name for name, _args, _kwargs in mock_github_client.mock_calls]
+    assert call_names.index("approve_pr") < call_names.index("repo_has_label")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["edited", "closed", "review_requested", "ready_for_review"])
+async def test_pr_action_without_review_effect_skips_policy_read(
+    webhook_handler, mock_github_client, action
+):
+    """Test actions that cannot change review state make no GitHub requests."""
+    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload["action"] = action
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "ignored"
+    assert action in result["message"]
+    mock_github_client.get_repo_file.assert_not_called()
+    mock_github_client.approve_pr.assert_not_called()
+    mock_github_client.repo_has_label.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_repo_config_is_cached_between_events(webhook_handler, mock_github_client):
+    """Test a second event for the same repository reuses the parsed policy."""
+    payload = load_fixture("pr_labeled_autoapprove")
+
+    first = await webhook_handler.handle_event("pull_request", payload)
+    second = await webhook_handler.handle_event("pull_request", payload)
+
+    assert first["status"] == "success"
+    assert second["status"] == "success"
+    mock_github_client.get_repo_file.assert_called_once()
+    assert mock_github_client.approve_pr.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_repo_config_cache_disabled(mock_github_client, monkeypatch):
+    """Test a zero cache lifetime reads policy on every event."""
+    monkeypatch.setattr("stampbot.webhook_handler._repo_config_cache_seconds", lambda: 0)
+    from stampbot.webhook_handler import WebhookHandler
+
+    handler = WebhookHandler()
+    payload = load_fixture("pr_labeled_autoapprove")
+
+    await handler.handle_event("pull_request", payload)
+    await handler.handle_event("pull_request", payload)
+
+    assert mock_github_client.get_repo_file.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_repo_config_cache_key_includes_default_branch(webhook_handler, mock_github_client):
+    """Test policy read from another default branch is not served from the cache."""
+    payload = load_fixture("pr_labeled_autoapprove")
+
+    await webhook_handler.handle_event("pull_request", payload)
+    payload["repository"]["default_branch"] = "develop"
+    await webhook_handler.handle_event("pull_request", payload)
+
+    assert mock_github_client.get_repo_file.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_invalid_repo_config_is_not_cached(webhook_handler, mock_github_client):
+    """Test a policy error is re-read on the next event so fixes apply at once."""
+    payload = load_fixture("pr_labeled_autoapprove")
+    mock_github_client.get_repo_file.side_effect = [
+        'chatops_required_permission = "owner"',
+        None,
+    ]
+
+    first = await webhook_handler.handle_event("pull_request", payload)
+    second = await webhook_handler.handle_event("pull_request", payload)
+
+    assert first["status"] == "error"
+    assert second["status"] == "success"
+    assert mock_github_client.get_repo_file.call_count == 2
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (300, 300),
+        ("120", 120),
+        (" 45 ", 45),
+        (0, 0),
+        (-5, 0),
+        ("soon", 300),
+        (None, 300),
+        (True, 300),
+        (12.5, 300),
+    ],
+)
+def test_repo_config_cache_seconds_parsing(monkeypatch, raw, expected):
+    """Test the cache lifetime accepts integers, rejects junk, and never goes negative."""
+    from stampbot import webhook_handler as module
+
+    monkeypatch.setattr(module, "settings", MagicMock(get=lambda _key, _default=None: raw))
+
+    assert module._repo_config_cache_seconds() == expected
+
+
+@pytest.mark.asyncio
+async def test_handle_event_records_delivery_id(webhook_handler):
+    """Test the GitHub delivery GUID is attached to the event span."""
+    with patch("stampbot.webhook_handler.create_span") as mock_span:
+        mock_span.return_value.__enter__ = MagicMock(return_value=None)
+        mock_span.return_value.__exit__ = MagicMock(return_value=False)
+
+        await webhook_handler.handle_event("ping", {"zen": "x"}, delivery_id="abc-123")
+
+    attributes = mock_span.call_args_list[0].args[1]
+    assert attributes["github.delivery_id"] == "abc-123"
+    assert attributes["webhook.event_type"] == "ping"
+
+
+@pytest.mark.asyncio
+async def test_handle_event_omits_missing_delivery_id(webhook_handler):
+    """Test no delivery attribute is recorded when GitHub sent none."""
+    with patch("stampbot.webhook_handler.create_span") as mock_span:
+        mock_span.return_value.__enter__ = MagicMock(return_value=None)
+        mock_span.return_value.__exit__ = MagicMock(return_value=False)
+
+        await webhook_handler.handle_event("ping", {"zen": "x"})
+
+    attributes = mock_span.call_args_list[0].args[1]
+    assert "github.delivery_id" not in attributes
 
 
 @pytest.mark.asyncio

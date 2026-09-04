@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.logging import LoggingInstrumentor
+from opentelemetry.instrumentation.requests import RequestsInstrumentor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -21,6 +23,11 @@ from stampbot.logger import get_logger
 from stampbot.version import APP_VERSION
 
 logger = get_logger(__name__)
+
+# Probe endpoints are polled every few seconds and never call GitHub. Keeping
+# them out of the trace store leaves the search results to webhook deliveries.
+# Each entry is a regular expression matched against the full request URL.
+TRACE_EXCLUDED_URLS = "/health$,/ready$"
 
 
 def configure_telemetry() -> TracerProvider | None:
@@ -66,6 +73,16 @@ def configure_telemetry() -> TracerProvider | None:
         # Set as global tracer provider
         trace.set_tracer_provider(provider)
 
+        # PyGithub uses requests, so this gives every GitHub API call its own
+        # child span with method, URL, and status code. Without it a
+        # ``github.*`` span hides how many requests it made and which one was
+        # slow.
+        RequestsInstrumentor().instrument()
+
+        # Log records gain trace and span IDs. This runs after the provider is
+        # set so the records also carry the service name.
+        LoggingInstrumentor().instrument(set_logging_format=True)
+
         logger.info(
             "OpenTelemetry configured with endpoint: %s (%s)",
             settings.otel_endpoint,
@@ -91,7 +108,7 @@ def instrument_fastapi(app: Any) -> None:
     """
     if settings.otel_enabled:
         try:
-            FastAPIInstrumentor.instrument_app(app)
+            FastAPIInstrumentor.instrument_app(app, excluded_urls=TRACE_EXCLUDED_URLS)
             logger.info("FastAPI instrumented with OpenTelemetry")
         except Exception as e:
             logger.error("Failed to instrument FastAPI: %s", e, extra={"error": str(e)})
