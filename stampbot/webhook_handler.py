@@ -366,7 +366,16 @@ class WebhookHandler:
             event.repo_full_name,
             event.pr_number,
         )
-        if not self._approval_needs_refresh(reviews, event.head_sha):
+        if reviews is None:
+            # GitHub could not be read. Approving may create a duplicate that
+            # the cleanup removes; skipping could miss an approval for good.
+            logger.warning(
+                "Could not read reviews for PR #%d in %s; approving without a refresh check",
+                event.pr_number,
+                event.repo_full_name,
+                extra={"repo": event.repo_full_name, "pr_number": event.pr_number},
+            )
+        elif not self._approval_needs_refresh(reviews, event.head_sha):
             add_span_attributes(span, {"webhook.result": "no_action"})
             set_span_ok(span)
             return dict(NO_ACTION)
@@ -950,6 +959,16 @@ class WebhookHandler:
                     repo_full_name,
                     pr_number,
                 )
+                if reviews is None:
+                    # Unknown state. A duplicate is recoverable; a missed
+                    # approval is not, so approve and let the cleanup sort it out.
+                    logger.warning(
+                        "Could not read reviews for PR #%d in %s; approving without a check",
+                        pr_number,
+                        repo_full_name,
+                        extra={"repo": repo_full_name, "pr_number": pr_number},
+                    )
+                    reviews = []
                 existing_approvals = self._active_approvals_for_head(reviews, head_sha)
                 if existing_approvals:
                     logger.info(
@@ -1056,6 +1075,10 @@ class WebhookHandler:
                     repo_full_name,
                     pr_number,
                 )
+                if reviews is None:
+                    # Nothing can be dismissed without the list, and the
+                    # failure has to reach the metric operators watch.
+                    raise RuntimeError("Stampbot reviews could not be listed")
                 if keep_oldest:
                     # Duplicate cleanup only touches approvals proven to be of
                     # this head, and leaves the oldest of them in place.

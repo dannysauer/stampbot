@@ -147,17 +147,67 @@ async def test_pr_opened_and_labeled_race_leaves_one_approval(webhook_handler, m
 
 
 @pytest.mark.asyncio
-async def test_pr_duplicate_check_failure_keeps_approval(webhook_handler, mock_github_client):
-    """Test a failed duplicate scan never turns a posted approval into an error."""
+@pytest.mark.parametrize("failure", [RuntimeError("GitHub unavailable"), None])
+async def test_pr_duplicate_check_failure_keeps_approval_and_is_counted(
+    webhook_handler, mock_github_client, failure
+):
+    """Test a failed duplicate scan keeps the approval and reaches the failure counter.
+
+    The client reports a listing failure as None; an unexpected exception is
+    handled the same way.
+    """
+    from stampbot.metrics import pr_dismissals_total
+
     payload = load_fixture("pr_labeled_autoapprove")
-    mock_github_client.find_bot_approval_reviews.side_effect = [
-        [],
-        RuntimeError("GitHub unavailable"),
-    ]
+    mock_github_client.find_bot_approval_reviews.side_effect = [[], failure]
+    failures = pr_dismissals_total.labels(trigger_type="duplicate", status="failure")
+    before = failures._value.get()
 
     result = await webhook_handler.handle_event("pull_request", payload)
 
     assert result["status"] == "success"
+    mock_github_client.dismiss_approval.assert_not_called()
+    assert failures._value.get() == before + 1
+
+
+@pytest.mark.asyncio
+async def test_pr_labeled_unknown_review_state_still_approves(webhook_handler, mock_github_client):
+    """Test a failed pre-check listing approves rather than risking a missed approval."""
+    payload = load_fixture("pr_labeled_autoapprove")
+    mock_github_client.find_bot_approval_reviews.return_value = None
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "success"
+    mock_github_client.approve_pr.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_pr_synchronize_unknown_review_state_still_approves(
+    webhook_handler, mock_github_client
+):
+    """Test a failed listing during a refresh approves instead of skipping."""
+    payload = load_fixture("pr_labeled_autoapprove")
+    payload["action"] = "synchronize"
+    payload.pop("label", None)
+    mock_github_client.get_repo_file.return_value = "reapprove = true"
+    mock_github_client.find_bot_approval_reviews.return_value = None
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "success"
+    mock_github_client.approve_pr.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_pr_unlabeled_unknown_review_state_fails(webhook_handler, mock_github_client):
+    """Test a dismissal cannot succeed when the review list is unavailable."""
+    payload = load_fixture("pr_unlabeled_autoapprove")
+    mock_github_client.find_bot_approval_reviews.return_value = None
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "error"
     mock_github_client.dismiss_approval.assert_not_called()
 
 

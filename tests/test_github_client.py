@@ -411,6 +411,45 @@ class TestGetInstallationClient:
             assert error.value is failure
 
 
+class TestRateLimitLabelPruning:
+    """Tests for bounding the installation_id label on the rate-limit gauges."""
+
+    def test_prune_removes_labels_for_evicted_installations(self):
+        """Test gauge label sets follow the credential cache, so churn cannot grow them."""
+        from stampbot.github_client import GitHubAppClient
+        from stampbot.metrics import github_api_rate_limit_limit, github_api_rate_limit_remaining
+
+        client = GitHubAppClient()
+        for installation_id in (9001, 9002):
+            fake = Mock()
+            fake.requester.rate_limiting = (10, 5000)
+            client._update_rate_limit_metrics(fake, installation_id)
+        assert client._rate_limit_installations == {"9001", "9002"}
+
+        # Only 9002 still has live credentials.
+        client._installation_auths[9002] = Mock()
+        with client._installation_auths_lock:
+            client._prune_rate_limit_metrics()
+
+        assert client._rate_limit_installations == {"9002"}
+        for gauge in (github_api_rate_limit_remaining, github_api_rate_limit_limit):
+            labelled = {sample.labels["installation_id"] for sample in gauge.collect()[0].samples}
+            assert "9001" not in labelled
+            assert "9002" in labelled
+
+    def test_prune_tolerates_missing_label_sets(self):
+        """Test pruning a label the gauge never held is not an error."""
+        from stampbot.github_client import GitHubAppClient
+
+        client = GitHubAppClient()
+        client._rate_limit_installations = {"424242"}
+
+        with client._installation_auths_lock:
+            client._prune_rate_limit_metrics()
+
+        assert client._rate_limit_installations == set()
+
+
 class TestUpdateRateLimitMetrics:
     """Tests for _update_rate_limit_metrics method."""
 
@@ -675,6 +714,7 @@ class TestDismissApproval:
             mock_settings.otel_enabled = False
 
             mock_review = Mock()
+            mock_review.state = "DISMISSED"
             mock_review.dismiss.side_effect = GithubException(
                 422, {"message": "Can not dismiss a dismissed pull request review"}, None
             )
@@ -694,6 +734,42 @@ class TestDismissApproval:
             client = GitHubAppClient()
 
             assert client.dismiss_approval(123456, "owner/repo", 42, 789, "Duplicate") is True
+
+    def test_dismiss_approval_422_with_review_still_approved_fails(self):
+        """Test a 422 that leaves the review approved is reported as a failure."""
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth"),
+            patch("stampbot.github_client.GithubIntegration"),
+            patch("stampbot.github_client.Github") as mock_github_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            mock_review = Mock()
+            mock_review.state = "APPROVED"
+            mock_review.dismiss.side_effect = GithubException(
+                422, {"message": "Validation Failed"}, None
+            )
+            mock_pr = Mock()
+            mock_pr.get_review.return_value = mock_review
+            mock_repo = Mock()
+            mock_repo.get_pull.return_value = mock_pr
+            mock_github = Mock()
+            mock_github.get_repo.return_value = mock_repo
+            mock_github_cls.return_value = mock_github
+
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+
+            assert client.dismiss_approval(123456, "owner/repo", 42, 789, "Duplicate") is False
 
     def test_dismiss_approval_other_github_error_fails(self):
         """Test a GitHub error other than an already dismissed review still fails."""
@@ -1320,8 +1396,8 @@ class TestFindBotApprovalReviews:
             assert mock_github_cls.call_count == 3
             mock_github.get_rate_limit.assert_not_called()
 
-    def test_find_bot_approval_reviews_returns_empty_on_error(self):
-        """Test that find_bot_approval_reviews returns empty list on error."""
+    def test_find_bot_approval_reviews_returns_none_on_error(self):
+        """Test that a listing failure is reported as None, distinct from no reviews."""
         with (
             patch("stampbot.github_client.is_configured", return_value=True),
             patch("stampbot.github_client.settings") as mock_settings,
@@ -1352,7 +1428,7 @@ class TestFindBotApprovalReviews:
             client = GitHubAppClient()
             result = client.find_bot_approval_reviews(123456, "owner/repo", 42)
 
-            assert result == []
+            assert result is None
 
 
 class TestUserHasPermission:

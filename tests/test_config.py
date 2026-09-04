@@ -635,7 +635,7 @@ def test_repo_config_cache_seconds_defaults():
         assert repo_config_cache_seconds() == 300
 
 
-@pytest.mark.parametrize("raw", ["soon", None, -5, "-1", [300]])
+@pytest.mark.parametrize("raw", ["soon", None, -5, "-1", [300], True, False, 1.9, "1.9"])
 def test_repo_config_cache_seconds_rejects_invalid_values(raw):
     """Test a non-integer or negative lifetime fails at startup instead of guessing."""
     with patch("stampbot.config.settings") as mock_settings:

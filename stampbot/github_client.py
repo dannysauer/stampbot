@@ -37,7 +37,9 @@ MAX_PRIVATE_KEY_SIZE = 64 * 1024
 # Installation credentials hold a token that PyGithub refreshes shortly before
 # GitHub expires it. Entries expire an hour after creation, which bounds memory
 # for installations that disappear and rotates the token about once an hour.
-INSTALLATION_AUTH_CACHE_SIZE = 256
+# The size also bounds the installation_id label on the rate-limit gauges, which
+# keeps those metrics inside the repository's low-cardinality rule.
+INSTALLATION_AUTH_CACHE_SIZE = 100
 INSTALLATION_AUTH_CACHE_TTL = 3600  # seconds
 # The App slug only changes when an operator renames the App.
 BOT_LOGIN_TTL = 3600  # seconds
@@ -152,6 +154,8 @@ class GitHubAppClient:
             ttl=INSTALLATION_AUTH_CACHE_TTL,
         )
         self._installation_auths_lock = threading.Lock()
+        # Installations that currently own a rate-limit gauge label set.
+        self._rate_limit_installations: set[str] = set()
         self._bot_login_value: tuple[str, float] | None = None  # (login, expires_at)
         self._bot_login_lock = threading.Lock()
 
@@ -299,7 +303,23 @@ class GitHubAppClient:
             installation_auth = self._auth.get_installation_auth(installation_id)
             self._exchange_token(installation_auth, installation_id)
             self._installation_auths[installation_id] = installation_auth
+            self._prune_rate_limit_metrics()
             return installation_auth
+
+    def _prune_rate_limit_metrics(self) -> None:
+        """Drop rate-limit gauge label sets for installations without live credentials.
+
+        Prometheus keeps a child series for every label value ever set. Pruning
+        whenever new credentials are created bounds the series count by the
+        credential cache size, so installation churn cannot grow it without
+        limit. Callers hold ``_installation_auths_lock``.
+        """
+        live = {str(installation_id) for installation_id in self._installation_auths}
+        for stale in self._rate_limit_installations - live:
+            # remove() is a no-op for a label set the gauge never held.
+            github_api_rate_limit_remaining.remove(stale)
+            github_api_rate_limit_limit.remove(stale)
+        self._rate_limit_installations &= live
 
     def _exchange_token(
         self, installation_auth: Auth.AppInstallationAuth, installation_id: int
@@ -375,10 +395,11 @@ class GitHubAppClient:
             if remaining < 0 or limit < 0:
                 # PyGithub reports -1 until a response has carried the headers.
                 return
-            github_api_rate_limit_remaining.labels(installation_id=str(installation_id)).set(
-                remaining
-            )
-            github_api_rate_limit_limit.labels(installation_id=str(installation_id)).set(limit)
+            label = str(installation_id)
+            github_api_rate_limit_remaining.labels(installation_id=label).set(remaining)
+            github_api_rate_limit_limit.labels(installation_id=label).set(limit)
+            with self._installation_auths_lock:
+                self._rate_limit_installations.add(label)
         except Exception:
             # Don't fail operations due to rate limit metric errors
             pass
@@ -582,11 +603,12 @@ class GitHubAppClient:
                 try:
                     review.dismiss(message)
                 except GithubException as e:
-                    if e.status != 422:
+                    # GitHub answers 422 when a review is already dismissed,
+                    # which two replicas cleaning up the same duplicate reach on
+                    # purpose. 422 also covers other validation failures, so the
+                    # review's state is read back before treating it as done.
+                    if e.status != 422 or pr.get_review(review_id).state != "DISMISSED":
                         raise
-                    # GitHub refuses to dismiss a review that is already
-                    # dismissed. Two replicas cleaning up the same duplicate
-                    # reach this on purpose, so it is the outcome we wanted.
                     logger.info(
                         "Review %d on PR #%d in %s was already dismissed",
                         review_id,
@@ -781,7 +803,7 @@ class GitHubAppClient:
         installation_id: int,
         repo_full_name: str,
         pr_number: int,
-    ) -> list[BotReview]:
+    ) -> list[BotReview] | None:
         """Find approval review states created by this bot on a PR.
 
         Args:
@@ -790,7 +812,9 @@ class GitHubAppClient:
             pr_number: Pull request number
 
         Returns:
-            Review state details for bot approval reviews.
+            Review state details for bot approval reviews, or None when GitHub
+            could not be read. Callers decide what an unknown state means for
+            them; an empty list always means "no Stampbot approvals".
         """
         start_time = time.time()
 
@@ -858,7 +882,7 @@ class GitHubAppClient:
                         "error": _sanitize_error(e),
                     },
                 )
-                return []
+                return None
 
     def create_pr_review_comment(
         self,

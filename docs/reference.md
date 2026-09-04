@@ -135,8 +135,11 @@ re-reads its reviews and dismisses every approval of the same head except the
 oldest, with the message `Duplicate Stampbot approval`. Those dismissals appear
 as `stampbot_pr_dismissals_total{trigger_type="duplicate"}`. Approvals of an
 older head, or whose commit GitHub did not report, are never dismissed by this
-cleanup. If the cleanup fails, the webhook response still reports success, the
-extra approval stays, and the counter records `status="failure"`.
+cleanup. If the cleanup fails, including when the review list cannot be read, the
+webhook response still reports success, the extra approval stays, and the
+counter records `status="failure"`. When the review list cannot be read before
+an approval, Stampbot approves anyway and logs a warning, because a duplicate
+can be cleaned up and a missed approval cannot.
 
 On `opened`, after the review decision, Stampbot logs a warning for each
 configured approval label that does not exist in the repository.
@@ -254,8 +257,11 @@ source-container build reports `0.0.0+unknown`. `make docker-build` defaults to
 GitHub requests use a 30-second timeout. The client permits up to three retries
 with exponential backoff for `500`, `502`, `503`, and `504` responses.
 
-Stampbot keeps installation credentials for at most 256 installations per
-replica, each for one hour after creation. The first operation for an
+Stampbot keeps installation credentials for at most 100 installations per
+replica, each for one hour after creation. The `installation_id` label on the
+rate-limit gauges follows that cache: label sets for installations whose
+credentials expired are removed when new credentials are created, so the
+series count stays within the same bound. The first operation for an
 installation exchanges the App JWT for an installation token; later operations
 reuse the token, and PyGithub refreshes it shortly before GitHub expires it.
 Each operation builds its own client on those credentials, so no connection

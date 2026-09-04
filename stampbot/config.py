@@ -81,6 +81,11 @@ def repo_config_cache_seconds() -> int:
         ValueError: If ``repo_config_cache_seconds`` is not a non-negative integer.
     """
     raw = settings.get("repo_config_cache_seconds", DEFAULT_REPO_CONFIG_CACHE_SECONDS)
+    # Dynaconf parses environment values, so ``false`` arrives as a bool and
+    # ``1.9`` as a float. Neither is an integer setting, and int() would accept
+    # both silently.
+    if isinstance(raw, bool) or (isinstance(raw, float) and not raw.is_integer()):
+        raise ValueError(f"repo_config_cache_seconds must be an integer, got {raw!r}")
     try:
         seconds = int(raw)
     except (TypeError, ValueError) as error:
