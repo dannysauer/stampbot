@@ -74,7 +74,7 @@ A handler-level error remains an HTTP `200` unless the handler raises.
 | Event | Behavior |
 | --- | --- |
 | `ping` | Returns `{"status":"ok","message":"pong"}`. |
-| `pull_request` | Handles label, open, reopen, synchronize, and related review decisions. |
+| `pull_request` | Acts on `opened`, `reopened`, `labeled`, `synchronize`, and `unlabeled`. Any other action returns `{"status":"ignored","message":"Action ACTION not handled"}` without reading policy or calling GitHub. |
 | `issue_comment` | Handles `@stampbot` commands only when the issue is a pull request. |
 | `pull_request_review_comment` | Handles `@stampbot` commands in review comments. |
 | Any other event | Returns an ignored result. |
@@ -101,6 +101,12 @@ event. Once GitHub makes the organization repository available to the App, a
 failure reading its policy does too. A readable but invalid file also stops
 automation.
 
+Valid results, including a missing file, stay in memory per replica for
+`STAMPBOT_REPO_CONFIG_CACHE_SECONDS` (default 300). Invalid policy and read
+failures are never cached. `stampbot_repo_config_loads_total{status="cached"}`
+counts events served from that cache; a cache hit creates no
+`webhook.get_repo_config` span.
+
 See [Configuration reference](configuration.md#repository-policy) for every
 field and validation rule.
 
@@ -111,13 +117,32 @@ field and validation rule.
 | Pull request action | Conditions | Result |
 | --- | --- | --- |
 | `opened` or `reopened` | A current label is configured and every eligibility filter passes. | Create an approval unless an active Stampbot approval covers the head. |
-| `labeled` with an approval label | The new label is configured and every filter passes. | Create an approval unless one already covers the head. |
+| `labeled` with an approval label | The new label is configured and every filter passes. | Create an approval unless an active Stampbot approval covers the head. |
 | `labeled` with another label | An approval label remains, a prior Stampbot review exists, and every filter passes. | Refresh approval when no active review covers the head. |
 | `synchronize` | `reapprove=true`, an approval label remains, a prior Stampbot review exists, and every filter passes. | Approve the new head. |
 | `unlabeled` | The removed label is in `approval_labels`. | Dismiss active Stampbot approvals. |
 
 Removing one configured approval label dismisses the review even when another
 configured approval label remains.
+
+A stale approval of an older head never blocks these rows; only an active
+approval of the current head does.
+
+GitHub sends `opened` and one `labeled` event for each label present when a
+pull request is created, and it can send them to different replicas within a
+second. Every one of those events may approve. After each approval Stampbot
+re-reads its reviews and dismisses every approval of the same head except the
+oldest, with the message `Duplicate Stampbot approval`. Those dismissals appear
+as `stampbot_pr_dismissals_total{trigger_type="duplicate"}`. Approvals of an
+older head, or whose commit GitHub did not report, are never dismissed by this
+cleanup. If the cleanup fails, including when the review list cannot be read, the
+webhook response still reports success, the extra approval stays, and the
+counter records `status="failure"`. When the review list cannot be read before
+an approval, Stampbot approves anyway and logs a warning, because a duplicate
+can be cleaned up and a missed approval cannot.
+
+On `opened`, after the review decision, Stampbot logs a warning for each
+configured approval label that does not exist in the repository.
 
 Title filtering accepts at most 20 patterns. Each pattern and the title are
 limited to 256 characters. Each pattern has a 10 ms match budget. Matching runs
@@ -195,6 +220,25 @@ Tracing is disabled by default. When enabled, the OTLP gRPC exporter uses TLS.
 `STAMPBOT_OTEL_INSECURE=true` permits plaintext only for a non-HTTPS endpoint.
 An HTTPS endpoint cannot be downgraded.
 
+A webhook trace contains these spans:
+
+| Span | Source | Key attributes |
+| --- | --- | --- |
+| `POST /webhook` | FastAPI instrumentation | HTTP route, status, and client |
+| `webhook.*` | Stampbot | `webhook.event_type`, `webhook.action`, `webhook.result`, `github.repo`, `github.pr_number`, `github.delivery_id`, `config.result` |
+| `github.*` | Stampbot | `github.installation_id`, `github.result`, `github.reviews_found`, `github.token_refresh` |
+| `GET`, `POST`, `PUT` | `requests` instrumentation | `http.url`, `http.status_code` for each GitHub API request |
+
+`github.token_refresh` is `true` on a `github.get_installation_token` span that
+renews a token about to expire and `false` on the first exchange for an
+installation.
+
+`github.delivery_id` is the `X-GitHub-Delivery` header, so a delivery in the
+GitHub App's **Recent Deliveries** page can be found in Tempo and Loki. The
+same value appears in log records as `delivery_id`. Values longer than 64
+characters or containing characters other than letters, digits, and hyphens
+are dropped. `GET /health` and `GET /ready` are not traced.
+
 `OTEL_EXPORTER_OTLP_CERTIFICATE` selects a PEM CA file for a private certificate
 authority. The Helm chart can mount that file from an existing Secret.
 
@@ -216,6 +260,32 @@ source-container build reports `0.0.0+unknown`. `make docker-build` defaults to
 
 GitHub requests use a 30-second timeout. The client permits up to three retries
 with exponential backoff for `500`, `502`, `503`, and `504` responses.
+
+Stampbot keeps installation credentials for at most 100 installations per
+replica, each for one hour after creation. The `installation_id` label on the
+rate-limit gauges follows that cache: label sets for installations whose
+credentials expired are removed when new credentials are created, so the
+series count stays within the same bound. The first operation for an
+installation exchanges the App JWT for an installation token; later operations
+reuse the token, and PyGithub refreshes it shortly before GitHub expires it.
+The first exchange and every refresh each produce one
+`github.get_installation_token` span, one increment of
+`stampbot_github_api_requests_total{operation="get_token"}`, and one observation
+in `stampbot_github_api_request_duration_seconds{operation="get_token"}`.
+Concurrent operations for one installation share a single exchange, and
+operations for other installations are not delayed by it. A refresh is uncommon:
+credentials leave the cache after the same hour GitHub gives the token, so a
+refresh happens only when an operation arrives in the last seconds before the
+token expires. Each operation builds its own client on those credentials, so no
+connection state is shared between threads. In steady state
+`stampbot_github_api_requests_total{operation="get_token"}` rises about once
+per hour per active installation.
+
+Repository and pull request objects are lazy. A GitHub operation requests only
+the resources it reads or writes, and the remaining rate limit comes from the
+`x-ratelimit-*` headers of those responses instead of a separate request. The
+App's bot login is read once per hour. Parsed repository policy is kept for at
+most 1,024 repositories per replica.
 
 Logs scrub common GitHub token formats. Operators still need to remove private
 repository and customer data before sharing logs.

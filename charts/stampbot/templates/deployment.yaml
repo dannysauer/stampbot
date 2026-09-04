@@ -72,6 +72,8 @@ spec:
         {{- end }}
         - name: STAMPBOT_LOG_LEVEL
           value: {{ .Values.config.logLevel }}
+        - name: STAMPBOT_REPO_CONFIG_CACHE_SECONDS
+          value: {{ .Values.config.repoConfigCacheSeconds | quote }}
         - name: STAMPBOT_OTEL_ENABLED
           value: {{ .Values.config.otelEnabled | quote }}
         {{- if .Values.config.otelEnabled }}

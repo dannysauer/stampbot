@@ -248,7 +248,7 @@ data:
           "pluginVersion": "10.0.0",
           "targets": [
             {
-              "expr": "stampbot_github_rate_limit_remaining",
+              "expr": "min(stampbot_github_api_rate_limit_remaining) by (installation_id)",
               "legendFormat": "Rate Limit",
               "refId": "A"
             }

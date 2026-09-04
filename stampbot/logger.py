@@ -8,7 +8,6 @@ import os
 import sys
 
 import structlog
-from opentelemetry.instrumentation.logging import LoggingInstrumentor
 
 from stampbot.config import settings
 
@@ -102,9 +101,8 @@ def configure_logging() -> None:
     root_logger.handlers = [handler]
     root_logger.setLevel(log_level_int)
 
-    # Instrument logging with OpenTelemetry if enabled
-    if settings.otel_enabled:
-        LoggingInstrumentor().instrument(set_logging_format=True)
+    # Trace-context log fields are added by stampbot.telemetry.configure_telemetry
+    # once the tracer provider exists, so records carry the service name.
 
 
 def get_logger(name: str) -> structlog.BoundLogger:

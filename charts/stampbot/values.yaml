@@ -210,6 +210,10 @@ affinity:
 config:
   # config.logLevel -- STAMPBOT_LOG_LEVEL.
   logLevel: INFO
+  # config.repoConfigCacheSeconds -- STAMPBOT_REPO_CONFIG_CACHE_SECONDS. Seconds to keep a
+  # repository's parsed stampbot.toml in memory before re-reading it. Set 0 to read policy
+  # on every event.
+  repoConfigCacheSeconds: 300
   # config.otelEnabled -- STAMPBOT_OTEL_ENABLED.
   otelEnabled: false
   # config.otelEndpoint -- STAMPBOT_OTEL_ENDPOINT when tracing is enabled.

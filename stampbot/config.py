@@ -68,6 +68,33 @@ def is_configured() -> bool:
     )
 
 
+DEFAULT_REPO_CONFIG_CACHE_SECONDS = 300
+
+
+def repo_config_cache_seconds() -> int:
+    """Return how long a repository's parsed policy stays cached, in seconds.
+
+    Returns:
+        A non-negative integer. Zero disables the cache.
+
+    Raises:
+        ValueError: If ``repo_config_cache_seconds`` is not a non-negative integer.
+    """
+    raw = settings.get("repo_config_cache_seconds", DEFAULT_REPO_CONFIG_CACHE_SECONDS)
+    # Dynaconf parses environment values, so ``false`` arrives as a bool and
+    # ``1.9`` as a float. Neither is an integer setting, and int() would accept
+    # both silently.
+    if isinstance(raw, bool) or (isinstance(raw, float) and not raw.is_integer()):
+        raise ValueError(f"repo_config_cache_seconds must be an integer, got {raw!r}")
+    try:
+        seconds = int(raw)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"repo_config_cache_seconds must be an integer, got {raw!r}") from error
+    if seconds < 0:
+        raise ValueError(f"repo_config_cache_seconds must be 0 or greater, got {raw!r}")
+    return seconds
+
+
 def get_setting(key: str, default: Any = None) -> Any:
     """Get a setting value with a default fallback.
 

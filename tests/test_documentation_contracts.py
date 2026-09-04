@@ -11,6 +11,7 @@ def _normalized(path: str) -> str:
 def test_policy_read_failure_boundaries_are_documented() -> None:
     required = {
         "docs/reference.md": (
+            "dismisses every approval of the same head except the oldest",
             "repository-level `404`, so that response continues lookup to service defaults.",
             "A failure reading the target repository's policy stops automation for that event.",
             "Once GitHub makes the organization repository available to the App, "
@@ -24,6 +25,7 @@ def test_policy_read_failure_boundaries_are_documented() -> None:
         ),
         "docs/operations.md": (
             "Stampbot treats that optional repository as unavailable and uses service defaults.",
+            "Expected when GitHub delivered two events for one new head to different replicas",
             "A failure reading the target repository's policy stops automation for that event.",
             "Once GitHub makes the organization repository available to the App, "
             "a failure reading its policy does too.",

@@ -22,6 +22,11 @@ otel_service_name = "stampbot"
 otel_insecure = false
 # otel_endpoint = ""  # Set via env var or .secrets.toml
 
+# Repository policy (stampbot.toml) is cached in memory per installation,
+# repository, and default branch for this many seconds. A policy edit takes
+# effect after the cache entry expires. Set to 0 to read policy on every event.
+repo_config_cache_seconds = 300
+
 # Metrics use a separate listener so the public webhook port never serves them.
 # Enable this listener explicitly and choose a non-loopback host only when the
 # surrounding network limits who can connect.

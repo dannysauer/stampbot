@@ -6,10 +6,12 @@
 import os
 import re
 import stat
+import threading
 import time
 from pathlib import Path
-from typing import TypedDict
+from typing import Literal, TypedDict
 
+from cachetools import TTLCache
 from github import Auth, Github, GithubIntegration
 from github.ContentFile import ContentFile
 from github.GithubException import GithubException
@@ -17,6 +19,7 @@ from github.Repository import Repository
 from urllib3.util.retry import Retry
 
 from stampbot.config import is_configured, settings
+from stampbot.installation_auth import InstrumentedInstallationAuth
 from stampbot.logger import get_logger
 from stampbot.metrics import (
     github_api_rate_limit_limit,
@@ -31,6 +34,16 @@ GITHUB_API_TIMEOUT = 30  # seconds
 GITHUB_API_RETRY_TOTAL = 3
 GITHUB_API_RETRY_BACKOFF = 0.5  # exponential backoff factor
 MAX_PRIVATE_KEY_SIZE = 64 * 1024
+
+# Installation credentials hold a token that PyGithub refreshes shortly before
+# GitHub expires it. Entries expire an hour after creation, which bounds memory
+# for installations that disappear and rotates the token about once an hour.
+# The size also bounds the installation_id label on the rate-limit gauges, which
+# keeps those metrics inside the repository's low-cardinality rule.
+INSTALLATION_AUTH_CACHE_SIZE = 100
+INSTALLATION_AUTH_CACHE_TTL = 3600  # seconds
+# The App slug only changes when an operator renames the App.
+BOT_LOGIN_TTL = 3600  # seconds
 
 logger = get_logger(__name__)
 
@@ -79,6 +92,50 @@ def _can_read_repo_root(repo: Repository, ref: str | None) -> bool:
     return isinstance(root, list)
 
 
+def _repository_is_missing(repo: Repository) -> bool:
+    """Confirm that GitHub returns 404 for the repository itself.
+
+    Lazy repository objects never request ``GET /repos/{owner}/{repo}`` on their
+    own, so a contents 404 cannot distinguish a missing file from a missing or
+    inaccessible repository. This check settles that question with one request.
+    """
+    try:
+        repo.complete()
+    except GithubException as e:
+        return e.status == 404
+    except Exception:
+        return False
+    return False
+
+
+NotFoundKind = Literal["repository", "file", "unconfirmed"]
+
+
+def _classify_not_found(repo: Repository, ref: str | None, *, optional_repo: bool) -> NotFoundKind:
+    """Decide what a contents 404 means.
+
+    An optional fallback repository may itself be missing, which one repository
+    request settles and which is the common case for organizations without a
+    ``.github`` repository. A readable repository root proves the file is
+    absent. Anything else stays unconfirmed and the caller fails closed.
+    """
+    if optional_repo and _repository_is_missing(repo):
+        return "repository"
+    if _can_read_repo_root(repo, ref):
+        return "file"
+    return "unconfirmed"
+
+
+def _build_retry() -> Retry:
+    """Build the urllib3 retry policy shared by every GitHub client."""
+    return Retry(
+        total=GITHUB_API_RETRY_TOTAL,
+        backoff_factor=GITHUB_API_RETRY_BACKOFF,
+        status_forcelist=[500, 502, 503, 504],
+        allowed_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+    )
+
+
 class GitHubAppClient:
     """GitHub App client with installation token management."""
 
@@ -87,6 +144,23 @@ class GitHubAppClient:
         self._auth: Auth.AppAuth | None = None
         self._integration: GithubIntegration | None = None
         self._initialized = False
+        # First use from several webhook threads must build the App credentials once.
+        self._init_lock = threading.Lock()
+        # Installation credentials are shared across webhook threads. PyGithub
+        # caches the installation token inside the Auth object and refreshes it
+        # shortly before expiry, so sharing it removes the token exchange from
+        # every GitHub operation. Github clients themselves are never shared: a
+        # PyGithub Requester keeps the in-flight request on one connection
+        # object, so two threads using one client can swap each other's requests.
+        self._installation_auths: TTLCache[int, InstrumentedInstallationAuth] = TTLCache(
+            maxsize=INSTALLATION_AUTH_CACHE_SIZE,
+            ttl=INSTALLATION_AUTH_CACHE_TTL,
+        )
+        self._installation_auths_lock = threading.Lock()
+        # Installations that currently own a rate-limit gauge label set.
+        self._rate_limit_installations: set[str] = set()
+        self._bot_login_value: tuple[str, float] | None = None  # (login, expires_at)
+        self._bot_login_lock = threading.Lock()
 
     def _ensure_initialized(self) -> None:
         """Ensure client is initialized with credentials.
@@ -97,18 +171,28 @@ class GitHubAppClient:
         if self._initialized:
             return
 
-        if not is_configured():
-            raise RuntimeError("GitHub App not configured. Visit /setup to create your GitHub App.")
+        with self._init_lock:
+            if self._initialized:
+                return
 
-        # is_configured() guarantees app_id is set, but check for type safety
-        app_id = settings.app_id
-        if app_id is None:
-            raise RuntimeError("App ID not configured")
+            if not is_configured():
+                raise RuntimeError(
+                    "GitHub App not configured. Visit /setup to create your GitHub App."
+                )
 
-        private_key = self._load_private_key()
-        self._auth = Auth.AppAuth(app_id, private_key)
-        self._integration = GithubIntegration(auth=self._auth)
-        self._initialized = True
+            # is_configured() guarantees app_id is set, but check for type safety
+            app_id = settings.app_id
+            if app_id is None:
+                raise RuntimeError("App ID not configured")
+
+            private_key = self._load_private_key()
+            self._auth = Auth.AppAuth(app_id, private_key)
+            self._integration = GithubIntegration(
+                auth=self._auth,
+                timeout=GITHUB_API_TIMEOUT,
+                retry=_build_retry(),
+            )
+            self._initialized = True
 
     @property
     def integration(self) -> GithubIntegration:
@@ -179,8 +263,82 @@ class GitHubAppClient:
 
         return pem_content
 
+    def _new_client(self, installation_auth: Auth.AppInstallationAuth) -> Github:
+        """Build a lazy client bound to installation credentials.
+
+        Lazy clients build URLs for ``get_repo`` and ``get_pull`` without
+        requesting the object, so each operation only pays for the requests it
+        needs. Constructing the client also binds a requester to the
+        credentials, which PyGithub requires before the token can be read.
+
+        Args:
+            installation_auth: Shared credentials for one installation.
+
+        Returns:
+            Github client instance with timeout and retry configured.
+        """
+        return Github(
+            auth=installation_auth,
+            timeout=GITHUB_API_TIMEOUT,
+            retry=_build_retry(),
+            lazy=True,
+        )
+
+    def _installation_auth(self, installation_id: int) -> InstrumentedInstallationAuth:
+        """Return the shared credentials for an installation, creating them on first use.
+
+        No network request happens here, so the cache lock is held only briefly.
+        The token exchange happens when a caller reads ``token``, serialized per
+        installation by the credentials themselves.
+
+        Args:
+            installation_id: GitHub App installation ID.
+
+        Returns:
+            Credentials whose token PyGithub exchanges on first read and
+            refreshes before GitHub expires it.
+
+        Raises:
+            RuntimeError: If the GitHub App credentials are not configured.
+        """
+        with self._installation_auths_lock:
+            installation_auth = self._installation_auths.get(installation_id)
+            if installation_auth is None:
+                # The App credentials must be loaded before an installation auth
+                # can be derived from them.
+                self._ensure_initialized()
+                assert self._auth is not None  # guaranteed by _ensure_initialized
+                installation_auth = InstrumentedInstallationAuth(self._auth, installation_id)
+                self._installation_auths[installation_id] = installation_auth
+                self._prune_rate_limit_metrics()
+            return installation_auth
+
+    def _prune_rate_limit_metrics(self) -> None:
+        """Drop rate-limit gauge label sets for installations without live credentials.
+
+        Prometheus keeps a child series for every label value ever set. Pruning
+        whenever new credentials are created bounds the series count by the
+        credential cache size, so installation churn cannot grow it without
+        limit. Callers hold ``_installation_auths_lock``.
+        """
+        live = {str(installation_id) for installation_id in self._installation_auths}
+        for stale in self._rate_limit_installations - live:
+            # remove() is a no-op for a label set the gauge never held.
+            github_api_rate_limit_remaining.remove(stale)
+            github_api_rate_limit_limit.remove(stale)
+        self._rate_limit_installations &= live
+
     def _get_installation_client(self, installation_id: int) -> Github:
-        """Get authenticated GitHub client for an installation.
+        """Get an authenticated GitHub client for an installation.
+
+        Every call builds a private lazy client on credentials shared per
+        installation, so the token is reused while connection state stays
+        private to the calling thread. Binding the client gives the credentials
+        the requester PyGithub needs for an exchange. The token is then read
+        here, before any repository request, so the first exchange or a due
+        refresh happens now and an authentication failure never looks like a
+        missing repository. A failed exchange leaves the credentials in place;
+        the next read retries.
 
         Args:
             installation_id: GitHub App installation ID.
@@ -191,61 +349,56 @@ class GitHubAppClient:
         Raises:
             github.GithubException: If token exchange fails.
         """
-        start_time = time.time()
-
-        with create_span(
-            "github.get_installation_token",
-            {"github.installation_id": installation_id},
-        ) as span:
-            try:
-                auth = self.integration.get_access_token(installation_id)
-
-                # Configure retry with exponential backoff
-                retry = Retry(
-                    total=GITHUB_API_RETRY_TOTAL,
-                    backoff_factor=GITHUB_API_RETRY_BACKOFF,
-                    status_forcelist=[500, 502, 503, 504],
-                    allowed_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
-                )
-
-                client = Github(
-                    auth=Auth.Token(auth.token),
-                    timeout=GITHUB_API_TIMEOUT,
-                    retry=retry,
-                )
-
-                duration = time.time() - start_time
-                github_api_request_duration_seconds.labels(operation="get_token").observe(duration)
-                github_api_requests_total.labels(operation="get_token", status="success").inc()
-
-                set_span_ok(span)
-                return client
-
-            except Exception as e:
-                duration = time.time() - start_time
-                github_api_request_duration_seconds.labels(operation="get_token").observe(duration)
-                github_api_requests_total.labels(operation="get_token", status="failure").inc()
-                set_span_error(span, e)
-                raise
+        installation_auth = self._installation_auth(installation_id)
+        client = self._new_client(installation_auth)
+        installation_auth.token  # noqa: B018
+        return client
 
     def _update_rate_limit_metrics(self, client: Github, installation_id: int) -> None:
-        """Update rate limit metrics from GitHub client.
+        """Update rate limit metrics from the client's last GitHub response.
+
+        GitHub returns the installation's remaining quota in the
+        ``x-ratelimit-*`` headers of every response, so this reads PyGithub's
+        record of those headers instead of spending a request on
+        ``GET /rate_limit``. The requester is read directly because
+        ``Github.rate_limiting`` falls back to that request when no response
+        has carried the headers yet.
 
         Args:
             client: Authenticated GitHub client.
             installation_id: GitHub App installation ID for metric labels.
         """
         try:
-            rate_limit = client.get_rate_limit()
-            github_api_rate_limit_remaining.labels(installation_id=str(installation_id)).set(
-                rate_limit.core.remaining  # type: ignore[attr-defined]
-            )
-            github_api_rate_limit_limit.labels(installation_id=str(installation_id)).set(
-                rate_limit.core.limit  # type: ignore[attr-defined]
-            )
+            remaining, limit = client.requester.rate_limiting
+            if remaining < 0 or limit < 0:
+                # PyGithub reports -1 until a response has carried the headers.
+                return
+            label = str(installation_id)
+            github_api_rate_limit_remaining.labels(installation_id=label).set(remaining)
+            github_api_rate_limit_limit.labels(installation_id=label).set(limit)
+            with self._installation_auths_lock:
+                self._rate_limit_installations.add(label)
         except Exception:
             # Don't fail operations due to rate limit metric errors
             pass
+
+    def _bot_login(self) -> str:
+        """Return the App's bot login, such as ``stampbot[bot]``.
+
+        The slug is read through the JWT-authenticated App endpoint about once
+        an hour, because installation tokens cannot call ``GET /user`` and the
+        slug only changes when the App is renamed.
+
+        Returns:
+            Login GitHub attributes to reviews created by this App.
+        """
+        with self._bot_login_lock:
+            now = time.monotonic()
+            if self._bot_login_value is not None and self._bot_login_value[1] > now:
+                return self._bot_login_value[0]
+            login = f"{self.integration.get_app().slug}[bot]"
+            self._bot_login_value = (login, now + BOT_LOGIN_TTL)
+            return login
 
     def approve_pr(
         self,
@@ -425,7 +578,26 @@ class GitHubAppClient:
 
                 # Get the review and dismiss it
                 review = pr.get_review(review_id)
-                review.dismiss(message)
+                try:
+                    review.dismiss(message)
+                except GithubException as e:
+                    # GitHub answers 422 when a review is already dismissed,
+                    # which two replicas cleaning up the same duplicate reach on
+                    # purpose. 422 also covers other validation failures, so the
+                    # review's state is read back before treating it as done.
+                    if e.status != 422 or pr.get_review(review_id).state != "DISMISSED":
+                        raise
+                    logger.info(
+                        "Review %d on PR #%d in %s was already dismissed",
+                        review_id,
+                        pr_number,
+                        repo_full_name,
+                        extra={
+                            "repo": repo_full_name,
+                            "pr_number": pr_number,
+                            "review_id": review_id,
+                        },
+                    )
 
                 duration = time.time() - start_time
                 github_api_request_duration_seconds.labels(operation="dismiss").observe(duration)
@@ -492,7 +664,6 @@ class GitHubAppClient:
         """
         start_time = time.time()
         repo: Repository | None = None
-        repository_lookup_started = False
 
         with create_span(
             "github.get_file",
@@ -505,7 +676,8 @@ class GitHubAppClient:
         ) as span:
             try:
                 client = self._get_installation_client(installation_id)
-                repository_lookup_started = True
+                # Lazy: this builds the repository URL without a request, so
+                # ``repo`` stays None only when authentication itself failed.
                 repo = client.get_repo(repo_full_name)
 
                 content = _get_repo_contents(repo, file_path, ref)
@@ -533,15 +705,13 @@ class GitHubAppClient:
             except GithubException as e:
                 duration = time.time() - start_time
                 github_api_request_duration_seconds.labels(operation="get_file").observe(duration)
-                repository_is_optionally_missing = (
-                    e.status == 404
-                    and repository_lookup_started
-                    and repo is None
-                    and missing_repository_is_optional
-                )
-                file_is_confirmed_missing = (
-                    e.status == 404 and repo is not None and _can_read_repo_root(repo, ref)
-                )
+                not_found: NotFoundKind = "unconfirmed"
+                if e.status == 404 and repo is not None:
+                    not_found = _classify_not_found(
+                        repo, ref, optional_repo=missing_repository_is_optional
+                    )
+                repository_is_optionally_missing = not_found == "repository"
+                file_is_confirmed_missing = not_found == "file"
                 if repository_is_optionally_missing or file_is_confirmed_missing:
                     github_api_requests_total.labels(operation="get_file", status="not_found").inc()
 
@@ -606,92 +776,12 @@ class GitHubAppClient:
                 )
                 raise
 
-    def find_bot_reviews(
-        self,
-        installation_id: int,
-        repo_full_name: str,
-        pr_number: int,
-    ) -> list[int]:
-        """Find all reviews created by this bot on a PR.
-
-        Args:
-            installation_id: GitHub App installation ID
-            repo_full_name: Repository full name (owner/repo)
-            pr_number: Pull request number
-
-        Returns:
-            List of review IDs created by the bot
-        """
-        start_time = time.time()
-
-        with create_span(
-            "github.find_bot_reviews",
-            {
-                "github.repo": repo_full_name,
-                "github.pr_number": pr_number,
-                "github.installation_id": installation_id,
-            },
-        ) as span:
-            try:
-                client = self._get_installation_client(installation_id)
-                repo = client.get_repo(repo_full_name)
-                pr = repo.get_pull(pr_number)
-
-                # Get bot user via JWT-authenticated integration (installation tokens
-                # cannot call GET /user, which is restricted by GitHub Apps integration)
-                app_info = self.integration.get_app()
-                bot_user = f"{app_info.slug}[bot]"
-
-                # Find all reviews by bot that are approvals
-                bot_review_ids = []
-                for review in pr.get_reviews():
-                    if review.user.login == bot_user and review.state == "APPROVED":
-                        bot_review_ids.append(review.id)
-
-                duration = time.time() - start_time
-                github_api_request_duration_seconds.labels(operation="find_reviews").observe(
-                    duration
-                )
-                github_api_requests_total.labels(operation="find_reviews", status="success").inc()
-
-                self._update_rate_limit_metrics(client, installation_id)
-
-                add_span_attributes(
-                    span, {"github.reviews_found": len(bot_review_ids), "github.bot_user": bot_user}
-                )
-                set_span_ok(span)
-
-                return bot_review_ids
-
-            except Exception as e:
-                duration = time.time() - start_time
-                github_api_request_duration_seconds.labels(operation="find_reviews").observe(
-                    duration
-                )
-                github_api_requests_total.labels(operation="find_reviews", status="failure").inc()
-
-                set_span_error(span, e)
-
-                logger.error(
-                    "Failed to find bot reviews for PR #%s in %s: %s",
-                    pr_number,
-                    repo_full_name,
-                    _sanitize_error(e),
-                    extra={
-                        "repo": repo_full_name,
-                        "pr_number": pr_number,
-                        "installation_id": installation_id,
-                        "error": _sanitize_error(e),
-                    },
-                )
-                return []
-
     def find_bot_approval_reviews(
         self,
         installation_id: int,
         repo_full_name: str,
         pr_number: int,
-    ) -> list[BotReview]:
+    ) -> list[BotReview] | None:
         """Find approval review states created by this bot on a PR.
 
         Args:
@@ -700,7 +790,9 @@ class GitHubAppClient:
             pr_number: Pull request number
 
         Returns:
-            Review state details for bot approval reviews.
+            Review state details for bot approval reviews, or None when GitHub
+            could not be read. Callers decide what an unknown state means for
+            them; an empty list always means "no Stampbot approvals".
         """
         start_time = time.time()
 
@@ -716,11 +808,7 @@ class GitHubAppClient:
                 client = self._get_installation_client(installation_id)
                 repo = client.get_repo(repo_full_name)
                 pr = repo.get_pull(pr_number)
-
-                # Get bot user via JWT-authenticated integration (installation tokens
-                # cannot call GET /user, which is restricted by GitHub Apps integration)
-                app_info = self.integration.get_app()
-                bot_user = f"{app_info.slug}[bot]"
+                bot_user = self._bot_login()
 
                 bot_reviews: list[BotReview] = []
                 for review in pr.get_reviews():
@@ -772,7 +860,7 @@ class GitHubAppClient:
                         "error": _sanitize_error(e),
                     },
                 )
-                return []
+                return None
 
     def create_pr_review_comment(
         self,
@@ -961,7 +1049,8 @@ class GitHubAppClient:
             try:
                 client = self._get_installation_client(installation_id)
                 repo = client.get_repo(repo_full_name)
-                repo.get_label(label_name)
+                # The lazy client defers the request until the label is read.
+                repo.get_label(label_name).complete()
 
                 duration = time.time() - start_time
                 github_api_request_duration_seconds.labels(operation="get_label").observe(duration)
@@ -1138,6 +1227,7 @@ class GitHubAppClient:
             try:
                 client = self._get_installation_client(installation_id)
                 org = client.get_organization(org_name)
+                user = client.get_user(username)
 
                 for team_ref in allowed_teams:
                     # Extract team slug (handle both "org/team" and "team" formats)
@@ -1146,7 +1236,6 @@ class GitHubAppClient:
                     try:
                         team = org.get_team_by_slug(team_slug)
                         # Check if user is a member
-                        user = client.get_user(username)
                         if team.has_in_members(user):  # type: ignore[arg-type]
                             member_teams.append(team_slug)
                             logger.debug(

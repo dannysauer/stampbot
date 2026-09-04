@@ -13,6 +13,7 @@ from stampbot.config import (
     RepoConfig,
     get_setting,
     is_configured,
+    repo_config_cache_seconds,
 )
 
 
@@ -612,3 +613,33 @@ allowed_teams = ["my-org/release-team"]
 """
     config = RepoConfig.from_toml(toml_content)
     assert config.needs_team_check("other-user") is True
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [(300, 300), ("120", 120), (0, 0), (5.0, 5)],
+)
+def test_repo_config_cache_seconds_accepts_integers(raw, expected):
+    """Test the cache lifetime accepts integer-valued settings."""
+    with patch("stampbot.config.settings") as mock_settings:
+        mock_settings.get.return_value = raw
+
+        assert repo_config_cache_seconds() == expected
+
+
+def test_repo_config_cache_seconds_defaults():
+    """Test the cache lifetime defaults to five minutes."""
+    with patch("stampbot.config.settings") as mock_settings:
+        mock_settings.get.side_effect = lambda _key, default=None: default
+
+        assert repo_config_cache_seconds() == 300
+
+
+@pytest.mark.parametrize("raw", ["soon", None, -5, "-1", [300], True, False, 1.9, "1.9"])
+def test_repo_config_cache_seconds_rejects_invalid_values(raw):
+    """Test a non-integer or negative lifetime fails at startup instead of guessing."""
+    with patch("stampbot.config.settings") as mock_settings:
+        mock_settings.get.return_value = raw
+
+        with pytest.raises(ValueError, match="repo_config_cache_seconds"):
+            repo_config_cache_seconds()

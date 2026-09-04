@@ -30,6 +30,7 @@ Environment variables use the `STAMPBOT_` prefix. Keep `.env` and
 | `STAMPBOT_OTEL_ENDPOINT` | `otel_endpoint` | string | unset | With tracing | OTLP gRPC endpoint. Without it, Stampbot logs a warning and exports no spans. |
 | `STAMPBOT_OTEL_SERVICE_NAME` | `otel_service_name` | string | `stampbot` | No | OpenTelemetry service name. |
 | `STAMPBOT_OTEL_INSECURE` | `otel_insecure` | boolean | `false` | No | Permits plaintext OTLP gRPC for a non-HTTPS endpoint when `true`. An HTTPS endpoint always uses TLS. |
+| `STAMPBOT_REPO_CONFIG_CACHE_SECONDS` | `repo_config_cache_seconds` | integer, minimum 0 | `300` | No | Seconds a repository's parsed policy stays in memory per replica. A policy edit takes effect after the entry expires. `0` reads policy on every event. A negative, boolean, or non-integer value stops startup with a `ValueError`. The value is read once at startup. Errors are never cached. |
 | `STAMPBOT_SETUP_ENABLED` | `setup_enabled` | boolean | `false` | No | Opens setup on an unconfigured instance. It closes after credentials appear. |
 | `STAMPBOT_SETUP_ALLOW_CONFIGURED` | `setup_allow_configured` | boolean | `false` | No | Reopens setup after credentials exist. Use only during deliberate reprovisioning. |
 | `STAMPBOT_BASE_URL` | `base_url` | URL | unset | With setup | Trusted public origin for manifest callback and webhook URLs. HTTPS is required except on localhost. Request headers are never a fallback. |
@@ -104,13 +105,19 @@ For each event, Stampbot checks these locations in order:
 The first file found wins. Stampbot doesn't merge repository and organization
 files.
 
+Each replica keeps the result, including "no file found", in memory for
+`STAMPBOT_REPO_CONFIG_CACHE_SECONDS` (default 300). Within that window, events
+for the same installation, repository, and default branch reuse the parsed
+policy without reading GitHub. Invalid policy and read failures are not cached,
+so a corrected file applies on the next event.
+
 ## Repository policy keys
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `approval_labels` | list of strings | `["autoapprove", "stamp"]` | Labels that trigger approval. Removing any configured approval label can dismiss active Stampbot approvals. |
 | `auto_approve_on_label` | boolean | `true` | Enables label-driven approval and dismissal on label removal. |
-| `reapprove` | boolean | `false` | Lets a `synchronize` event approve a new head when an approval label remains. |
+| `reapprove` | boolean | `false` | Lets a `synchronize` event approve a new head when an approval label remains. With `false`, a new head is approved only by a later `labeled` or `reopened` event or a ChatOps command. |
 | `chatops_enabled` | boolean | `true` | Enables `@stampbot` commands in pull request issue and review comments. |
 | `chatops_required_permission` | enum | `maintain` | Minimum permission for approve and unapprove commands: `none`, `read`, `triage`, `write`, `maintain`, or `admin`. |
 | `approve_commands` | list of strings | `["approve", "stamp"]` | Words that create approval after `@stampbot`. |

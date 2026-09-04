@@ -39,6 +39,10 @@ GitHub branch rules remain the final enforcement boundary.
 - Stop automation when GitHub cannot complete a target-repository policy read.
 - Stop automation when GitHub exposes a fallback repository but cannot complete
   its policy read.
+- Cache only valid policy results, never a read failure or an invalid file.
+- Bound cached policy age to `STAMPBOT_REPO_CONFIG_CACHE_SECONDS`. A policy
+  edit can lag by that long on each replica; set `0` where tightening must
+  apply immediately.
 - Reject unknown permission names and invalid command lists.
 - Bound title length, pattern count, pattern length, and match time.
 - Run title matching outside the asyncio event loop.

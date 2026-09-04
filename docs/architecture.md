@@ -17,7 +17,7 @@ flowchart LR
     route["Route event"]
     policy["Load policy"]
     decision{"Action allowed?"}
-    installation["Create installation client"]
+    installation["Reuse installation client"]
     write["Write review or comment"]
     signals["Logs, metrics, traces"]
 
@@ -41,10 +41,16 @@ A valid request moves to `WebhookHandler`. The handler loads policy for the
 target repository and decides whether the event calls for approval, dismissal,
 a help comment, or no action.
 
-When a write is needed, `GitHubAppClient` signs an App JWT and exchanges it for
-an installation token. GitHub scopes that token to the installation. The
-visible result lands on the pull request timeline; the webhook response only
+When a write is needed, `GitHubAppClient` builds a client for that operation
+on credentials shared per installation. The first operation signs an App JWT and
+exchanges it for an installation token; later operations reuse that token until
+shortly before GitHub expires it. GitHub scopes the token to the installation.
+The visible result lands on the pull request timeline; the webhook response only
 describes what Stampbot did.
+
+Pull request actions that cannot change review state, such as `edited`,
+`closed`, and `review_requested`, return before any policy read or GitHub
+request.
 
 ## Review state
 
@@ -57,17 +63,23 @@ stateDiagram-v2
     Unapproved --> Approved: matching label or authorized command
     Approved --> Dismissed: label removed or unapprove command
     Approved --> Stale: head commit changes
-    Stale --> Approved: reapprove enabled or authorized command
+    Stale --> Approved: reapprove enabled, label event, or authorized command
     Dismissed --> Approved: later matching event or command
 ```
 
 The same flow in words:
 
 - `opened`, `reopened`, and `labeled` may create a label-driven approval.
+  GitHub sends both `opened` and `labeled` for a pull request created with a
+  label, so two replicas can approve at once. Stampbot accepts that and
+  dismisses every approval of the head except the oldest afterwards, rather
+  than letting one event defer to another and risk a missed approval when the
+  other never arrives.
 - Every configured eligibility category must pass before that approval.
 - Removing any configured approval label dismisses active Stampbot approvals.
 - A new head makes an old approval stale. `reapprove` decides whether a
-  `synchronize` event may create a fresh review.
+  `synchronize` event may create a fresh review; a later `labeled` or
+  `reopened` event, or a command, may do so regardless.
 - An authorized ChatOps command may approve the current head or dismiss active
   Stampbot reviews.
 
@@ -85,6 +97,11 @@ For every event, Stampbot looks for policy in this order:
 
 The first file wins. Repository and organization files are not merged. A
 missing file moves lookup to the next source.
+
+Each replica caches valid results, including "no file found", per installation,
+repository, and default branch for `STAMPBOT_REPO_CONFIG_CACHE_SECONDS`
+(default 300). Invalid policy and read failures bypass the cache, so the
+fail-closed paths below always re-read GitHub.
 
 The organization repository is optional. GitHub returns a repository-level
 `404` when `OWNER/.github` doesn't exist or the App installation doesn't include
@@ -106,7 +123,9 @@ fails closed.
 | --- | --- |
 | `stampbot/main.py` | HTTP routes, body limits, setup gates, and request metrics |
 | `stampbot/webhook_handler.py` | Event routing, policy decisions, ChatOps, and review lifecycle |
+| `stampbot/repo_policy.py` | Policy lookup order and the per-replica policy cache |
 | `stampbot/github_client.py` | App authentication, installation clients, retries, and GitHub calls |
+| `stampbot/installation_auth.py` | Installation credentials: one token exchange at a time per installation, traced and counted |
 | `stampbot/config.py` | Service settings, repository defaults, TOML parsing, and policy validation |
 | `stampbot/manifest.py` | Trusted setup URLs and GitHub App manifest creation |
 | `stampbot/metrics.py` | Prometheus metric definitions and the dedicated listener lifecycle |

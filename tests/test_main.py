@@ -9,6 +9,7 @@ import urllib.request
 from unittest.mock import MagicMock, patch
 
 import pytest
+import structlog.contextvars
 from fastapi.testclient import TestClient
 
 
@@ -543,3 +544,64 @@ def test_webhook_handler_exception(test_client: TestClient):
 
     assert response.status_code == 500
     assert response.json()["detail"] == "Internal server error"
+
+
+def _signed_ping(body: bytes) -> str:
+    """Return the GitHub signature header for a webhook body."""
+    from stampbot.webhook_handler import webhook_handler
+
+    return "sha256=" + hmac.new(webhook_handler.webhook_secret, body, hashlib.sha256).hexdigest()
+
+
+def test_webhook_passes_delivery_id_to_handler(test_client: TestClient):
+    """Test the GitHub delivery GUID reaches the handler and the log context."""
+    body = json.dumps({"zen": "test"}).encode()
+    delivery = "72d3162e-cc78-11e3-81ab-4c9367dc0958"
+    seen_context: dict[str, object] = {}
+
+    async def fake_handle(event_type, payload, delivery_id=None):
+        seen_context.update(structlog.contextvars.get_contextvars())
+        return {"status": "ok", "message": event_type, "delivery": delivery_id}
+
+    with patch("stampbot.main.webhook_handler.handle_event", side_effect=fake_handle):
+        response = test_client.post(
+            "/webhook",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-GitHub-Event": "ping",
+                "X-GitHub-Delivery": delivery,
+                "X-Hub-Signature-256": _signed_ping(body),
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["delivery"] == delivery
+    assert seen_context["delivery_id"] == delivery
+
+
+@pytest.mark.parametrize("header", ["", "x" * 65, "not a guid!", "../../etc"])
+def test_webhook_drops_malformed_delivery_id(test_client: TestClient, header: str):
+    """Test a delivery header that is not a GUID is neither logged nor forwarded."""
+    body = json.dumps({"zen": "test"}).encode()
+    seen_context: dict[str, object] = {}
+
+    async def fake_handle(event_type, payload, delivery_id=None):
+        seen_context.update(structlog.contextvars.get_contextvars())
+        return {"status": "ok", "message": event_type, "delivery": delivery_id}
+
+    with patch("stampbot.main.webhook_handler.handle_event", side_effect=fake_handle):
+        response = test_client.post(
+            "/webhook",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-GitHub-Event": "ping",
+                "X-GitHub-Delivery": header,
+                "X-Hub-Signature-256": _signed_ping(body),
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["delivery"] is None
+    assert "delivery_id" not in seen_context
