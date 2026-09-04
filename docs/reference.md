@@ -116,10 +116,8 @@ field and validation rule.
 
 | Pull request action | Conditions | Result |
 | --- | --- | --- |
-| `opened` with an approval label | The label was present when the pull request was created. | Ignore the event; GitHub sends a `labeled` event for each label present at creation, and that event creates the approval. The response reads `Approval label handled by the labeled event`. If that `labeled` delivery fails, redeliver it; the `opened` event does not approve on redelivery. |
-| `reopened` | A current label is configured and every eligibility filter passes. | Create an approval unless an active Stampbot approval exists. |
-| `labeled` with an approval label | The new label is the first configured approval label present on the pull request, and every filter passes. | Create an approval unless an active Stampbot approval exists. |
-| `labeled` with a second approval label | Another configured approval label that sorts earlier in `approval_labels` is already present. | Ignore the event; the event for the earlier label creates the approval. |
+| `opened` or `reopened` | A current label is configured and every eligibility filter passes. | Create an approval unless an active Stampbot approval covers the head. |
+| `labeled` with an approval label | The new label is configured and every filter passes. | Create an approval unless an active Stampbot approval covers the head. |
 | `labeled` with another label | An approval label remains, a prior Stampbot review exists, and every filter passes. | Refresh approval when no active review covers the head. |
 | `synchronize` | `reapprove=true`, an approval label remains, a prior Stampbot review exists, and every filter passes. | Approve the new head. |
 | `unlabeled` | The removed label is in `approval_labels`. | Dismiss active Stampbot approvals. |
@@ -127,8 +125,14 @@ field and validation rule.
 Removing one configured approval label dismisses the review even when another
 configured approval label remains.
 
-The `opened` event still reads policy: it posts the invalid-policy review
-comment and warns about approval labels that do not exist in the repository.
+GitHub sends `opened` and one `labeled` event for each label present when a
+pull request is created, and it can send them to different replicas within a
+second. Every one of those events may approve, because a missed approval costs
+more than a duplicate. After each approval Stampbot re-reads its reviews and
+dismisses every approval of the same head except the oldest, with the message
+`Duplicate Stampbot approval`. Those dismissals appear as
+`stampbot_pr_dismissals_total{trigger_type="duplicate"}`. Approvals of an
+older head are stale, not duplicates, and stay as GitHub left them.
 
 Title filtering accepts at most 20 patterns. Each pattern and the title are
 limited to 256 characters. Each pattern has a 10 ms match budget. Matching runs

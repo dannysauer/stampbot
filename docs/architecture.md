@@ -69,13 +69,12 @@ stateDiagram-v2
 
 The same flow in words:
 
-- `labeled` and `reopened` may create a label-driven approval. An `opened`
-  event that already carries an approval label is a duplicate of the `labeled`
-  event GitHub sends for that label, so it creates nothing. Acting on both could
-  let two replicas post two approvals. When several approval labels arrive
-  together, only the event for the first configured label approves. The cost is
-  that a lost `labeled` delivery, or a pull request converted from an
-  already-labeled issue, waits for a label to be re-added.
+- `opened`, `reopened`, and `labeled` may create a label-driven approval.
+  GitHub sends both `opened` and `labeled` for a pull request created with a
+  label, so two replicas can approve at once. Stampbot accepts that and
+  dismisses every approval of the head except the oldest afterwards, rather
+  than letting one event defer to another and risk a missed approval when the
+  other never arrives.
 - Every configured eligibility category must pass before that approval.
 - Removing any configured approval label dismisses active Stampbot approvals.
 - A new head makes an old approval stale. `reapprove` decides whether a

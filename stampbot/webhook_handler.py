@@ -47,7 +47,6 @@ class Decision(Enum):
     APPROVE = "approve"
     REFRESH = "refresh"  # approve again only when a prior approval is stale
     DISMISS = "dismiss"
-    DUPLICATE = "duplicate"  # another event for the same change creates the approval
     NONE = "none"
 
 
@@ -282,8 +281,6 @@ class WebhookHandler:
                 result = await self._refresh_for_label(span, event, label)
             elif decision is Decision.DISMISS and label:
                 result = await self._dismiss_for_label(span, event, label)
-            elif decision is Decision.DUPLICATE and label:
-                result = self._defer_to_labeled_event(span, event, label)
             else:
                 add_span_attributes(span, {"webhook.result": "no_action"})
                 set_span_ok(span)
@@ -318,23 +315,17 @@ class WebhookHandler:
         if label is None:
             return Decision.NONE, None
 
-        if event.action == "opened":
-            # GitHub also sends one labeled event for every label present when
-            # a pull request is created, and that event creates the approval.
-            # Acting here as well let two replicas race and post two approvals.
-            return Decision.DUPLICATE, label
-
-        if event.action == "reopened":
+        if event.action in ("opened", "reopened"):
+            # GitHub also sends a labeled event for every label present when a
+            # pull request is created. Both events approve, because a missed
+            # approval costs more than a duplicate one; _approve_pr dismisses
+            # any duplicate afterwards.
             return Decision.APPROVE, label
 
         if event.action == "labeled":
-            if event.event_label not in config.approval_labels:
-                return Decision.REFRESH, label
-            # When several approval labels arrive together, only the event for
-            # the first configured label present on the pull request approves.
-            if event.event_label == label:
+            if event.event_label in config.approval_labels:
                 return Decision.APPROVE, label
-            return Decision.DUPLICATE, label
+            return Decision.REFRESH, label
 
         if event.action == "synchronize" and config.reapprove:
             return Decision.REFRESH, label
@@ -355,30 +346,6 @@ class WebhookHandler:
             if label in labels:
                 return label
         return None
-
-    def _defer_to_labeled_event(
-        self, span: Span | None, event: PullRequestEvent, label: str
-    ) -> dict[str, Any]:
-        """Record that another event for the same change creates the approval.
-
-        Args:
-            span: Active tracing span (None if tracing disabled)
-            event: Pull request event
-            label: Approval label the other event carries
-
-        Returns:
-            Response dictionary
-        """
-        logger.info(
-            "PR #%d %s with approval label %s; the labeled event approves it",
-            event.pr_number,
-            event.action,
-            label,
-            extra={"repo": event.repo_full_name, "pr_number": event.pr_number, "label": label},
-        )
-        add_span_attributes(span, {"webhook.result": "duplicate_event"})
-        set_span_ok(span)
-        return {"status": "ignored", "message": "Approval label handled by the labeled event"}
 
     async def _refresh_for_label(
         self, span: Span | None, event: PullRequestEvent, label: str
@@ -477,6 +444,7 @@ class WebhookHandler:
             f"Auto-approved by Stampbot (label: {label})",
             "label",
             skip_existing_check=skip_existing_check,
+            head_sha=event.head_sha,
         )
 
         add_span_attributes(
@@ -919,7 +887,13 @@ class WebhookHandler:
     ) -> bool:
         """Approve a PR and track metrics.
 
-        Checks for existing active approvals first to avoid duplicate comments.
+        Checks for existing active approvals first to avoid duplicate reviews.
+        Two replicas handling the ``opened`` and ``labeled`` events of one new
+        pull request can both pass that check, so after a successful approval
+        the reviews are read again and every Stampbot approval of the same head
+        except the oldest is dismissed. Approving twice and dismissing one is
+        preferred to deferring, which could miss an approval when the other
+        event never arrives.
 
         Args:
             installation_id: GitHub App installation ID
@@ -1005,11 +979,91 @@ class WebhookHandler:
 
             if not success:
                 errors_total.labels(error_type="approval_failed").inc()
+            else:
+                await self._dismiss_duplicate_approvals(
+                    span, installation_id, repo_full_name, pr_number, head_sha
+                )
 
             add_span_attributes(span, {"approval.result": status})
             set_span_ok(span)
 
             return success
+
+    async def _dismiss_duplicate_approvals(
+        self,
+        span: Span | None,
+        installation_id: int,
+        repo_full_name: str,
+        pr_number: int,
+        head_sha: str | None,
+    ) -> None:
+        """Leave one active Stampbot approval on the current head.
+
+        Every replica that approved runs this and reaches the same answer,
+        because all of them keep the approval with the lowest review ID.
+        Failures are logged and never turn a posted approval into an error.
+
+        Args:
+            span: Active tracing span (None if tracing disabled)
+            installation_id: GitHub App installation ID
+            repo_full_name: Repository full name
+            pr_number: PR number
+            head_sha: Current PR head SHA; approvals of other heads are stale, not duplicates
+        """
+        try:
+            reviews = await run_in_threadpool(
+                github_client.find_bot_approval_reviews,
+                installation_id,
+                repo_full_name,
+                pr_number,
+            )
+            duplicates = self._duplicate_approvals(reviews, head_sha)
+            add_span_attributes(span, {"approval.duplicates": len(duplicates)})
+            for review_id in duplicates:
+                logger.info(
+                    "Dismissing duplicate Stampbot approval %d on PR #%d in %s",
+                    review_id,
+                    pr_number,
+                    repo_full_name,
+                    extra={"repo": repo_full_name, "pr_number": pr_number, "review_id": review_id},
+                )
+                dismissed = await run_in_threadpool(
+                    github_client.dismiss_approval,
+                    installation_id,
+                    repo_full_name,
+                    pr_number,
+                    review_id,
+                    "Duplicate Stampbot approval",
+                )
+                pr_dismissals_total.labels(
+                    trigger_type="duplicate",
+                    status="success" if dismissed else "failure",
+                ).inc()
+        except Exception as e:
+            logger.warning(
+                "Could not check PR #%d in %s for duplicate approvals: %s",
+                pr_number,
+                repo_full_name,
+                e,
+                extra={"repo": repo_full_name, "pr_number": pr_number, "error": str(e)},
+            )
+
+    def _duplicate_approvals(self, reviews: list[BotReview], head_sha: str | None) -> list[int]:
+        """Return the IDs of every active approval of the head except the oldest.
+
+        Args:
+            reviews: Bot review states.
+            head_sha: Current PR head SHA.
+
+        Returns:
+            Review IDs to dismiss, oldest first.
+        """
+        active = sorted(
+            review["id"]
+            for review in reviews
+            if self._has_current_active_approval([review], head_sha)
+        )
+        return active[1:]
 
     async def _dismiss_approvals(
         self,

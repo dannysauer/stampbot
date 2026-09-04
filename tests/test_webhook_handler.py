@@ -69,21 +69,33 @@ async def test_unknown_event(webhook_handler):
 
 
 @pytest.mark.asyncio
-async def test_pr_opened_with_autoapprove_label_defers_to_labeled_event(
-    webhook_handler, mock_github_client
-):
-    """Test PR opened with an approval label is a duplicate of its labeled event."""
+async def test_pr_opened_with_autoapprove_label(webhook_handler, mock_github_client):
+    """Test PR opened with autoapprove label triggers approval."""
     payload = load_fixture("pr_opened_with_autoapprove_label")
 
     result = await webhook_handler.handle_event("pull_request", payload)
 
-    assert result == {
-        "status": "ignored",
-        "message": "Approval label handled by the labeled event",
-    }
-    mock_github_client.approve_pr.assert_not_called()
-    mock_github_client.find_bot_reviews.assert_not_called()
-    mock_github_client.find_bot_approval_reviews.assert_not_called()
+    assert result["status"] == "success"
+    assert "approved" in result["message"].lower()
+    mock_github_client.approve_pr.assert_called_once_with(
+        12345,  # installation_id
+        "octocat/hello-world",  # repo
+        42,  # pr_number
+        "Auto-approved by Stampbot (label: autoapprove)",
+    )
+
+
+def _remember_approval(mock_github_client, review_id=777, commit_id="abc123def456"):
+    """Make later review scans see an approval, as GitHub would after a create_review."""
+
+    def approve_and_remember(*_args, **_kwargs):
+        mock_github_client.find_bot_approval_reviews.return_value = [
+            {"id": review_id, "state": "APPROVED", "commit_id": commit_id}
+        ]
+        mock_github_client.find_bot_reviews.return_value = [review_id]
+        return True
+
+    mock_github_client.approve_pr.side_effect = approve_and_remember
 
 
 @pytest.mark.asyncio
@@ -93,55 +105,115 @@ async def test_pr_labeled_at_creation_approves_once(
 ):
     """Test the opened and labeled events for one new pull request yield one approval.
 
-    GitHub delivers the two events in either order.
+    GitHub delivers the two events in either order. When the second event can
+    see the first approval, the existing-approval check stops it.
     """
     opened = load_fixture("pr_opened_with_autoapprove_label")
     labeled = load_fixture("pr_labeled_autoapprove")
     events = [labeled, opened] if labeled_first else [opened, labeled]
-
-    def approve_and_remember(*_args, **_kwargs):
-        # Later review scans see the approval this call created.
-        mock_github_client.find_bot_reviews.return_value = [777]
-        return True
-
-    mock_github_client.approve_pr.side_effect = approve_and_remember
+    _remember_approval(mock_github_client)
 
     results = [await webhook_handler.handle_event("pull_request", e) for e in events]
 
-    assert [r["status"] for r in results] == (
-        ["success", "ignored"] if labeled_first else ["ignored", "success"]
-    )
-    mock_github_client.approve_pr.assert_called_once_with(
-        12345,  # installation_id
-        "octocat/hello-world",  # repo
-        42,  # pr_number
-        "Auto-approved by Stampbot (label: autoapprove)",
-    )
+    assert [r["status"] for r in results] == ["success", "success"]
+    mock_github_client.approve_pr.assert_called_once()
+    mock_github_client.dismiss_approval.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_pr_labeled_second_approval_label_is_duplicate(webhook_handler, mock_github_client):
-    """Test only the first configured approval label present approves when several arrive."""
+async def test_pr_opened_and_labeled_race_leaves_one_approval(webhook_handler, mock_github_client):
+    """Test two replicas that both approved converge on one active approval.
+
+    Neither replica saw the other's review before approving. After approving,
+    each re-reads the reviews and dismisses every approval of the head except
+    the oldest, so both reach the same answer.
+    """
     payload = load_fixture("pr_labeled_autoapprove")
-    payload["pull_request"]["labels"] = [{"name": "autoapprove"}, {"name": "stamp"}]
-    payload["label"] = {"name": "stamp"}
+    mock_github_client.find_bot_approval_reviews.side_effect = [
+        [],  # pre-check: nothing yet
+        [  # post-approval scan: both replicas have posted
+            {"id": 200, "state": "APPROVED", "commit_id": "abc123def456"},
+            {"id": 100, "state": "APPROVED", "commit_id": "abc123def456"},
+            {"id": 50, "state": "APPROVED", "commit_id": "oldsha"},  # stale, not a duplicate
+            {"id": 60, "state": "DISMISSED", "commit_id": "abc123def456"},
+        ],
+    ]
 
     result = await webhook_handler.handle_event("pull_request", payload)
 
-    assert result["status"] == "ignored"
-    assert "labeled event" in result["message"]
-    mock_github_client.approve_pr.assert_not_called()
-    mock_github_client.find_bot_reviews.assert_not_called()
+    assert result["status"] == "success"
+    mock_github_client.approve_pr.assert_called_once()
+    mock_github_client.dismiss_approval.assert_called_once_with(
+        12345, "octocat/hello-world", 42, 200, "Duplicate Stampbot approval"
+    )
 
 
 @pytest.mark.asyncio
-async def test_pr_labeled_first_approval_label_approves_when_second_present(
-    webhook_handler, mock_github_client
-):
-    """Test the event for the first configured label approves even if another is present."""
+async def test_pr_duplicate_check_failure_keeps_approval(webhook_handler, mock_github_client):
+    """Test a failed duplicate scan never turns a posted approval into an error."""
     payload = load_fixture("pr_labeled_autoapprove")
-    payload["pull_request"]["labels"] = [{"name": "stamp"}, {"name": "autoapprove"}]
-    payload["label"] = {"name": "autoapprove"}
+    mock_github_client.find_bot_approval_reviews.side_effect = [
+        [],
+        RuntimeError("GitHub unavailable"),
+    ]
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "success"
+    mock_github_client.dismiss_approval.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("reviews", "head_sha", "expected"),
+    [
+        ([], "head", []),
+        ([{"id": 1, "state": "APPROVED", "commit_id": "head"}], "head", []),
+        (
+            [
+                {"id": 3, "state": "APPROVED", "commit_id": "head"},
+                {"id": 1, "state": "APPROVED", "commit_id": "head"},
+                {"id": 2, "state": "APPROVED", "commit_id": "head"},
+            ],
+            "head",
+            [2, 3],
+        ),
+        (
+            [
+                {"id": 1, "state": "APPROVED", "commit_id": "old"},
+                {"id": 2, "state": "APPROVED", "commit_id": "head"},
+            ],
+            "head",
+            [],
+        ),
+        (
+            [
+                {"id": 1, "state": "APPROVED", "commit_id": None},
+                {"id": 2, "state": "APPROVED", "commit_id": "head"},
+            ],
+            None,
+            [2],
+        ),
+        (
+            [
+                {"id": 1, "state": "DISMISSED", "commit_id": "head"},
+                {"id": 2, "state": "APPROVED", "commit_id": "head"},
+            ],
+            "head",
+            [],
+        ),
+    ],
+)
+def test_duplicate_approvals(webhook_handler, reviews, head_sha, expected):
+    """Test every active approval of the head except the oldest counts as a duplicate."""
+    assert webhook_handler._duplicate_approvals(reviews, head_sha) == expected
+
+
+@pytest.mark.asyncio
+async def test_pr_labeled_second_approval_label_also_approves(webhook_handler, mock_github_client):
+    """Test a second configured label still approves when no approval exists yet."""
+    payload = load_fixture("pr_labeled_autoapprove")
+    payload["pull_request"]["labels"] = [{"name": "autoapprove"}, {"name": "stamp"}]
+    payload["label"] = {"name": "stamp"}
 
     result = await webhook_handler.handle_event("pull_request", payload)
 
@@ -158,7 +230,7 @@ async def test_pr_reopened_with_autoapprove_label(webhook_handler, mock_github_c
     result = await webhook_handler.handle_event("pull_request", payload)
 
     assert result["status"] == "success"
-    mock_github_client.find_bot_reviews.assert_called_once()
+    mock_github_client.find_bot_approval_reviews.assert_called()
     mock_github_client.approve_pr.assert_called_once()
 
 
@@ -182,9 +254,12 @@ async def test_pr_opened_missing_label_logs_warning(webhook_handler, mock_github
 
     result = await webhook_handler.handle_event("pull_request", payload)
 
-    assert result["status"] == "ignored"
+    assert result["status"] == "success"
     # The label on the pull request exists by definition; only "stamp" is checked.
     mock_github_client.repo_has_label.assert_called_once_with(12345, "octocat/hello-world", "stamp")
+    # The lookup runs after the approval so it never delays the review.
+    call_names = [name for name, _args, _kwargs in mock_github_client.mock_calls]
+    assert call_names.index("approve_pr") < call_names.index("repo_has_label")
 
 
 @pytest.mark.asyncio
@@ -407,11 +482,11 @@ async def test_pr_synchronize_reapprove_enabled_current_review_ignored(
 @pytest.mark.parametrize(
     ("action", "event_label", "labels", "reapprove", "expected"),
     [
-        ("opened", None, ["autoapprove"], False, ("duplicate", "autoapprove")),
+        ("opened", None, ["autoapprove"], False, ("approve", "autoapprove")),
         ("opened", None, [], False, ("none", None)),
         ("reopened", None, ["stamp"], False, ("approve", "stamp")),
         ("labeled", "autoapprove", ["autoapprove"], False, ("approve", "autoapprove")),
-        ("labeled", "stamp", ["autoapprove", "stamp"], False, ("duplicate", "autoapprove")),
+        ("labeled", "stamp", ["autoapprove", "stamp"], False, ("approve", "autoapprove")),
         ("labeled", "autoapprove", ["stamp", "autoapprove"], False, ("approve", "autoapprove")),
         ("labeled", "bug", ["autoapprove"], False, ("refresh", "autoapprove")),
         ("labeled", "bug", [], False, ("none", None)),
@@ -467,16 +542,31 @@ def test_decide_respects_auto_approve_disabled(webhook_handler):
 async def test_pr_labeled_skips_duplicate_approval(webhook_handler, mock_github_client):
     """Test that existing approval prevents duplicate approval comment."""
     payload = load_fixture("pr_labeled_autoapprove")
-    # Simulate existing active approval
-    mock_github_client.find_bot_reviews.return_value = [12345]
+    # Simulate an existing active approval of the current head
+    mock_github_client.find_bot_approval_reviews.return_value = [
+        {"id": 12345, "state": "APPROVED", "commit_id": "abc123def456"}
+    ]
 
     result = await webhook_handler.handle_event("pull_request", payload)
 
     assert result["status"] == "success"
-    # find_bot_reviews should be called to check for existing approval
-    mock_github_client.find_bot_reviews.assert_called_once()
+    mock_github_client.find_bot_approval_reviews.assert_called_once()
     # approve_pr should NOT be called since there's already an approval
     mock_github_client.approve_pr.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pr_labeled_stale_approval_does_not_block(webhook_handler, mock_github_client):
+    """Test re-adding a label approves a new head that only a stale approval covers."""
+    payload = load_fixture("pr_labeled_autoapprove")
+    mock_github_client.find_bot_approval_reviews.return_value = [
+        {"id": 12345, "state": "APPROVED", "commit_id": "oldsha"}
+    ]
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "success"
+    mock_github_client.approve_pr.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -677,9 +767,45 @@ async def test_issue_comment_approve_refreshes_stale_approval(webhook_handler, m
 
     assert result["status"] == "success"
     mock_github_client.get_pr_head_sha.assert_called_once()
-    mock_github_client.find_bot_approval_reviews.assert_called_once()
+    # Once before approving, once afterwards to look for duplicates.
+    assert mock_github_client.find_bot_approval_reviews.call_count == 2
     mock_github_client.find_bot_reviews.assert_not_called()
     mock_github_client.approve_pr.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_issue_comment_approve_without_head_uses_any_active_approval(
+    webhook_handler, mock_github_client
+):
+    """Test the existing-approval check falls back to any active review when the head is unknown."""
+    payload = load_fixture("issue_comment_approve")
+    mock_github_client.get_pr_head_sha.return_value = None
+    mock_github_client.find_bot_reviews.return_value = [4242]
+
+    result = await webhook_handler.handle_event("issue_comment", payload)
+
+    assert result["status"] == "success"
+    mock_github_client.find_bot_reviews.assert_called_once()
+    mock_github_client.approve_pr.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pr_duplicate_dismissal_failure_is_counted(webhook_handler, mock_github_client):
+    """Test a dismissal that GitHub rejects is recorded without failing the approval."""
+    payload = load_fixture("pr_labeled_autoapprove")
+    mock_github_client.find_bot_approval_reviews.side_effect = [
+        [],
+        [
+            {"id": 100, "state": "APPROVED", "commit_id": "abc123def456"},
+            {"id": 200, "state": "APPROVED", "commit_id": "abc123def456"},
+        ],
+    ]
+    mock_github_client.dismiss_approval.return_value = False
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "success"
+    mock_github_client.dismiss_approval.assert_called_once()
 
 
 @pytest.mark.asyncio
