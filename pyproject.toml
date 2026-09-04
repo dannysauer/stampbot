@@ -25,13 +25,13 @@ classifiers = [
 [tool.poetry.dependencies]
 python = ">=3.11,<3.15"
 fastapi = "0.141.1"
-uvicorn = {extras = ["standard"], version = "0.52.1"}
-pydantic = "2.13.4"
+uvicorn = {extras = ["standard"], version = "0.52.4"}
+pydantic = "2.13.5"
 pydantic-settings = "2.15.0"
 dynaconf = "3.3.5"
-PyGithub = "2.9.1"
+PyGithub = "2.10.0"
 PyJWT = {extras = ["crypto"], version = "2.13.0"}
-cryptography = "50.0.0"
+cryptography = "50.0.1"
 prometheus-client = "0.26.0"
 opentelemetry-api = "1.44.0"
 opentelemetry-sdk = "1.44.0"
@@ -42,18 +42,18 @@ opentelemetry-exporter-otlp = "1.44.0"
 structlog = "26.1.0"
 httpx = "0.28.1"
 toml = "0.10.2"
-regex = "2026.7.19"
+regex = "2026.9.3"
 cachetools = "7.1.8"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "9.1.1"
 pytest-cov = "7.1.0"
 pytest-asyncio = "1.4.0"
-ruff = "0.16.2"
-mypy = "2.3.0"
+ruff = "0.16.6"
+mypy = "2.3.1"
 types-toml = "0.10.8.20260518"
 types-cachetools = "7.0.0.20260713"
-pre-commit = "4.6.1"
+pre-commit = "4.6.2"
 cosmic-ray = "8.7.0"
 
 [tool.poetry.group.secrets.dependencies]
