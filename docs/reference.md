@@ -226,8 +226,12 @@ A webhook trace contains these spans:
 | --- | --- | --- |
 | `POST /webhook` | FastAPI instrumentation | HTTP route, status, and client |
 | `webhook.*` | Stampbot | `webhook.event_type`, `webhook.action`, `webhook.result`, `github.repo`, `github.pr_number`, `github.delivery_id`, `config.result` |
-| `github.*` | Stampbot | `github.installation_id`, `github.result`, `github.reviews_found` |
+| `github.*` | Stampbot | `github.installation_id`, `github.result`, `github.reviews_found`, `github.token_refresh` |
 | `GET`, `POST`, `PUT` | `requests` instrumentation | `http.url`, `http.status_code` for each GitHub API request |
+
+`github.token_refresh` is `true` on a `github.get_installation_token` span that
+renews a token about to expire and `false` on the first exchange for an
+installation.
 
 `github.delivery_id` is the `X-GitHub-Delivery` header, so a delivery in the
 GitHub App's **Recent Deliveries** page can be found in Tempo and Loki. The
@@ -264,8 +268,16 @@ credentials expired are removed when new credentials are created, so the
 series count stays within the same bound. The first operation for an
 installation exchanges the App JWT for an installation token; later operations
 reuse the token, and PyGithub refreshes it shortly before GitHub expires it.
-Each operation builds its own client on those credentials, so no connection
-state is shared between threads. In steady state
+The first exchange and every refresh each produce one
+`github.get_installation_token` span, one increment of
+`stampbot_github_api_requests_total{operation="get_token"}`, and one observation
+in `stampbot_github_api_request_duration_seconds{operation="get_token"}`.
+Concurrent operations for one installation share a single exchange, and
+operations for other installations are not delayed by it. A refresh is uncommon:
+credentials leave the cache after the same hour GitHub gives the token, so a
+refresh happens only when an operation arrives in the last seconds before the
+token expires. Each operation builds its own client on those credentials, so no
+connection state is shared between threads. In steady state
 `stampbot_github_api_requests_total{operation="get_token"}` rises about once
 per hour per active installation.
 

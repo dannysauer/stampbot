@@ -125,6 +125,7 @@ fails closed.
 | `stampbot/webhook_handler.py` | Event routing, policy decisions, ChatOps, and review lifecycle |
 | `stampbot/repo_policy.py` | Policy lookup order and the per-replica policy cache |
 | `stampbot/github_client.py` | App authentication, installation clients, retries, and GitHub calls |
+| `stampbot/installation_auth.py` | Installation credentials: one token exchange at a time per installation, traced and counted |
 | `stampbot/config.py` | Service settings, repository defaults, TOML parsing, and policy validation |
 | `stampbot/manifest.py` | Trusted setup URLs and GitHub App manifest creation |
 | `stampbot/metrics.py` | Prometheus metric definitions and the dedicated listener lifecycle |

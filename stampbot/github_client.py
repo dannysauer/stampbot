@@ -19,6 +19,7 @@ from github.Repository import Repository
 from urllib3.util.retry import Retry
 
 from stampbot.config import is_configured, settings
+from stampbot.installation_auth import InstrumentedInstallationAuth
 from stampbot.logger import get_logger
 from stampbot.metrics import (
     github_api_rate_limit_limit,
@@ -143,13 +144,15 @@ class GitHubAppClient:
         self._auth: Auth.AppAuth | None = None
         self._integration: GithubIntegration | None = None
         self._initialized = False
+        # First use from several webhook threads must build the App credentials once.
+        self._init_lock = threading.Lock()
         # Installation credentials are shared across webhook threads. PyGithub
         # caches the installation token inside the Auth object and refreshes it
         # shortly before expiry, so sharing it removes the token exchange from
         # every GitHub operation. Github clients themselves are never shared: a
         # PyGithub Requester keeps the in-flight request on one connection
         # object, so two threads using one client can swap each other's requests.
-        self._installation_auths: TTLCache[int, Auth.AppInstallationAuth] = TTLCache(
+        self._installation_auths: TTLCache[int, InstrumentedInstallationAuth] = TTLCache(
             maxsize=INSTALLATION_AUTH_CACHE_SIZE,
             ttl=INSTALLATION_AUTH_CACHE_TTL,
         )
@@ -168,22 +171,28 @@ class GitHubAppClient:
         if self._initialized:
             return
 
-        if not is_configured():
-            raise RuntimeError("GitHub App not configured. Visit /setup to create your GitHub App.")
+        with self._init_lock:
+            if self._initialized:
+                return
 
-        # is_configured() guarantees app_id is set, but check for type safety
-        app_id = settings.app_id
-        if app_id is None:
-            raise RuntimeError("App ID not configured")
+            if not is_configured():
+                raise RuntimeError(
+                    "GitHub App not configured. Visit /setup to create your GitHub App."
+                )
 
-        private_key = self._load_private_key()
-        self._auth = Auth.AppAuth(app_id, private_key)
-        self._integration = GithubIntegration(
-            auth=self._auth,
-            timeout=GITHUB_API_TIMEOUT,
-            retry=_build_retry(),
-        )
-        self._initialized = True
+            # is_configured() guarantees app_id is set, but check for type safety
+            app_id = settings.app_id
+            if app_id is None:
+                raise RuntimeError("App ID not configured")
+
+            private_key = self._load_private_key()
+            self._auth = Auth.AppAuth(app_id, private_key)
+            self._integration = GithubIntegration(
+                auth=self._auth,
+                timeout=GITHUB_API_TIMEOUT,
+                retry=_build_retry(),
+            )
+            self._initialized = True
 
     @property
     def integration(self) -> GithubIntegration:
@@ -275,35 +284,33 @@ class GitHubAppClient:
             lazy=True,
         )
 
-    def _installation_auth(self, installation_id: int) -> Auth.AppInstallationAuth:
-        """Return the shared credentials for an installation, exchanging a token on first use.
+    def _installation_auth(self, installation_id: int) -> InstrumentedInstallationAuth:
+        """Return the shared credentials for an installation, creating them on first use.
 
-        The lock is held across the exchange so concurrent first calls for one
-        installation share a single token. That happens once per installation
-        per hour, so the serialization is not noticeable.
+        No network request happens here, so the cache lock is held only briefly.
+        The token exchange happens when a caller reads ``token``, serialized per
+        installation by the credentials themselves.
 
         Args:
             installation_id: GitHub App installation ID.
 
         Returns:
-            Credentials whose token PyGithub refreshes before GitHub expires it.
+            Credentials whose token PyGithub exchanges on first read and
+            refreshes before GitHub expires it.
 
         Raises:
-            github.GithubException: If token exchange fails.
+            RuntimeError: If the GitHub App credentials are not configured.
         """
         with self._installation_auths_lock:
-            cached = self._installation_auths.get(installation_id)
-            if cached is not None:
-                return cached
-
-            # The App credentials must be loaded before an installation auth
-            # can be derived from them.
-            self._ensure_initialized()
-            assert self._auth is not None  # guaranteed by _ensure_initialized
-            installation_auth = self._auth.get_installation_auth(installation_id)
-            self._exchange_token(installation_auth, installation_id)
-            self._installation_auths[installation_id] = installation_auth
-            self._prune_rate_limit_metrics()
+            installation_auth = self._installation_auths.get(installation_id)
+            if installation_auth is None:
+                # The App credentials must be loaded before an installation auth
+                # can be derived from them.
+                self._ensure_initialized()
+                assert self._auth is not None  # guaranteed by _ensure_initialized
+                installation_auth = InstrumentedInstallationAuth(self._auth, installation_id)
+                self._installation_auths[installation_id] = installation_auth
+                self._prune_rate_limit_metrics()
             return installation_auth
 
     def _prune_rate_limit_metrics(self) -> None:
@@ -321,46 +328,17 @@ class GitHubAppClient:
             github_api_rate_limit_limit.remove(stale)
         self._rate_limit_installations &= live
 
-    def _exchange_token(
-        self, installation_auth: Auth.AppInstallationAuth, installation_id: int
-    ) -> None:
-        """Exchange the App JWT for an installation token, with a span and metrics.
-
-        Args:
-            installation_auth: Credentials to fill. A client is bound first
-                because PyGithub requires a requester before it can exchange.
-            installation_id: GitHub App installation ID for labels.
-
-        Raises:
-            github.GithubException: If token exchange fails.
-        """
-        start_time = time.time()
-        with create_span(
-            "github.get_installation_token",
-            {"github.installation_id": installation_id},
-        ) as span:
-            try:
-                self._new_client(installation_auth)
-                installation_auth.token  # noqa: B018
-                github_api_requests_total.labels(operation="get_token", status="success").inc()
-                set_span_ok(span)
-            except Exception as e:
-                github_api_requests_total.labels(operation="get_token", status="failure").inc()
-                set_span_error(span, e)
-                raise
-            finally:
-                github_api_request_duration_seconds.labels(operation="get_token").observe(
-                    time.time() - start_time
-                )
-
     def _get_installation_client(self, installation_id: int) -> Github:
         """Get an authenticated GitHub client for an installation.
 
         Every call builds a private lazy client on credentials shared per
         installation, so the token is reused while connection state stays
-        private to the calling thread. A due token refresh runs here, before any
-        repository request, so an authentication failure never looks like a
-        missing repository.
+        private to the calling thread. Binding the client gives the credentials
+        the requester PyGithub needs for an exchange. The token is then read
+        here, before any repository request, so the first exchange or a due
+        refresh happens now and an authentication failure never looks like a
+        missing repository. A failed exchange leaves the credentials in place;
+        the next read retries.
 
         Args:
             installation_id: GitHub App installation ID.
@@ -373,7 +351,7 @@ class GitHubAppClient:
         """
         installation_auth = self._installation_auth(installation_id)
         client = self._new_client(installation_auth)
-        installation_auth.token  # noqa: B018  # refresh when PyGithub deems it due
+        installation_auth.token  # noqa: B018
         return client
 
     def _update_rate_limit_metrics(self, client: Github, installation_id: int) -> None:

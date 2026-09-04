@@ -80,6 +80,7 @@ GitHub Webhook -> POST /webhook -> WebhookHandler.handle_event()
 - `webhook_handler.py` - Event routing, label/chatops processing
 - `repo_policy.py` - Repository policy lookup (stampbot.toml, org fallback, defaults) with a short cache
 - `github_client.py` - GitHub API with app authentication (JWT)
+- `installation_auth.py` - Installation credentials with a per-installation exchange lock, span, and metrics
 - `config.py` - Dynaconf-based configuration (env vars, settings.toml, per-repo stampbot.toml)
 - `manifest.py` - GitHub App manifest creation for easy setup
 - `metrics.py` - Prometheus metric definitions and the optional separate listener
