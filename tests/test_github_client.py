@@ -375,6 +375,42 @@ class TestGetInstallationClient:
             assert kwargs["auth"] is mock_auth_cls.return_value.get_installation_auth.return_value
             assert mock_github_cls.call_args_list[1].kwargs["auth"] is kwargs["auth"]
 
+    def test_get_installation_client_keeps_first_credentials_after_a_race(self):
+        """Test a concurrent exchange for the same installation shares the first credentials."""
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth") as mock_auth_cls,
+            patch("stampbot.github_client.GithubIntegration"),
+            patch("stampbot.github_client.Github") as mock_github_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+            winner = Mock(name="winner")
+            loser = Mock(name="loser")
+
+            def another_thread_wins_first(_installation_id):
+                # Simulate a second thread finishing its exchange between this
+                # thread's cache miss and its cache insert.
+                client._installation_auths[111] = winner
+                return loser
+
+            mock_auth_cls.return_value.get_installation_auth.side_effect = another_thread_wins_first
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            client._get_installation_client(111)
+
+            assert client._installation_auths[111] is winner
+            # The returned client was rebuilt on the shared credentials.
+            assert mock_github_cls.call_args_list[-1].kwargs["auth"] is winner
+
     def test_get_installation_client_surfaces_refresh_failure(self):
         """Test a failed token refresh on cached credentials raises before any request."""
         with (

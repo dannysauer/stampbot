@@ -369,6 +369,27 @@ class WebhookHandler:
             "synchronize",
         ]:
             approval_label = self._find_approval_label(labels, repo_config)
+            if approval_label and action == "opened":
+                # GitHub also sends one labeled event for every label present
+                # when a pull request is created, and that event creates the
+                # approval. Treating this event as a duplicate stops two
+                # replicas from racing to post two approvals.
+                logger.info(
+                    "PR #%d opened with approval label %s; the labeled event approves it",
+                    pr_number,
+                    approval_label,
+                    extra={
+                        "repo": repo_full_name,
+                        "pr_number": pr_number,
+                        "label": approval_label,
+                    },
+                )
+                add_span_attributes(span, {"webhook.result": "duplicate_event"})
+                set_span_ok(span)
+                return {
+                    "status": "ignored",
+                    "message": "Approval label handled by the labeled event",
+                }
             if approval_label:
                 should_approve, skip_existing_check = await self._should_approve_for_pr_event(
                     action,
@@ -553,7 +574,7 @@ class WebhookHandler:
         Returns:
             Tuple of (should approve, skip existing approval check).
         """
-        if action in ("opened", "reopened"):
+        if action == "reopened":
             return True, False
 
         added_label = payload.get("label", {}).get("name")

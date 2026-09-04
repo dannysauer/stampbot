@@ -115,7 +115,8 @@ field and validation rule.
 
 | Pull request action | Conditions | Result |
 | --- | --- | --- |
-| `opened` or `reopened` | A current label is configured and every eligibility filter passes. | Create an approval unless an active Stampbot approval covers the head. |
+| `opened` with an approval label | The label was present when the pull request was created. | Ignore the event; GitHub sends a `labeled` event for each label present at creation, and that event creates the approval. The response reads `Approval label handled by the labeled event`. |
+| `reopened` | A current label is configured and every eligibility filter passes. | Create an approval unless an active Stampbot approval covers the head. |
 | `labeled` with an approval label | The new label is configured and every filter passes. | Create an approval unless one already covers the head. |
 | `labeled` with another label | An approval label remains, a prior Stampbot review exists, and every filter passes. | Refresh approval when no active review covers the head. |
 | `synchronize` | `reapprove=true`, an approval label remains, a prior Stampbot review exists, and every filter passes. | Approve the new head. |
@@ -123,6 +124,9 @@ field and validation rule.
 
 Removing one configured approval label dismisses the review even when another
 configured approval label remains.
+
+The `opened` event still reads policy: it posts the invalid-policy review
+comment and warns about approval labels that do not exist in the repository.
 
 Title filtering accepts at most 20 patterns. Each pattern and the title are
 limited to 256 characters. Each pattern has a 10 ms match budget. Matching runs

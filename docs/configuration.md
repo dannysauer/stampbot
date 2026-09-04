@@ -199,7 +199,7 @@ The App manifest subscribes to these events:
 
 | Event | Actions used |
 | --- | --- |
-| `pull_request` | `opened`, `reopened`, `labeled`, `unlabeled`, and `synchronize` |
+| `pull_request` | `opened`, `reopened`, `labeled`, `unlabeled`, and `synchronize`. `opened` never creates an approval; its `labeled` companion event does. |
 | `issue_comment` | Comments whose issue is a pull request |
 | `pull_request_review_comment` | Review comments on a pull request |
 

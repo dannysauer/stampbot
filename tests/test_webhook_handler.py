@@ -66,20 +66,52 @@ async def test_unknown_event(webhook_handler):
 
 
 @pytest.mark.asyncio
-async def test_pr_opened_with_autoapprove_label(webhook_handler, mock_github_client):
-    """Test PR opened with autoapprove label triggers approval."""
+async def test_pr_opened_with_autoapprove_label_defers_to_labeled_event(
+    webhook_handler, mock_github_client
+):
+    """Test PR opened with an approval label is a duplicate of its labeled event."""
     payload = load_fixture("pr_opened_with_autoapprove_label")
 
     result = await webhook_handler.handle_event("pull_request", payload)
 
+    assert result == {
+        "status": "ignored",
+        "message": "Approval label handled by the labeled event",
+    }
+    mock_github_client.approve_pr.assert_not_called()
+    mock_github_client.find_bot_reviews.assert_not_called()
+    mock_github_client.find_bot_approval_reviews.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pr_labeled_at_creation_approves_once(webhook_handler, mock_github_client):
+    """Test the opened and labeled events for one new pull request yield one approval."""
+    opened = load_fixture("pr_opened_with_autoapprove_label")
+    labeled = load_fixture("pr_labeled_autoapprove")
+
+    await webhook_handler.handle_event("pull_request", opened)
+    result = await webhook_handler.handle_event("pull_request", labeled)
+
     assert result["status"] == "success"
-    assert "approved" in result["message"].lower()
     mock_github_client.approve_pr.assert_called_once_with(
         12345,  # installation_id
         "octocat/hello-world",  # repo
         42,  # pr_number
         "Auto-approved by Stampbot (label: autoapprove)",
     )
+
+
+@pytest.mark.asyncio
+async def test_pr_reopened_with_autoapprove_label(webhook_handler, mock_github_client):
+    """Test reopening a labeled pull request approves it; no labeled event accompanies reopen."""
+    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload["action"] = "reopened"
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "success"
+    mock_github_client.find_bot_reviews.assert_called_once()
+    mock_github_client.approve_pr.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -102,12 +134,9 @@ async def test_pr_opened_missing_label_logs_warning(webhook_handler, mock_github
 
     result = await webhook_handler.handle_event("pull_request", payload)
 
-    assert result["status"] == "success"
+    assert result["status"] == "ignored"
     # The label on the pull request exists by definition; only "stamp" is checked.
     mock_github_client.repo_has_label.assert_called_once_with(12345, "octocat/hello-world", "stamp")
-    # The lookup runs after the approval so it never delays the review.
-    call_names = [name for name, _args, _kwargs in mock_github_client.mock_calls]
-    assert call_names.index("approve_pr") < call_names.index("repo_has_label")
 
 
 @pytest.mark.asyncio
@@ -240,7 +269,7 @@ async def test_handle_event_omits_missing_delivery_id(webhook_handler):
 @pytest.mark.asyncio
 async def test_pr_label_ignored_when_auto_approve_disabled(webhook_handler, mock_github_client):
     """Test label approvals are ignored when auto_approve_on_label is disabled."""
-    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload = load_fixture("pr_labeled_autoapprove")
     mock_github_client.get_repo_file.return_value = "auto_approve_on_label = false"
 
     result = await webhook_handler.handle_event("pull_request", payload)
@@ -428,7 +457,7 @@ async def test_pr_unlabeled_no_bot_reviews(webhook_handler, mock_github_client):
 @pytest.mark.asyncio
 async def test_pr_approval_failure(webhook_handler, mock_github_client):
     """Test handling approval failure."""
-    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload = load_fixture("pr_labeled_autoapprove")
     mock_github_client.approve_pr.return_value = False  # Simulate failure
 
     result = await webhook_handler.handle_event("pull_request", payload)
@@ -440,7 +469,7 @@ async def test_pr_approval_failure(webhook_handler, mock_github_client):
 @pytest.mark.asyncio
 async def test_pr_missing_installation_id(webhook_handler, mock_github_client):
     """Test PR event with missing installation ID."""
-    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload = load_fixture("pr_labeled_autoapprove")
     del payload["installation"]
 
     result = await webhook_handler.handle_event("pull_request", payload)
@@ -452,7 +481,7 @@ async def test_pr_missing_installation_id(webhook_handler, mock_github_client):
 @pytest.mark.asyncio
 async def test_pr_not_eligible_missing_required_label(webhook_handler, mock_github_client):
     """Test PR with approval label but missing required label is not approved."""
-    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload = load_fixture("pr_labeled_autoapprove")
     mock_github_client.get_repo_file.return_value = 'required_labels = ["dependencies"]'
 
     result = await webhook_handler.handle_event("pull_request", payload)
@@ -466,7 +495,7 @@ async def test_pr_not_eligible_missing_required_label(webhook_handler, mock_gith
 @pytest.mark.asyncio
 async def test_pr_not_eligible_title_pattern_no_match(webhook_handler, mock_github_client):
     """Test PR with approval label but title doesn't match pattern is not approved."""
-    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload = load_fixture("pr_labeled_autoapprove")
     mock_github_client.get_repo_file.return_value = 'required_title_patterns = ["^chore:"]'
 
     result = await webhook_handler.handle_event("pull_request", payload)
@@ -481,7 +510,7 @@ async def test_pathological_pr_title_pattern_is_bounded(webhook_handler, mock_gi
     """Test a pathological title pattern fails closed within a bounded time."""
     from stampbot.config import MAX_PR_TITLE_LENGTH
 
-    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload = load_fixture("pr_labeled_autoapprove")
     payload["pull_request"]["title"] = "a" * (MAX_PR_TITLE_LENGTH - 1) + "!"
     mock_github_client.get_repo_file.return_value = 'required_title_patterns = ["(a|aa)+$"]'
 
@@ -501,7 +530,7 @@ async def test_pr_eligibility_does_not_block_event_loop(
     """Test title eligibility work runs outside the asyncio event loop."""
     from stampbot.config import RepoConfig
 
-    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload = load_fixture("pr_labeled_autoapprove")
     eligibility_started = threading.Event()
 
     def slow_eligibility(*_args, **_kwargs):
@@ -526,7 +555,7 @@ async def test_pr_eligibility_does_not_block_event_loop(
 @pytest.mark.asyncio
 async def test_pr_eligible_with_required_label(webhook_handler, mock_github_client):
     """Test PR with approval label and matching required label is approved."""
-    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload = load_fixture("pr_labeled_autoapprove")
     # The fixture has "autoapprove" label, so require it
     mock_github_client.get_repo_file.return_value = 'required_labels = ["autoapprove"]'
 
@@ -790,9 +819,10 @@ async def test_chatops_does_not_block_event_loop(webhook_handler, mock_github_cl
 @pytest.mark.asyncio
 async def test_custom_repo_config(webhook_handler, mock_github_client):
     """Test loading custom repo config from stampbot.toml."""
-    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload = load_fixture("pr_labeled_autoapprove")
     # Change label to custom one
     payload["pull_request"]["labels"] = [{"name": "custom-approve"}]
+    payload["label"] = {"name": "custom-approve"}
 
     # Mock custom config
     mock_github_client.get_repo_file.return_value = """
@@ -812,7 +842,7 @@ unapprove_commands = ["unapprove"]
 @pytest.mark.asyncio
 async def test_repo_config_uses_default_branch(webhook_handler, mock_github_client):
     """Test repo config is loaded from the default branch."""
-    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload = load_fixture("pr_labeled_autoapprove")
     payload["repository"]["default_branch"] = "develop"
     payload["pull_request"]["base"]["ref"] = "release"
 
@@ -826,11 +856,12 @@ async def test_repo_config_uses_default_branch(webhook_handler, mock_github_clie
 @pytest.mark.asyncio
 async def test_org_github_repo_config_fallback(webhook_handler, mock_github_client):
     """Test org .github stampbot.toml is used when repo config is missing."""
-    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload = load_fixture("pr_labeled_autoapprove")
     payload["repository"]["full_name"] = "acme/widgets"
     payload["repository"]["default_branch"] = "main"
     payload["repository"]["owner"] = {"login": "acme", "type": "Organization"}
     payload["pull_request"]["labels"] = [{"name": "org-approve"}]
+    payload["label"] = {"name": "org-approve"}
 
     def get_repo_file_side_effect(
         _installation_id,
@@ -863,7 +894,7 @@ async def test_org_github_repo_config_fallback(webhook_handler, mock_github_clie
 @pytest.mark.asyncio
 async def test_org_github_repo_config_missing_uses_defaults(webhook_handler, mock_github_client):
     """Test org .github missing falls back to default config."""
-    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload = load_fixture("pr_labeled_autoapprove")
     payload["repository"]["full_name"] = "acme/widgets"
     payload["repository"]["default_branch"] = "main"
     payload["repository"]["owner"] = {"login": "acme", "type": "Organization"}
@@ -895,7 +926,7 @@ async def test_org_github_repo_config_missing_uses_defaults(webhook_handler, moc
 @pytest.mark.asyncio
 async def test_target_repo_not_found_fails_closed(webhook_handler, mock_github_client):
     """Test a target-repository 404 never advances to service defaults."""
-    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload = load_fixture("pr_labeled_autoapprove")
     mock_github_client.get_repo_file.side_effect = GithubException(
         404,
         {"message": "Not Found"},
@@ -923,7 +954,7 @@ async def test_org_policy_read_failure_fails_closed(
     failure,
 ):
     """Test only a missing optional organization repository permits defaults."""
-    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload = load_fixture("pr_labeled_autoapprove")
     payload["repository"]["full_name"] = "acme/widgets"
     payload["repository"]["owner"] = {"login": "acme", "type": "Organization"}
 
@@ -1339,7 +1370,7 @@ async def test_pr_with_non_approval_labels(webhook_handler, mock_github_client):
     This tests the branch where the for loop completes without finding
     a matching approval label (line 167->166).
     """
-    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload = load_fixture("pr_labeled_autoapprove")
     # Change labels to ones that don't trigger approval
     payload["pull_request"]["labels"] = [
         {"name": "bug"},
@@ -1380,7 +1411,7 @@ async def test_pr_unlabeled_non_approval_label(webhook_handler, mock_github_clie
 @pytest.mark.asyncio
 async def test_pr_with_allowed_teams_triggers_team_check(webhook_handler, mock_github_client):
     """Test PR with allowed_teams configured triggers team membership check."""
-    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload = load_fixture("pr_labeled_autoapprove")
     # Config with allowed_teams - user not in allowed_users so needs team check
     mock_github_client.get_repo_file.return_value = """
 allowed_teams = ["acme/release-team"]
@@ -1398,7 +1429,7 @@ allowed_teams = ["acme/release-team"]
 @pytest.mark.asyncio
 async def test_pr_with_allowed_teams_user_not_member(webhook_handler, mock_github_client):
     """Test PR rejected when user is not in any allowed team."""
-    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload = load_fixture("pr_labeled_autoapprove")
     mock_github_client.get_repo_file.return_value = """
 allowed_teams = ["acme/release-team"]
 """
@@ -1416,7 +1447,7 @@ allowed_teams = ["acme/release-team"]
 @pytest.mark.asyncio
 async def test_pr_with_allowed_users_skips_team_check(webhook_handler, mock_github_client):
     """Test PR with user in allowed_users skips team membership check."""
-    payload = load_fixture("pr_opened_with_autoapprove_label")
+    payload = load_fixture("pr_labeled_autoapprove")
     # The fixture has user "contributor"
     mock_github_client.get_repo_file.return_value = """
 allowed_users = ["contributor"]

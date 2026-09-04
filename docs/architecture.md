@@ -68,7 +68,10 @@ stateDiagram-v2
 
 The same flow in words:
 
-- `opened`, `reopened`, and `labeled` may create a label-driven approval.
+- `labeled` and `reopened` may create a label-driven approval. An `opened`
+  event that already carries an approval label is a duplicate of the `labeled`
+  event GitHub sends for that label, so it creates nothing. Acting on both let
+  two replicas post two approvals.
 - Every configured eligibility category must pass before that approval.
 - Removing any configured approval label dismisses active Stampbot approvals.
 - A new head makes an old approval stale. `reapprove` decides whether a
