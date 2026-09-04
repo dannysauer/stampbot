@@ -109,8 +109,10 @@ def test_configure_telemetry_disabled():
         assert result is None
 
 
-def test_configure_telemetry_no_endpoint():
-    """Test configure_telemetry returns None when no endpoint configured."""
+def test_configure_telemetry_no_endpoint(library_instrumentors):
+    """Test a missing endpoint exports nothing but still shapes log records."""
+    requests_instrumentor, logging_instrumentor = library_instrumentors
+
     with patch("stampbot.telemetry.settings") as mock_settings:
         mock_settings.otel_enabled = True
         mock_settings.otel_endpoint = None
@@ -118,6 +120,9 @@ def test_configure_telemetry_no_endpoint():
 
         result = configure_telemetry()
         assert result is None
+
+    logging_instrumentor.return_value.instrument.assert_called_once_with(set_logging_format=True)
+    requests_instrumentor.return_value.instrument.assert_not_called()
 
 
 def test_instrument_fastapi_when_disabled():

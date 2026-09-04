@@ -158,6 +158,7 @@ automation. Stampbot records these failures as policy-load errors.
 | --- | --- |
 | A labeled pull request is not approved | A current label appears in `approval_labels`, and every configured filter category passes. |
 | An approval label is reported missing | Create that label or remove it from policy. |
+| A policy edit has no effect | Wait `STAMPBOT_REPO_CONFIG_CACHE_SECONDS` (default 300) or restart the replicas. A corrected file replaces an invalid one immediately, because errors are never cached. |
 | Removing one approval label dismisses the review | This is current behavior, even when another approval label remains. |
 | A new commit is not approved | `reapprove` defaults to `false`. |
 | A repeated event creates no review | An active Stampbot approval already covers the current head. |
@@ -263,9 +264,10 @@ GitHub calls use a 30-second timeout. Stampbot retries server errors with
 exponential backoff; authorization and rate-limit failures need operator action.
 
 Each replica reuses one installation token until GitHub is about to expire it,
-and reads the remaining limit from response headers. A rising
-`stampbot_github_api_requests_total{operation="get_token"}` therefore points at
-restarts, new installations, or token failures rather than event volume.
+and reads the remaining limit from response headers. In steady state
+`stampbot_github_api_requests_total{operation="get_token"}` rises about once per
+hour per active installation. A faster rise points at restarts, new
+installations, or token failures rather than event volume.
 
 When the remaining limit is low:
 

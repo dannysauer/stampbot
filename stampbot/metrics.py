@@ -164,7 +164,7 @@ github_api_rate_limit_limit = Gauge(
 repo_config_loads_total = Counter(
     "stampbot_repo_config_loads_total",
     "Total repository configuration loads",
-    ["status"],  # found, default, error
+    ["status"],  # found, default, cached, error
 )
 
 # =============================================================================

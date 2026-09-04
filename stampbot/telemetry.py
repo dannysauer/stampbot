@@ -42,6 +42,9 @@ def configure_telemetry() -> TracerProvider | None:
 
     if not settings.otel_endpoint:
         logger.warning("OpenTelemetry enabled but no endpoint configured")
+        # Log records still gain the (empty) trace fields so their shape does
+        # not depend on whether an exporter exists.
+        LoggingInstrumentor().instrument(set_logging_format=True)
         return None
 
     try:

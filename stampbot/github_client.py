@@ -34,10 +34,11 @@ GITHUB_API_RETRY_TOTAL = 3
 GITHUB_API_RETRY_BACKOFF = 0.5  # exponential backoff factor
 MAX_PRIVATE_KEY_SIZE = 64 * 1024
 
-# Installation clients hold a token that PyGithub refreshes on expiry. Evicting
-# an idle client after an hour bounds memory for installations that disappear.
-INSTALLATION_CLIENT_CACHE_SIZE = 256
-INSTALLATION_CLIENT_CACHE_TTL = 3600  # seconds
+# Installation credentials hold a token that PyGithub refreshes shortly before
+# GitHub expires it. Entries expire an hour after creation, which bounds memory
+# for installations that disappear and rotates the token about once an hour.
+INSTALLATION_AUTH_CACHE_SIZE = 256
+INSTALLATION_AUTH_CACHE_TTL = 3600  # seconds
 # The App slug only changes when an operator renames the App.
 BOT_LOGIN_CACHE_TTL = 3600  # seconds
 
@@ -122,15 +123,17 @@ class GitHubAppClient:
         self._auth: Auth.AppAuth | None = None
         self._integration: GithubIntegration | None = None
         self._initialized = False
-        # Installation clients are shared across webhook threads. PyGithub caches
-        # the installation token inside the client's Auth object and refreshes it
-        # shortly before expiry, so one client per installation removes the token
-        # exchange from every GitHub operation.
-        self._installation_clients: TTLCache[int, Github] = TTLCache(
-            maxsize=INSTALLATION_CLIENT_CACHE_SIZE,
-            ttl=INSTALLATION_CLIENT_CACHE_TTL,
+        # Installation credentials are shared across webhook threads. PyGithub
+        # caches the installation token inside the Auth object and refreshes it
+        # shortly before expiry, so sharing it removes the token exchange from
+        # every GitHub operation. Github clients themselves are never shared: a
+        # PyGithub Requester keeps the in-flight request on one connection
+        # object, so two threads using one client can swap each other's requests.
+        self._installation_auths: TTLCache[int, Auth.AppInstallationAuth] = TTLCache(
+            maxsize=INSTALLATION_AUTH_CACHE_SIZE,
+            ttl=INSTALLATION_AUTH_CACHE_TTL,
         )
-        self._installation_clients_lock = threading.Lock()
+        self._installation_auths_lock = threading.Lock()
         self._bot_login_cache: TTLCache[str, str] = TTLCache(maxsize=1, ttl=BOT_LOGIN_CACHE_TTL)
         self._bot_login_lock = threading.Lock()
 
@@ -229,14 +232,37 @@ class GitHubAppClient:
 
         return pem_content
 
+    def _new_client(self, installation_auth: Auth.AppInstallationAuth) -> Github:
+        """Build a lazy client bound to installation credentials.
+
+        Lazy clients build URLs for ``get_repo`` and ``get_pull`` without
+        requesting the object, so each operation only pays for the requests it
+        needs. Constructing the client also binds a requester to the
+        credentials, which PyGithub requires before the token can be read.
+
+        Args:
+            installation_auth: Shared credentials for one installation.
+
+        Returns:
+            Github client instance with timeout and retry configured.
+        """
+        return Github(
+            auth=installation_auth,
+            timeout=GITHUB_API_TIMEOUT,
+            retry=_build_retry(),
+            lazy=True,
+        )
+
     def _get_installation_client(self, installation_id: int) -> Github:
-        """Get the shared authenticated GitHub client for an installation.
+        """Get an authenticated GitHub client for an installation.
 
         The first call for an installation exchanges the App JWT for an
-        installation token and caches the client. Later calls reuse it, and
-        PyGithub refreshes the token itself shortly before it expires. Clients
-        are lazy: ``get_repo`` and ``get_pull`` build URLs without requesting
-        the object, so each operation only pays for the requests it needs.
+        installation token and caches the credentials. Later calls build a new
+        client on the cached credentials, so the token is reused while the
+        connection state stays private to the calling thread. PyGithub refreshes
+        the token shortly before it expires; that refresh runs here, before any
+        repository request, so an authentication failure never looks like a
+        missing repository.
 
         Args:
             installation_id: GitHub App installation ID.
@@ -247,10 +273,12 @@ class GitHubAppClient:
         Raises:
             github.GithubException: If token exchange fails.
         """
-        with self._installation_clients_lock:
-            cached = self._installation_clients.get(installation_id)
+        with self._installation_auths_lock:
+            cached = self._installation_auths.get(installation_id)
         if cached is not None:
-            return cached
+            client = self._new_client(cached)
+            cached.token  # noqa: B018  # refresh when PyGithub deems it due
+            return client
 
         start_time = time.time()
 
@@ -264,13 +292,7 @@ class GitHubAppClient:
                 self._ensure_initialized()
                 assert self._auth is not None  # guaranteed by _ensure_initialized
                 installation_auth = self._auth.get_installation_auth(installation_id)
-
-                client = Github(
-                    auth=installation_auth,
-                    timeout=GITHUB_API_TIMEOUT,
-                    retry=_build_retry(),
-                    lazy=True,
-                )
+                client = self._new_client(installation_auth)
 
                 # Exchange the token now so authentication failures surface here
                 # rather than inside the first repository request.
@@ -280,10 +302,14 @@ class GitHubAppClient:
                 github_api_request_duration_seconds.labels(operation="get_token").observe(duration)
                 github_api_requests_total.labels(operation="get_token", status="success").inc()
 
-                with self._installation_clients_lock:
-                    # Another thread may have created a client first. Keep the
-                    # first one so both threads share the same token.
-                    client = self._installation_clients.setdefault(installation_id, client)
+                with self._installation_auths_lock:
+                    # Another thread may have finished its exchange first. Keep
+                    # the first credentials so both threads share one token.
+                    shared_auth = self._installation_auths.setdefault(
+                        installation_id, installation_auth
+                    )
+                if shared_auth is not installation_auth:
+                    client = self._new_client(shared_auth)
 
                 set_span_ok(span)
                 return client
@@ -301,14 +327,16 @@ class GitHubAppClient:
         GitHub returns the installation's remaining quota in the
         ``x-ratelimit-*`` headers of every response, so this reads PyGithub's
         record of those headers instead of spending a request on
-        ``GET /rate_limit``.
+        ``GET /rate_limit``. The requester is read directly because
+        ``Github.rate_limiting`` falls back to that request when no response
+        has carried the headers yet.
 
         Args:
             client: Authenticated GitHub client.
             installation_id: GitHub App installation ID for metric labels.
         """
         try:
-            remaining, limit = client.rate_limiting
+            remaining, limit = client.requester.rate_limiting
             if remaining < 0 or limit < 0:
                 # PyGithub reports -1 until a response has carried the headers.
                 return
@@ -627,19 +655,22 @@ class GitHubAppClient:
                 duration = time.time() - start_time
                 github_api_request_duration_seconds.labels(operation="get_file").observe(duration)
                 # A 404 only advances policy lookup when GitHub confirms which
-                # object is missing. A readable repository root proves the file
-                # is absent. Otherwise an optional fallback repository may itself
-                # be missing, which one repository request settles. Anything
+                # object is missing. An optional fallback repository may itself
+                # be missing, which one repository request settles and which is
+                # the common case for organizations without a .github repo. A
+                # readable repository root proves the file is absent. Anything
                 # else stays a read failure and the caller fails closed.
-                file_is_confirmed_missing = (
-                    e.status == 404 and repo is not None and _can_read_repo_root(repo, ref)
-                )
                 repository_is_optionally_missing = (
                     e.status == 404
-                    and not file_is_confirmed_missing
                     and repository_lookup_started
                     and missing_repository_is_optional
                     and (repo is None or _repository_is_missing(repo))
+                )
+                file_is_confirmed_missing = (
+                    e.status == 404
+                    and not repository_is_optionally_missing
+                    and repo is not None
+                    and _can_read_repo_root(repo, ref)
                 )
                 if repository_is_optionally_missing or file_is_confirmed_missing:
                     github_api_requests_total.labels(operation="get_file", status="not_found").inc()

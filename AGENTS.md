@@ -457,8 +457,9 @@ curl http://localhost:8000/ready    # readiness (503 only if unconfigured AND se
 
 ### Rate Limiting
 
-- Monitor `github_api_rate_limit_remaining` metric
-- Consider implementing caching
+- Monitor `stampbot_github_api_rate_limit_remaining` metric
+- Installation tokens are cached per installation and repository policy per
+  repository (`STAMPBOT_REPO_CONFIG_CACHE_SECONDS`); see `docs/reference.md`
 - Use conditional requests where possible
 
 ## CI/CD Pipeline

@@ -198,6 +198,7 @@ async def test_invalid_repo_config_is_not_cached(webhook_handler, mock_github_cl
         (None, 300),
         (True, 300),
         (12.5, 300),
+        (300.0, 300),
     ],
 )
 def test_repo_config_cache_seconds_parsing(monkeypatch, raw, expected):

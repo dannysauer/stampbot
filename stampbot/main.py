@@ -404,8 +404,10 @@ async def ready() -> Response:
 def _delivery_id_label(raw: str | None) -> str | None:
     """Return a GitHub delivery GUID suitable for logs and span attributes.
 
-    GitHub sends a 36-character GUID. Anything else is dropped rather than
-    stored, since the value is only useful for matching GitHub's delivery log.
+    GitHub sends a 36-character GUID. The check allows letters, digits, and
+    hyphens up to 64 characters so a future format change still correlates,
+    and drops anything else rather than storing it, since the value is only
+    useful for matching GitHub's delivery log.
 
     Args:
         raw: Value of the ``X-GitHub-Delivery`` header, if present.

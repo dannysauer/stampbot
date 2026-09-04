@@ -49,6 +49,8 @@ def _repo_config_cache_seconds() -> int:
     seconds: int | None = None
     if isinstance(raw, int) and not isinstance(raw, bool):
         seconds = raw
+    elif isinstance(raw, float) and raw.is_integer():
+        seconds = int(raw)
     elif isinstance(raw, str):
         try:
             seconds = int(raw.strip())
@@ -70,11 +72,21 @@ class WebhookHandler:
     def __init__(self) -> None:
         """Initialize webhook handler (lazy initialization)."""
         self._webhook_secret: bytes | None = None
-        cache_seconds = _repo_config_cache_seconds()
-        # Only the event loop touches this cache, so it needs no lock.
-        self._repo_config_cache: TTLCache[tuple[int, str, str], RepoConfig] | None = (
-            TTLCache(maxsize=REPO_CONFIG_CACHE_SIZE, ttl=cache_seconds) if cache_seconds else None
-        )
+        # Created on first use so the setting is read after logging is
+        # configured. Only the event loop touches the cache, so it needs no lock.
+        self._repo_config_cache: TTLCache[tuple[int, str, str], RepoConfig] | None = None
+        self._repo_config_cache_ready = False
+
+    def _policy_cache(self) -> TTLCache[tuple[int, str, str], RepoConfig] | None:
+        """Return the repository policy cache, or None when caching is disabled."""
+        if not self._repo_config_cache_ready:
+            cache_seconds = _repo_config_cache_seconds()
+            if cache_seconds:
+                self._repo_config_cache = TTLCache(
+                    maxsize=REPO_CONFIG_CACHE_SIZE, ttl=cache_seconds
+                )
+            self._repo_config_cache_ready = True
+        return self._repo_config_cache
 
     @property
     def webhook_secret(self) -> bytes:
@@ -322,7 +334,7 @@ class WebhookHandler:
     async def _apply_pull_request_policy(
         self,
         span: Any,
-        action: str | None,
+        action: str,
         payload: dict[str, Any],
         pr: dict[str, Any],
         labels: list[str],
@@ -834,8 +846,9 @@ class WebhookHandler:
             RepoConfig instance (default if file not found)
         """
         cache_key = (installation_id, repo_full_name, default_branch)
-        if self._repo_config_cache is not None:
-            cached = self._repo_config_cache.get(cache_key)
+        cache = self._policy_cache()
+        if cache is not None:
+            cached = cache.get(cache_key)
             if cached is not None:
                 repo_config_loads_total.labels(status="cached").inc()
                 with create_span(
@@ -859,8 +872,8 @@ class WebhookHandler:
 
         # Only valid policy is cached. Errors and fail-closed fallbacks are
         # re-evaluated on the next event so recovery is immediate.
-        if self._repo_config_cache is not None and repo_config.config_error is None:
-            self._repo_config_cache[cache_key] = repo_config
+        if cache is not None and repo_config.config_error is None:
+            cache[cache_key] = repo_config
 
         return repo_config
 
