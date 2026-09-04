@@ -104,7 +104,8 @@ automation.
 Valid results, including a missing file, stay in memory per replica for
 `STAMPBOT_REPO_CONFIG_CACHE_SECONDS` (default 300). Invalid policy and read
 failures are never cached. `stampbot_repo_config_loads_total{status="cached"}`
-counts events served from that cache.
+counts events served from that cache; a cache hit creates no
+`webhook.get_repo_config` span.
 
 See [Configuration reference](configuration.md#repository-policy) for every
 field and validation rule.
@@ -115,9 +116,10 @@ field and validation rule.
 
 | Pull request action | Conditions | Result |
 | --- | --- | --- |
-| `opened` with an approval label | The label was present when the pull request was created. | Ignore the event; GitHub sends a `labeled` event for each label present at creation, and that event creates the approval. The response reads `Approval label handled by the labeled event`. |
-| `reopened` | A current label is configured and every eligibility filter passes. | Create an approval unless an active Stampbot approval covers the head. |
-| `labeled` with an approval label | The new label is configured and every filter passes. | Create an approval unless one already covers the head. |
+| `opened` with an approval label | The label was present when the pull request was created. | Ignore the event; GitHub sends a `labeled` event for each label present at creation, and that event creates the approval. The response reads `Approval label handled by the labeled event`. If that `labeled` delivery fails, redeliver it; the `opened` event does not approve on redelivery. |
+| `reopened` | A current label is configured and every eligibility filter passes. | Create an approval unless an active Stampbot approval exists. |
+| `labeled` with an approval label | The new label is the first configured approval label present on the pull request, and every filter passes. | Create an approval unless an active Stampbot approval exists. |
+| `labeled` with a second approval label | Another configured approval label that sorts earlier in `approval_labels` is already present. | Ignore the event; the event for the earlier label creates the approval. |
 | `labeled` with another label | An approval label remains, a prior Stampbot review exists, and every filter passes. | Refresh approval when no active review covers the head. |
 | `synchronize` | `reapprove=true`, an approval label remains, a prior Stampbot review exists, and every filter passes. | Approve the new head. |
 | `unlabeled` | The removed label is in `approval_labels`. | Dismiss active Stampbot approvals. |
@@ -209,7 +211,7 @@ A webhook trace contains these spans:
 | Span | Source | Key attributes |
 | --- | --- | --- |
 | `POST /webhook` | FastAPI instrumentation | HTTP route, status, and client |
-| `webhook.*` | Stampbot | `webhook.event_type`, `webhook.action`, `webhook.result`, `github.repo`, `github.pr_number`, `github.delivery_id`, `config.cache` |
+| `webhook.*` | Stampbot | `webhook.event_type`, `webhook.action`, `webhook.result`, `github.repo`, `github.pr_number`, `github.delivery_id`, `config.result` |
 | `github.*` | Stampbot | `github.installation_id`, `github.result`, `github.reviews_found` |
 | `GET`, `POST`, `PUT` | `requests` instrumentation | `http.url`, `http.status_code` for each GitHub API request |
 

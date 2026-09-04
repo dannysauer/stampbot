@@ -40,11 +40,24 @@ def configure_telemetry() -> TracerProvider | None:
         logger.info("OpenTelemetry disabled")
         return None
 
+    provider = _configure_exporter()
+
+    # Log records gain trace and span IDs whenever tracing is enabled. This
+    # runs after the provider attempt so the records also carry the service
+    # name when an exporter exists.
+    LoggingInstrumentor().instrument(set_logging_format=True)
+
+    return provider
+
+
+def _configure_exporter() -> TracerProvider | None:
+    """Create the tracer provider and OTLP exporter.
+
+    Returns:
+        TracerProvider when an endpoint is configured and setup succeeds, else None.
+    """
     if not settings.otel_endpoint:
         logger.warning("OpenTelemetry enabled but no endpoint configured")
-        # Log records still gain the (empty) trace fields so their shape does
-        # not depend on whether an exporter exists.
-        LoggingInstrumentor().instrument(set_logging_format=True)
         return None
 
     try:
@@ -81,10 +94,6 @@ def configure_telemetry() -> TracerProvider | None:
         # ``github.*`` span hides how many requests it made and which one was
         # slow.
         RequestsInstrumentor().instrument()
-
-        # Log records gain trace and span IDs. This runs after the provider is
-        # set so the records also carry the service name.
-        LoggingInstrumentor().instrument(set_logging_format=True)
 
         logger.info(
             "OpenTelemetry configured with endpoint: %s (%s)",

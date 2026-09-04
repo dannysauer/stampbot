@@ -41,11 +41,12 @@ A valid request moves to `WebhookHandler`. The handler loads policy for the
 target repository and decides whether the event calls for approval, dismissal,
 a help comment, or no action.
 
-When a write is needed, `GitHubAppClient` uses one client per installation.
-The first operation signs an App JWT and exchanges it for an installation token;
-later operations reuse that token until shortly before GitHub expires it. GitHub
-scopes the token to the installation. The visible result lands on the pull
-request timeline; the webhook response only describes what Stampbot did.
+When a write is needed, `GitHubAppClient` builds a client for that operation
+on credentials shared per installation. The first operation signs an App JWT and
+exchanges it for an installation token; later operations reuse that token until
+shortly before GitHub expires it. GitHub scopes the token to the installation.
+The visible result lands on the pull request timeline; the webhook response only
+describes what Stampbot did.
 
 Pull request actions that cannot change review state, such as `edited`,
 `closed`, and `review_requested`, return before any policy read or GitHub
@@ -70,8 +71,11 @@ The same flow in words:
 
 - `labeled` and `reopened` may create a label-driven approval. An `opened`
   event that already carries an approval label is a duplicate of the `labeled`
-  event GitHub sends for that label, so it creates nothing. Acting on both let
-  two replicas post two approvals.
+  event GitHub sends for that label, so it creates nothing. Acting on both could
+  let two replicas post two approvals. When several approval labels arrive
+  together, only the event for the first configured label approves. The cost is
+  that a lost `labeled` delivery, or a pull request converted from an
+  already-labeled issue, waits for a label to be re-added.
 - Every configured eligibility category must pass before that approval.
 - Removing any configured approval label dismisses active Stampbot approvals.
 - A new head makes an old approval stale. `reapprove` decides whether a
@@ -119,6 +123,7 @@ fails closed.
 | --- | --- |
 | `stampbot/main.py` | HTTP routes, body limits, setup gates, and request metrics |
 | `stampbot/webhook_handler.py` | Event routing, policy decisions, ChatOps, and review lifecycle |
+| `stampbot/repo_policy.py` | Policy lookup order and the per-replica policy cache |
 | `stampbot/github_client.py` | App authentication, installation clients, retries, and GitHub calls |
 | `stampbot/config.py` | Service settings, repository defaults, TOML parsing, and policy validation |
 | `stampbot/manifest.py` | Trusted setup URLs and GitHub App manifest creation |

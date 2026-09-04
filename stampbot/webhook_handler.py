@@ -7,12 +7,14 @@ import hashlib
 import hmac
 import re
 import time
+from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
-from cachetools import TTLCache
 from fastapi.concurrency import run_in_threadpool
+from opentelemetry.trace import Span
 
-from stampbot.config import RepoConfig, settings
+from stampbot.config import RepoConfig, repo_config_cache_seconds, settings
 from stampbot.github_client import BotReview, github_client
 from stampbot.logger import get_logger
 from stampbot.metrics import (
@@ -22,9 +24,9 @@ from stampbot.metrics import (
     pr_approvals_total,
     pr_dismissal_duration_seconds,
     pr_dismissals_total,
-    repo_config_loads_total,
     webhook_events_total,
 )
+from stampbot.repo_policy import RepoPolicyResolver
 from stampbot.telemetry import add_span_attributes, create_span, set_span_error, set_span_ok
 
 logger = get_logger(__name__)
@@ -36,34 +38,42 @@ MAX_COMMENT_LENGTH = 65536  # 64KB - generous but prevents abuse
 # action returns before any GitHub request is made.
 PULL_REQUEST_ACTIONS = frozenset({"opened", "reopened", "labeled", "synchronize", "unlabeled"})
 
-# Repository policy cache defaults. The cache holds parsed policy per
-# installation, repository, and default branch for a short time so that bursts
-# of events for one repository do not each re-read stampbot.toml.
-DEFAULT_REPO_CONFIG_CACHE_SECONDS = 300
-REPO_CONFIG_CACHE_SIZE = 1024
+NO_ACTION = {"status": "ignored", "message": "No action needed"}
 
 
-def _repo_config_cache_seconds() -> int:
-    """Return the configured policy cache lifetime in seconds, or 0 when disabled."""
-    raw = settings.get("repo_config_cache_seconds", DEFAULT_REPO_CONFIG_CACHE_SECONDS)
-    seconds: int | None = None
-    if isinstance(raw, int) and not isinstance(raw, bool):
-        seconds = raw
-    elif isinstance(raw, float) and raw.is_integer():
-        seconds = int(raw)
-    elif isinstance(raw, str):
-        try:
-            seconds = int(raw.strip())
-        except ValueError:
-            seconds = None
-    if seconds is None:
-        logger.warning(
-            "Invalid repo_config_cache_seconds %r, using default %d",
-            raw,
-            DEFAULT_REPO_CONFIG_CACHE_SECONDS,
-        )
-        return DEFAULT_REPO_CONFIG_CACHE_SECONDS
-    return max(seconds, 0)
+class Decision(Enum):
+    """What a pull request event asks Stampbot to do."""
+
+    APPROVE = "approve"
+    REFRESH = "refresh"  # approve again only when a prior approval is stale
+    DISMISS = "dismiss"
+    DUPLICATE = "duplicate"  # another event for the same change creates the approval
+    NONE = "none"
+
+
+@dataclass(frozen=True)
+class PullRequestEvent:
+    """The parts of a pull request webhook that policy decisions read."""
+
+    action: str
+    installation_id: int
+    repo_full_name: str
+    pr_number: int
+    owner_login: str | None
+    pr: dict[str, Any]
+    event_label: str | None
+    repo_config: RepoConfig
+
+    @property
+    def labels(self) -> list[str]:
+        """Names of the labels currently on the pull request."""
+        return [label["name"] for label in self.pr.get("labels", [])]
+
+    @property
+    def head_sha(self) -> str | None:
+        """Current head commit, when GitHub included it."""
+        sha = self.pr.get("head", {}).get("sha")
+        return str(sha) if sha else None
 
 
 class WebhookHandler:
@@ -72,21 +82,7 @@ class WebhookHandler:
     def __init__(self) -> None:
         """Initialize webhook handler (lazy initialization)."""
         self._webhook_secret: bytes | None = None
-        # Created on first use so the setting is read after logging is
-        # configured. Only the event loop touches the cache, so it needs no lock.
-        self._repo_config_cache: TTLCache[tuple[int, str, str], RepoConfig] | None = None
-        self._repo_config_cache_ready = False
-
-    def _policy_cache(self) -> TTLCache[tuple[int, str, str], RepoConfig] | None:
-        """Return the repository policy cache, or None when caching is disabled."""
-        if not self._repo_config_cache_ready:
-            cache_seconds = _repo_config_cache_seconds()
-            if cache_seconds:
-                self._repo_config_cache = TTLCache(
-                    maxsize=REPO_CONFIG_CACHE_SIZE, ttl=cache_seconds
-                )
-            self._repo_config_cache_ready = True
-        return self._repo_config_cache
+        self._policy = RepoPolicyResolver(repo_config_cache_seconds())
 
     @property
     def webhook_secret(self) -> bytes:
@@ -226,8 +222,7 @@ class WebhookHandler:
                 set_span_ok(span)
                 return {"status": "ignored", "message": f"Action {action} not handled"}
 
-            # Get repository configuration
-            repo_config = await self._get_repo_config(
+            repo_config = await self._policy.get(
                 installation_id,
                 repo_full_name,
                 repo_default_branch,
@@ -269,271 +264,82 @@ class WebhookHandler:
                     "message": "Invalid repository configuration",
                 }
 
-            labels = [label["name"] for label in pr.get("labels", [])]
-
-            result = await self._apply_pull_request_policy(
-                span,
-                action,
-                payload,
-                pr,
-                labels,
-                installation_id,
-                repo_full_name,
-                pr_number,
-                owner_login,
-                repo_config,
+            event = PullRequestEvent(
+                action=action,
+                installation_id=installation_id,
+                repo_full_name=repo_full_name,
+                pr_number=pr_number,
+                owner_login=owner_login,
+                pr=pr,
+                event_label=payload.get("label", {}).get("name"),
+                repo_config=repo_config,
             )
+
+            decision, label = self._decide(event)
+            if decision is Decision.APPROVE and label:
+                result = await self._approve_for_label(span, event, label)
+            elif decision is Decision.REFRESH and label:
+                result = await self._refresh_for_label(span, event, label)
+            elif decision is Decision.DISMISS and label:
+                result = await self._dismiss_for_label(span, event, label)
+            elif decision is Decision.DUPLICATE and label:
+                result = self._defer_to_labeled_event(span, event, label)
+            else:
+                add_span_attributes(span, {"webhook.result": "no_action"})
+                set_span_ok(span)
+                result = dict(NO_ACTION)
 
             if action == "opened":
                 # This only produces an operator warning, so it runs after the
                 # review decision instead of delaying it.
-                await self._warn_missing_approval_labels(
-                    installation_id,
-                    repo_full_name,
-                    labels,
-                    repo_config,
-                )
+                await self._warn_missing_approval_labels(event)
 
             return result
 
-    async def _warn_missing_approval_labels(
-        self,
-        installation_id: int,
-        repo_full_name: str,
-        pr_labels: list[str],
-        repo_config: RepoConfig,
-    ) -> None:
-        """Warn when a configured approval label does not exist in the repository.
-
-        Labels already present on the pull request exist by definition, so only
-        the remaining configured labels are looked up.
+    def _decide(self, event: PullRequestEvent) -> tuple[Decision, str | None]:
+        """Map a pull request event to the action Stampbot takes.
 
         Args:
-            installation_id: GitHub App installation ID
-            repo_full_name: Repository full name
-            pr_labels: Labels currently on the pull request
-            repo_config: Repository configuration
-        """
-        for label in repo_config.approval_labels:
-            if label in pr_labels:
-                continue
-            label_exists = await run_in_threadpool(
-                github_client.repo_has_label,
-                installation_id,
-                repo_full_name,
-                label,
-            )
-            if label_exists is False:
-                logger.warning(
-                    "Approval label %s not found in %s",
-                    label,
-                    repo_full_name,
-                    extra={"repo": repo_full_name, "label": label},
-                )
-
-    async def _apply_pull_request_policy(
-        self,
-        span: Any,
-        action: str,
-        payload: dict[str, Any],
-        pr: dict[str, Any],
-        labels: list[str],
-        installation_id: int,
-        repo_full_name: str,
-        pr_number: int,
-        owner_login: str | None,
-        repo_config: RepoConfig,
-    ) -> dict[str, Any]:
-        """Apply label policy to a pull request event with valid configuration.
-
-        Args:
-            span: Active tracing span (can be None if tracing disabled)
-            action: Pull request event action
-            payload: Event payload
-            pr: Pull request object from the payload
-            labels: Labels currently on the pull request
-            installation_id: GitHub App installation ID
-            repo_full_name: Repository full name
-            pr_number: Pull request number
-            owner_login: Repository owner login
-            repo_config: Validated repository configuration
+            event: Pull request event with valid repository policy.
 
         Returns:
-            Response dictionary
+            The decision and the approval label it concerns, if any.
         """
-        # Check if we should approve based on labels
-        if repo_config.auto_approve_on_label and action in [
-            "opened",
-            "reopened",
-            "labeled",
-            "synchronize",
-        ]:
-            approval_label = self._find_approval_label(labels, repo_config)
-            if approval_label and action == "opened":
-                # GitHub also sends one labeled event for every label present
-                # when a pull request is created, and that event creates the
-                # approval. Treating this event as a duplicate stops two
-                # replicas from racing to post two approvals.
-                logger.info(
-                    "PR #%d opened with approval label %s; the labeled event approves it",
-                    pr_number,
-                    approval_label,
-                    extra={
-                        "repo": repo_full_name,
-                        "pr_number": pr_number,
-                        "label": approval_label,
-                    },
-                )
-                add_span_attributes(span, {"webhook.result": "duplicate_event"})
-                set_span_ok(span)
-                return {
-                    "status": "ignored",
-                    "message": "Approval label handled by the labeled event",
-                }
-            if approval_label:
-                should_approve, skip_existing_check = await self._should_approve_for_pr_event(
-                    action,
-                    payload,
-                    pr.get("head", {}).get("sha"),
-                    installation_id,
-                    repo_full_name,
-                    pr_number,
-                    repo_config,
-                )
-                if not should_approve:
-                    add_span_attributes(span, {"webhook.result": "no_action"})
-                    set_span_ok(span)
-                    return {"status": "ignored", "message": "No action needed"}
+        config = event.repo_config
+        if not config.auto_approve_on_label:
+            return Decision.NONE, None
 
-                pr_title = pr.get("title", "")
-                pr_author = pr.get("user", {}).get("login", "")
+        if event.action == "unlabeled":
+            if event.event_label in config.approval_labels:
+                return Decision.DISMISS, event.event_label
+            return Decision.NONE, None
 
-                # Check if team membership verification is needed
-                author_team_slugs: list[str] | None = None
-                if repo_config.needs_team_check(pr_author) and owner_login:
-                    author_team_slugs = await run_in_threadpool(
-                        github_client.get_user_team_slugs,
-                        installation_id,
-                        owner_login,
-                        pr_author,
-                        repo_config.allowed_teams,
-                    )
+        label = self._find_approval_label(event.labels, config)
+        if label is None:
+            return Decision.NONE, None
 
-                # Check if PR passes eligibility filters
-                is_eligible, reason = await run_in_threadpool(
-                    repo_config.is_pr_eligible,
-                    labels,
-                    pr_title,
-                    pr_author,
-                    author_team_slugs,
-                )
-                if not is_eligible:
-                    logger.info(
-                        "PR #%d not eligible for auto-approval: %s",
-                        pr_number,
-                        reason,
-                        extra={
-                            "repo": repo_full_name,
-                            "pr_number": pr_number,
-                            "pr_author": pr_author,
-                            "reason": reason,
-                        },
-                    )
-                    add_span_attributes(
-                        span,
-                        {
-                            "webhook.result": "not_eligible",
-                            "webhook.ineligible_reason": reason,
-                        },
-                    )
-                    set_span_ok(span)
-                    return {
-                        "status": "ignored",
-                        "message": f"PR not eligible: {reason}",
-                    }
+        if event.action == "opened":
+            # GitHub also sends one labeled event for every label present when
+            # a pull request is created, and that event creates the approval.
+            # Acting here as well let two replicas race and post two approvals.
+            return Decision.DUPLICATE, label
 
-                logger.info(
-                    "PR #%d has approval label: %s",
-                    pr_number,
-                    approval_label,
-                    extra={
-                        "repo": repo_full_name,
-                        "pr_number": pr_number,
-                        "label": approval_label,
-                    },
-                )
+        if event.action == "reopened":
+            return Decision.APPROVE, label
 
-                # Approve the PR
-                success = await self._approve_pr(
-                    installation_id,
-                    repo_full_name,
-                    pr_number,
-                    f"Auto-approved by Stampbot (label: {approval_label})",
-                    "label",
-                    skip_existing_check=skip_existing_check,
-                )
+        if event.action == "labeled":
+            if event.event_label not in config.approval_labels:
+                return Decision.REFRESH, label
+            # When several approval labels arrive together, only the event for
+            # the first configured label present on the pull request approves.
+            if event.event_label == label:
+                return Decision.APPROVE, label
+            return Decision.DUPLICATE, label
 
-                add_span_attributes(
-                    span,
-                    {
-                        "webhook.result": "approved" if success else "approval_failed",
-                        "webhook.trigger_label": approval_label,
-                    },
-                )
-                set_span_ok(span)
+        if event.action == "synchronize" and config.reapprove:
+            return Decision.REFRESH, label
 
-                return {
-                    "status": "success" if success else "error",
-                    "message": (
-                        f"PR approved via label: {approval_label}"
-                        if success
-                        else "Failed to approve PR"
-                    ),
-                }
-
-        # Check if we should remove approval when label is removed
-        if repo_config.auto_approve_on_label and action == "unlabeled":
-            removed_label = payload.get("label", {}).get("name")
-            if removed_label in repo_config.approval_labels:
-                logger.info(
-                    "Approval label %s removed from PR #%d",
-                    removed_label,
-                    pr_number,
-                    extra={
-                        "repo": repo_full_name,
-                        "pr_number": pr_number,
-                        "label": removed_label,
-                    },
-                )
-
-                # Dismiss bot approvals
-                success = await self._dismiss_approvals(
-                    installation_id,
-                    repo_full_name,
-                    pr_number,
-                    f"Label {removed_label} removed",
-                    "label_removed",
-                )
-
-                add_span_attributes(
-                    span,
-                    {
-                        "webhook.result": "dismissed" if success else "dismiss_failed",
-                        "webhook.removed_label": removed_label,
-                    },
-                )
-                set_span_ok(span)
-
-                return {
-                    "status": "success" if success else "error",
-                    "message": (
-                        "Approvals dismissed" if success else "Failed to dismiss approvals"
-                    ),
-                }
-
-        add_span_attributes(span, {"webhook.result": "no_action"})
-        set_span_ok(span)
-        return {"status": "ignored", "message": "No action needed"}
+        return Decision.NONE, None
 
     def _find_approval_label(self, labels: list[str], repo_config: RepoConfig) -> str | None:
         """Find the first configured approval label present on the PR.
@@ -545,55 +351,216 @@ class WebhookHandler:
         Returns:
             Matching approval label, if present.
         """
-        for label in labels:
-            if label in repo_config.approval_labels:
+        for label in repo_config.approval_labels:
+            if label in labels:
                 return label
         return None
 
-    async def _should_approve_for_pr_event(
-        self,
-        action: str | None,
-        payload: dict[str, Any],
-        head_sha: str | None,
-        installation_id: int,
-        repo_full_name: str,
-        pr_number: int,
-        repo_config: RepoConfig,
-    ) -> tuple[bool, bool]:
-        """Decide whether a pull request event should create a new approval.
+    def _defer_to_labeled_event(
+        self, span: Span | None, event: PullRequestEvent, label: str
+    ) -> dict[str, Any]:
+        """Record that another event for the same change creates the approval.
 
         Args:
-            action: Pull request event action.
-            payload: Event payload.
-            head_sha: Current PR head SHA.
-            installation_id: GitHub App installation ID.
-            repo_full_name: Repository full name.
-            pr_number: Pull request number.
-            repo_config: Repository configuration.
+            span: Active tracing span (None if tracing disabled)
+            event: Pull request event
+            label: Approval label the other event carries
 
         Returns:
-            Tuple of (should approve, skip existing approval check).
+            Response dictionary
         """
-        if action == "reopened":
-            return True, False
+        logger.info(
+            "PR #%d %s with approval label %s; the labeled event approves it",
+            event.pr_number,
+            event.action,
+            label,
+            extra={"repo": event.repo_full_name, "pr_number": event.pr_number, "label": label},
+        )
+        add_span_attributes(span, {"webhook.result": "duplicate_event"})
+        set_span_ok(span)
+        return {"status": "ignored", "message": "Approval label handled by the labeled event"}
 
-        added_label = payload.get("label", {}).get("name")
-        if action == "labeled" and added_label in repo_config.approval_labels:
-            return True, False
+    async def _refresh_for_label(
+        self, span: Span | None, event: PullRequestEvent, label: str
+    ) -> dict[str, Any]:
+        """Approve again only when a prior Stampbot approval no longer covers the head.
 
-        if action == "synchronize" and not repo_config.reapprove:
-            return False, False
+        Args:
+            span: Active tracing span (None if tracing disabled)
+            event: Pull request event
+            label: Approval label present on the pull request
 
-        if action not in ("labeled", "synchronize"):
-            return False, False
-
+        Returns:
+            Response dictionary
+        """
         reviews = await run_in_threadpool(
             github_client.find_bot_approval_reviews,
-            installation_id,
-            repo_full_name,
-            pr_number,
+            event.installation_id,
+            event.repo_full_name,
+            event.pr_number,
         )
-        return self._approval_needs_refresh(reviews, head_sha), True
+        if not self._approval_needs_refresh(reviews, event.head_sha):
+            add_span_attributes(span, {"webhook.result": "no_action"})
+            set_span_ok(span)
+            return dict(NO_ACTION)
+        return await self._approve_for_label(span, event, label, skip_existing_check=True)
+
+    async def _approve_for_label(
+        self,
+        span: Span | None,
+        event: PullRequestEvent,
+        label: str,
+        skip_existing_check: bool = False,
+    ) -> dict[str, Any]:
+        """Approve a pull request that carries an approval label, if it is eligible.
+
+        Args:
+            span: Active tracing span (None if tracing disabled)
+            event: Pull request event
+            label: Approval label that triggered the approval
+            skip_existing_check: Whether the caller already checked for an active approval
+
+        Returns:
+            Response dictionary
+        """
+        config = event.repo_config
+        pr_title = event.pr.get("title", "")
+        pr_author = event.pr.get("user", {}).get("login", "")
+
+        author_team_slugs: list[str] | None = None
+        if config.needs_team_check(pr_author) and event.owner_login:
+            author_team_slugs = await run_in_threadpool(
+                github_client.get_user_team_slugs,
+                event.installation_id,
+                event.owner_login,
+                pr_author,
+                config.allowed_teams,
+            )
+
+        is_eligible, reason = await run_in_threadpool(
+            config.is_pr_eligible,
+            event.labels,
+            pr_title,
+            pr_author,
+            author_team_slugs,
+        )
+        if not is_eligible:
+            logger.info(
+                "PR #%d not eligible for auto-approval: %s",
+                event.pr_number,
+                reason,
+                extra={
+                    "repo": event.repo_full_name,
+                    "pr_number": event.pr_number,
+                    "pr_author": pr_author,
+                    "reason": reason,
+                },
+            )
+            add_span_attributes(
+                span,
+                {"webhook.result": "not_eligible", "webhook.ineligible_reason": reason},
+            )
+            set_span_ok(span)
+            return {"status": "ignored", "message": f"PR not eligible: {reason}"}
+
+        logger.info(
+            "PR #%d has approval label: %s",
+            event.pr_number,
+            label,
+            extra={"repo": event.repo_full_name, "pr_number": event.pr_number, "label": label},
+        )
+
+        success = await self._approve_pr(
+            event.installation_id,
+            event.repo_full_name,
+            event.pr_number,
+            f"Auto-approved by Stampbot (label: {label})",
+            "label",
+            skip_existing_check=skip_existing_check,
+        )
+
+        add_span_attributes(
+            span,
+            {
+                "webhook.result": "approved" if success else "approval_failed",
+                "webhook.trigger_label": label,
+            },
+        )
+        set_span_ok(span)
+
+        return {
+            "status": "success" if success else "error",
+            "message": f"PR approved via label: {label}" if success else "Failed to approve PR",
+        }
+
+    async def _dismiss_for_label(
+        self, span: Span | None, event: PullRequestEvent, label: str
+    ) -> dict[str, Any]:
+        """Dismiss Stampbot approvals after an approval label was removed.
+
+        Args:
+            span: Active tracing span (None if tracing disabled)
+            event: Pull request event
+            label: Approval label that was removed
+
+        Returns:
+            Response dictionary
+        """
+        logger.info(
+            "Approval label %s removed from PR #%d",
+            label,
+            event.pr_number,
+            extra={"repo": event.repo_full_name, "pr_number": event.pr_number, "label": label},
+        )
+
+        success = await self._dismiss_approvals(
+            event.installation_id,
+            event.repo_full_name,
+            event.pr_number,
+            f"Label {label} removed",
+            "label_removed",
+        )
+
+        add_span_attributes(
+            span,
+            {
+                "webhook.result": "dismissed" if success else "dismiss_failed",
+                "webhook.removed_label": label,
+            },
+        )
+        set_span_ok(span)
+
+        return {
+            "status": "success" if success else "error",
+            "message": "Approvals dismissed" if success else "Failed to dismiss approvals",
+        }
+
+    async def _warn_missing_approval_labels(self, event: PullRequestEvent) -> None:
+        """Warn when a configured approval label does not exist in the repository.
+
+        Labels already present on the pull request exist by definition, so only
+        the remaining configured labels are looked up.
+
+        Args:
+            event: Pull request event
+        """
+        present = event.labels
+        for label in event.repo_config.approval_labels:
+            if label in present:
+                continue
+            label_exists = await run_in_threadpool(
+                github_client.repo_has_label,
+                event.installation_id,
+                event.repo_full_name,
+                label,
+            )
+            if label_exists is False:
+                logger.warning(
+                    "Approval label %s not found in %s",
+                    label,
+                    event.repo_full_name,
+                    extra={"repo": event.repo_full_name, "label": label},
+                )
 
     def _approval_needs_refresh(
         self,
@@ -694,8 +661,7 @@ class WebhookHandler:
                 set_span_ok(span)
                 return {"status": "error", "message": "Missing required fields"}
 
-            # Get repository configuration
-            repo_config = await self._get_repo_config(
+            repo_config = await self._policy.get(
                 installation_id,
                 repo_full_name,
                 repo_default_branch,
@@ -842,206 +808,6 @@ class WebhookHandler:
             add_span_attributes(span, {"chatops.result": "unknown_command"})
             set_span_ok(span)
             return {"status": "ignored", "message": f"Unknown command: {command}"}
-
-    async def _get_repo_config(
-        self,
-        installation_id: int,
-        repo_full_name: str,
-        default_branch: str,
-        owner_login: str | None,
-        owner_type: str | None,
-    ) -> RepoConfig:
-        """Get repository configuration from stampbot.toml.
-
-        Reads from the repo's default branch first, then falls back to the
-        organization-wide .github repo if available.
-
-        Args:
-            installation_id: GitHub App installation ID
-            repo_full_name: Repository full name
-            default_branch: Repository default branch
-            owner_login: Repository owner login
-            owner_type: Repository owner type (Organization/User)
-
-        Returns:
-            RepoConfig instance (default if file not found)
-        """
-        cache_key = (installation_id, repo_full_name, default_branch)
-        cache = self._policy_cache()
-        if cache is not None:
-            cached = cache.get(cache_key)
-            if cached is not None:
-                repo_config_loads_total.labels(status="cached").inc()
-                with create_span(
-                    "webhook.get_repo_config",
-                    {
-                        "github.repo": repo_full_name,
-                        "github.ref": default_branch or "default",
-                        "config.cache": "hit",
-                    },
-                ) as span:
-                    set_span_ok(span)
-                return cached
-
-        repo_config = await self._load_repo_config(
-            installation_id,
-            repo_full_name,
-            default_branch,
-            owner_login,
-            owner_type,
-        )
-
-        # Only valid policy is cached. Errors and fail-closed fallbacks are
-        # re-evaluated on the next event so recovery is immediate.
-        if cache is not None and repo_config.config_error is None:
-            cache[cache_key] = repo_config
-
-        return repo_config
-
-    async def _load_repo_config(
-        self,
-        installation_id: int,
-        repo_full_name: str,
-        default_branch: str,
-        owner_login: str | None,
-        owner_type: str | None,
-    ) -> RepoConfig:
-        """Read repository configuration from GitHub without consulting the cache.
-
-        Args:
-            installation_id: GitHub App installation ID
-            repo_full_name: Repository full name
-            default_branch: Repository default branch
-            owner_login: Repository owner login
-            owner_type: Repository owner type (Organization/User)
-
-        Returns:
-            RepoConfig instance (default if file not found)
-        """
-        with create_span(
-            "webhook.get_repo_config",
-            {
-                "github.repo": repo_full_name,
-                "github.ref": default_branch or "default",
-                "config.cache": "miss",
-            },
-        ) as span:
-            try:
-                content = await run_in_threadpool(
-                    github_client.get_repo_file,
-                    installation_id,
-                    repo_full_name,
-                    "stampbot.toml",
-                    default_branch,
-                )
-
-                if content:
-                    return self._parse_repo_config(span, content, source_repo=repo_full_name)
-
-                org_repo_full_name = None
-                if (
-                    owner_type == "Organization"
-                    and owner_login
-                    and repo_full_name != f"{owner_login}/.github"
-                ):
-                    org_repo_full_name = f"{owner_login}/.github"
-                    org_content = await run_in_threadpool(
-                        github_client.get_repo_file,
-                        installation_id,
-                        org_repo_full_name,
-                        "stampbot.toml",
-                        None,
-                        missing_repository_is_optional=True,
-                    )
-                    if org_content:
-                        return self._parse_repo_config(
-                            span, org_content, source_repo=org_repo_full_name
-                        )
-
-                repo_config = RepoConfig.default_or_config_error()
-                if repo_config.config_error:
-                    error = ValueError(repo_config.config_error)
-                    repo_config_loads_total.labels(status="error").inc()
-                    logger.warning(
-                        "Invalid service default configuration for %s: %s",
-                        repo_full_name,
-                        repo_config.config_error,
-                        extra={"repo": repo_full_name, "error": repo_config.config_error},
-                    )
-                    add_span_attributes(
-                        span,
-                        {
-                            "config.result": "error",
-                            "config.error": repo_config.config_error,
-                            "config.source_repo": "service_defaults",
-                        },
-                    )
-                    set_span_error(span, error)
-                    return repo_config
-
-                repo_config_loads_total.labels(status="default").inc()
-                logger.info(
-                    "No stampbot.toml found in %s%s, using defaults",
-                    repo_full_name,
-                    f" or {org_repo_full_name}" if org_repo_full_name else "",
-                    extra={"repo": repo_full_name, "org_repo": org_repo_full_name},
-                )
-                add_span_attributes(span, {"config.result": "default"})
-                set_span_ok(span)
-                return repo_config
-
-            except Exception as e:
-                repo_config_loads_total.labels(status="error").inc()
-                logger.warning(
-                    "Error loading config from %s: %s, disabling automation",
-                    repo_full_name,
-                    e,
-                    extra={"repo": repo_full_name, "error": str(e)},
-                )
-                add_span_attributes(span, {"config.result": "error"})
-                set_span_error(span, e)
-                return RepoConfig.fail_closed(
-                    "Unable to load Stampbot configuration; automation is disabled"
-                )
-
-    def _parse_repo_config(
-        self,
-        span: Any,
-        toml_content: str,
-        source_repo: str,
-    ) -> RepoConfig:
-        """Parse repository config content with metrics and tracing.
-
-        Args:
-            span: Active tracing span (can be None if tracing disabled)
-            toml_content: Raw TOML content
-            source_repo: Repository name where config was loaded
-
-        Returns:
-            RepoConfig instance (default with config_error on invalid config)
-        """
-        try:
-            repo_config = RepoConfig.from_toml(toml_content)
-        except ValueError as e:
-            repo_config_loads_total.labels(status="error").inc()
-            add_span_attributes(
-                span,
-                {
-                    "config.result": "error",
-                    "config.error": str(e),
-                    "config.source_repo": source_repo,
-                },
-            )
-            set_span_error(span, e)
-            return RepoConfig.fail_closed(str(e))
-
-        repo_config_loads_total.labels(status="found").inc()
-        add_span_attributes(
-            span,
-            {"config.result": "found", "config.source_repo": source_repo},
-        )
-        set_span_ok(span)
-        return repo_config
 
     def _format_help_message(self, repo_config: RepoConfig) -> str:
         """Format a help message for the effective repository configuration.

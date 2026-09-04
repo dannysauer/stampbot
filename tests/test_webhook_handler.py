@@ -13,8 +13,11 @@ from tests.conftest import load_fixture
 
 @pytest.fixture
 def mock_github_client():
-    """Create a mock GitHub client."""
-    with patch("stampbot.webhook_handler.github_client") as mock:
+    """Create a mock GitHub client, visible to the handler and the policy resolver."""
+    with (
+        patch("stampbot.webhook_handler.github_client") as mock,
+        patch("stampbot.repo_policy.github_client", mock),
+    ):
         # Default successful responses
         mock.get_repo_file.return_value = None  # No config file, use defaults
         mock.approve_pr.return_value = True
@@ -84,21 +87,66 @@ async def test_pr_opened_with_autoapprove_label_defers_to_labeled_event(
 
 
 @pytest.mark.asyncio
-async def test_pr_labeled_at_creation_approves_once(webhook_handler, mock_github_client):
-    """Test the opened and labeled events for one new pull request yield one approval."""
+@pytest.mark.parametrize("labeled_first", [False, True])
+async def test_pr_labeled_at_creation_approves_once(
+    webhook_handler, mock_github_client, labeled_first
+):
+    """Test the opened and labeled events for one new pull request yield one approval.
+
+    GitHub delivers the two events in either order.
+    """
     opened = load_fixture("pr_opened_with_autoapprove_label")
     labeled = load_fixture("pr_labeled_autoapprove")
+    events = [labeled, opened] if labeled_first else [opened, labeled]
 
-    await webhook_handler.handle_event("pull_request", opened)
-    result = await webhook_handler.handle_event("pull_request", labeled)
+    def approve_and_remember(*_args, **_kwargs):
+        # Later review scans see the approval this call created.
+        mock_github_client.find_bot_reviews.return_value = [777]
+        return True
 
-    assert result["status"] == "success"
+    mock_github_client.approve_pr.side_effect = approve_and_remember
+
+    results = [await webhook_handler.handle_event("pull_request", e) for e in events]
+
+    assert [r["status"] for r in results] == (
+        ["success", "ignored"] if labeled_first else ["ignored", "success"]
+    )
     mock_github_client.approve_pr.assert_called_once_with(
         12345,  # installation_id
         "octocat/hello-world",  # repo
         42,  # pr_number
         "Auto-approved by Stampbot (label: autoapprove)",
     )
+
+
+@pytest.mark.asyncio
+async def test_pr_labeled_second_approval_label_is_duplicate(webhook_handler, mock_github_client):
+    """Test only the first configured approval label present approves when several arrive."""
+    payload = load_fixture("pr_labeled_autoapprove")
+    payload["pull_request"]["labels"] = [{"name": "autoapprove"}, {"name": "stamp"}]
+    payload["label"] = {"name": "stamp"}
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "ignored"
+    assert "labeled event" in result["message"]
+    mock_github_client.approve_pr.assert_not_called()
+    mock_github_client.find_bot_reviews.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pr_labeled_first_approval_label_approves_when_second_present(
+    webhook_handler, mock_github_client
+):
+    """Test the event for the first configured label approves even if another is present."""
+    payload = load_fixture("pr_labeled_autoapprove")
+    payload["pull_request"]["labels"] = [{"name": "stamp"}, {"name": "autoapprove"}]
+    payload["label"] = {"name": "autoapprove"}
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "success"
+    mock_github_client.approve_pr.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -174,7 +222,7 @@ async def test_repo_config_is_cached_between_events(webhook_handler, mock_github
 @pytest.mark.asyncio
 async def test_repo_config_cache_disabled(mock_github_client, monkeypatch):
     """Test a zero cache lifetime reads policy on every event."""
-    monkeypatch.setattr("stampbot.webhook_handler._repo_config_cache_seconds", lambda: 0)
+    monkeypatch.setattr("stampbot.webhook_handler.repo_config_cache_seconds", lambda: 0)
     from stampbot.webhook_handler import WebhookHandler
 
     handler = WebhookHandler()
@@ -213,30 +261,6 @@ async def test_invalid_repo_config_is_not_cached(webhook_handler, mock_github_cl
     assert first["status"] == "error"
     assert second["status"] == "success"
     assert mock_github_client.get_repo_file.call_count == 2
-
-
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        (300, 300),
-        ("120", 120),
-        (" 45 ", 45),
-        (0, 0),
-        (-5, 0),
-        ("soon", 300),
-        (None, 300),
-        (True, 300),
-        (12.5, 300),
-        (300.0, 300),
-    ],
-)
-def test_repo_config_cache_seconds_parsing(monkeypatch, raw, expected):
-    """Test the cache lifetime accepts integers, rejects junk, and never goes negative."""
-    from stampbot import webhook_handler as module
-
-    monkeypatch.setattr(module, "settings", MagicMock(get=lambda _key, _default=None: raw))
-
-    assert module._repo_config_cache_seconds() == expected
 
 
 @pytest.mark.asyncio
@@ -380,23 +404,63 @@ async def test_pr_synchronize_reapprove_enabled_current_review_ignored(
     mock_github_client.approve_pr.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_should_approve_for_unsupported_pr_event(webhook_handler):
-    """Test approval decision helper rejects unsupported PR actions."""
+@pytest.mark.parametrize(
+    ("action", "event_label", "labels", "reapprove", "expected"),
+    [
+        ("opened", None, ["autoapprove"], False, ("duplicate", "autoapprove")),
+        ("opened", None, [], False, ("none", None)),
+        ("reopened", None, ["stamp"], False, ("approve", "stamp")),
+        ("labeled", "autoapprove", ["autoapprove"], False, ("approve", "autoapprove")),
+        ("labeled", "stamp", ["autoapprove", "stamp"], False, ("duplicate", "autoapprove")),
+        ("labeled", "autoapprove", ["stamp", "autoapprove"], False, ("approve", "autoapprove")),
+        ("labeled", "bug", ["autoapprove"], False, ("refresh", "autoapprove")),
+        ("labeled", "bug", [], False, ("none", None)),
+        ("synchronize", None, ["autoapprove"], True, ("refresh", "autoapprove")),
+        ("synchronize", None, ["autoapprove"], False, ("none", None)),
+        ("unlabeled", "autoapprove", [], False, ("dismiss", "autoapprove")),
+        ("unlabeled", "bug", ["autoapprove"], False, ("none", None)),
+    ],
+)
+def test_decide(webhook_handler, action, event_label, labels, reapprove, expected):
+    """Test the pure decision for every pull request action Stampbot handles."""
     from stampbot.config import RepoConfig
+    from stampbot.webhook_handler import PullRequestEvent
 
-    should_approve, skip_existing_check = await webhook_handler._should_approve_for_pr_event(
-        "closed",
-        {},
-        "current-head",
-        12345,
-        "octocat/hello-world",
-        42,
-        RepoConfig.default(),
+    config = RepoConfig.from_toml(f"reapprove = {str(reapprove).lower()}")
+    event = PullRequestEvent(
+        action=action,
+        installation_id=12345,
+        repo_full_name="octocat/hello-world",
+        pr_number=42,
+        owner_login="octocat",
+        pr={"labels": [{"name": name} for name in labels]},
+        event_label=event_label,
+        repo_config=config,
     )
 
-    assert should_approve is False
-    assert skip_existing_check is False
+    decision, label = webhook_handler._decide(event)
+
+    assert (decision.value, label) == expected
+
+
+def test_decide_respects_auto_approve_disabled(webhook_handler):
+    """Test label events do nothing when label-driven approval is off."""
+    from stampbot.config import RepoConfig
+    from stampbot.webhook_handler import Decision, PullRequestEvent
+
+    config = RepoConfig.from_toml("auto_approve_on_label = false")
+    event = PullRequestEvent(
+        action="unlabeled",
+        installation_id=12345,
+        repo_full_name="octocat/hello-world",
+        pr_number=42,
+        owner_login="octocat",
+        pr={"labels": []},
+        event_label="autoapprove",
+        repo_config=config,
+    )
+
+    assert webhook_handler._decide(event) == (Decision.NONE, None)
 
 
 @pytest.mark.asyncio

@@ -300,7 +300,8 @@ class TestGetInstallationClient:
             client = GitHubAppClient()
             result = client._get_installation_client(123456)
 
-            mock_github.assert_called_once()
+            # One client is bound for the token exchange and one is returned.
+            assert mock_github.call_count == 2
             assert result is not None
 
     def test_get_installation_client_failure(self):
@@ -364,7 +365,8 @@ class TestGetInstallationClient:
             # so every call gets a private client bound to shared credentials.
             assert first is not second
             assert other is not first
-            assert mock_github_cls.call_count == 3
+            # Two exchanges bind a throwaway client each; three calls build one client each.
+            assert mock_github_cls.call_count == 5
             assert mock_auth_cls.return_value.get_installation_auth.call_args_list == [
                 call(111),
                 call(222),
@@ -374,42 +376,6 @@ class TestGetInstallationClient:
             assert kwargs["timeout"] == 30
             assert kwargs["auth"] is mock_auth_cls.return_value.get_installation_auth.return_value
             assert mock_github_cls.call_args_list[1].kwargs["auth"] is kwargs["auth"]
-
-    def test_get_installation_client_keeps_first_credentials_after_a_race(self):
-        """Test a concurrent exchange for the same installation shares the first credentials."""
-        with (
-            patch("stampbot.github_client.is_configured", return_value=True),
-            patch("stampbot.github_client.settings") as mock_settings,
-            patch("stampbot.github_client.Auth.AppAuth") as mock_auth_cls,
-            patch("stampbot.github_client.GithubIntegration"),
-            patch("stampbot.github_client.Github") as mock_github_cls,
-            patch("stampbot.github_client.create_span") as mock_span,
-        ):
-            mock_settings.app_id = 12345
-            mock_settings.private_key = TEST_PEM_KEY
-            mock_settings.otel_enabled = False
-
-            from stampbot.github_client import GitHubAppClient
-
-            client = GitHubAppClient()
-            winner = Mock(name="winner")
-            loser = Mock(name="loser")
-
-            def another_thread_wins_first(_installation_id):
-                # Simulate a second thread finishing its exchange between this
-                # thread's cache miss and its cache insert.
-                client._installation_auths[111] = winner
-                return loser
-
-            mock_auth_cls.return_value.get_installation_auth.side_effect = another_thread_wins_first
-            mock_span.return_value.__enter__ = Mock(return_value=None)
-            mock_span.return_value.__exit__ = Mock(return_value=False)
-
-            client._get_installation_client(111)
-
-            assert client._installation_auths[111] is winner
-            # The returned client was rebuilt on the shared credentials.
-            assert mock_github_cls.call_args_list[-1].kwargs["auth"] is winner
 
     def test_get_installation_client_surfaces_refresh_failure(self):
         """Test a failed token refresh on cached credentials raises before any request."""
@@ -427,7 +393,9 @@ class TestGetInstallationClient:
 
             failure = GithubException(404, {"message": "Not Found"}, None)
             installation_auth = Mock()
-            type(installation_auth).token = PropertyMock(side_effect=[TEST_TOKEN, failure])
+            type(installation_auth).token = PropertyMock(
+                side_effect=[TEST_TOKEN, TEST_TOKEN, failure]
+            )
             mock_auth_cls.return_value.get_installation_auth.return_value = installation_auth
 
             mock_span.return_value.__enter__ = Mock(return_value=None)
@@ -994,46 +962,6 @@ class TestGetRepoFile:
 
             assert error.value is failure
 
-    def test_get_repo_file_accepts_missing_optional_repository(self):
-        """Test an optional fallback repository may be absent from an installation."""
-        with (
-            patch("stampbot.github_client.is_configured", return_value=True),
-            patch("stampbot.github_client.settings") as mock_settings,
-            patch("stampbot.github_client.Auth.AppAuth"),
-            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
-            patch("stampbot.github_client.Github") as mock_github_cls,
-            patch("stampbot.github_client.create_span") as mock_span,
-        ):
-            mock_settings.app_id = 12345
-            mock_settings.private_key = TEST_PEM_KEY
-            mock_settings.otel_enabled = False
-
-            mock_integration = Mock()
-            mock_token = Mock()
-            mock_token.token = TEST_TOKEN
-            mock_integration.get_access_token.return_value = mock_token
-            mock_integration_cls.return_value = mock_integration
-
-            failure = GithubException(404, {"message": "Not Found"}, None)
-            mock_github = Mock()
-            mock_github.get_repo.side_effect = failure
-            mock_github_cls.return_value = mock_github
-
-            mock_span.return_value.__enter__ = Mock(return_value=None)
-            mock_span.return_value.__exit__ = Mock(return_value=False)
-
-            from stampbot.github_client import GitHubAppClient
-
-            client = GitHubAppClient()
-            result = client.get_repo_file(
-                123456,
-                "owner/.github",
-                "stampbot.toml",
-                missing_repository_is_optional=True,
-            )
-
-            assert result is None
-
     def test_get_repo_file_accepts_missing_optional_repository_with_lazy_client(self):
         """Test a lazy client confirms the optional repository itself is missing."""
         with (
@@ -1301,8 +1229,8 @@ class TestFindBotReviews:
             # The App slug is read once and reused for later review scans.
             client.find_bot_reviews(123456, "owner/repo", 43)
             mock_integration.get_app.assert_called_once_with()
-            # Each operation builds its own client on the shared credentials.
-            assert mock_github_cls.call_count == 2
+            # One client bound for the exchange, then one per operation.
+            assert mock_github_cls.call_count == 3
             mock_github.get_rate_limit.assert_not_called()
 
     def test_find_bot_reviews_returns_empty_on_error(self):

@@ -156,7 +156,7 @@ automation. Stampbot records these failures as policy-load errors.
 
 | Symptom | Check |
 | --- | --- |
-| A labeled pull request is not approved | A current label appears in `approval_labels`, and every configured filter category passes. |
+| A labeled pull request is not approved | A current label appears in `approval_labels`, and every configured filter category passes. If the label was on the pull request when it was created, the `labeled` delivery creates the approval and the `opened` delivery is ignored. Redeliver the `labeled` delivery, or remove and re-add the label. A pull request converted from a labeled issue gets no `labeled` delivery; re-add the label. |
 | An approval label is reported missing | Create that label or remove it from policy. |
 | A policy edit has no effect | Wait `STAMPBOT_REPO_CONFIG_CACHE_SECONDS` (default 300) or restart the replicas. A corrected file replaces an invalid one immediately, because errors are never cached. |
 | Removing one approval label dismisses the review | This is current behavior, even when another approval label remains. |
