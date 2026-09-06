@@ -117,13 +117,15 @@ controller in front of Stampbot has a smaller limit than Stampbot does, the
 controller rejects the delivery first and the only record is in the controller's
 own log.
 
-The events Stampbot subscribes to stay small. Over one organization's week,
-the largest `pull_request` delivery was 149 KB, the largest `issue_comment` was
-513 KB, and the largest `pull_request_review_comment` was 61 KB. Pushes are
-larger: about one in a hundred is over 512 KB, and bodies over 1 MiB do arrive.
-Stampbot doesn't subscribe to pushes today, so the 1 MiB limit has not cost it
-an event, but any change that adds `push` needs the ingress at least as
-permissive as Stampbot.
+The event types Stampbot subscribes to stay small. Over one week across three
+organizations, on a GitHub App receiving the same events, the largest
+`pull_request` delivery was 149 KiB, the largest `issue_comment` 513 KiB, and
+the largest `pull_request_review_comment` 61 KiB. Pushes are larger: of 19,649
+pushes over 30 days, 151 (0.8%) were between 512 KiB and 1 MiB, and the ingress
+in front of that App rejected about eight deliveries a day for exceeding 1 MiB,
+event type unknown. Stampbot doesn't subscribe to pushes today, so in that
+sample the 1 MiB limit didn't cost it an event, but any change that adds `push`
+needs the ingress at least as permissive as Stampbot.
 
 Set the controller's limit to GitHub's cap so Stampbot is the layer that decides.
 For ingress-nginx, whose default is `1m`, add an annotation through
@@ -137,8 +139,9 @@ ingress:
 
 Traefik has no request-body limit unless you add a `buffering` middleware; if
 you do, set `maxRequestBodyBytes` to `26214400` or higher. Envoy-based
-controllers such as Contour and Istio don't limit body size by default. Cloud
-Run accepts requests up to 32 MiB.
+controllers such as Contour and Istio don't limit body size by default. If you
+run Stampbot on Cloud Run instead, its 32 MiB request limit is already above
+GitHub's cap; see the [Cloud Run guide](../../docs/deploy-gcp-cloudrun.md).
 
 The limit itself is documented in the [reference](../../docs/reference.md) and
 the [security requirements](../../docs/security-requirements.md); this section
@@ -908,7 +911,7 @@ fields through without a chart-specific sub-schema.
 | `metrics.serviceMonitor.scrapeTimeout` | Non-empty string | `10s` | Sets the per-scrape timeout. |
 | `ingress.enabled` | Boolean | `false` | Creates an Ingress that targets only the main Service. |
 | `ingress.className` | String | Empty | Sets `spec.ingressClassName` when non-empty. |
-| `ingress.annotations` | Map | `{}` | Adds annotations to the Ingress. |
+| `ingress.annotations` | Map | `{}` | Adds annotations to the Ingress. See [Keep the ingress from being the smaller limit](#keep-the-ingress-from-being-the-smaller-limit) for the body-size annotation. |
 | `ingress.hosts` | List; each item needs `host` and `paths` | `stampbot.local` with `/` Prefix | Sets host rules. Each path needs `path` and `pathType`; path type is `Exact`, `Prefix`, or `ImplementationSpecific`. |
 | `ingress.tls` | Raw TLS-entry list | `[]` | Sets Ingress TLS hosts and Secret names. |
 | `networkPolicy.enabled` | Boolean | `false` | Creates one NetworkPolicy for Stampbot Pods. |
