@@ -112,10 +112,12 @@ Helm does not install or upgrade these CRDs.
 
 Stampbot rejects a webhook body over 1 MiB with a `413` and counts it in
 `stampbot_errors_total{error_type="payload_too_large"}`. GitHub can send a
-payload of up to 25 MB, and it doesn't retry a failed delivery. If the ingress
-controller in front of Stampbot has a smaller limit than Stampbot does, the
-controller rejects the delivery first and the only record is in the controller's
-own log.
+payload of up to 25 MB, and it doesn't retry a failed delivery on its own; the
+attempt stays in the App's **Recent Deliveries** page, where you can inspect it
+and redeliver it by hand. If the ingress controller in front of Stampbot has a
+smaller limit than Stampbot does, the controller rejects the delivery first.
+Stampbot's own logs and metrics then have no record of it; the controller's log
+and GitHub's delivery history are the only places it appears.
 
 The event types Stampbot subscribes to stay small. Over one week across three
 organizations, on a GitHub App receiving the same events, the largest
@@ -123,9 +125,11 @@ organizations, on a GitHub App receiving the same events, the largest
 the largest `pull_request_review_comment` 61 KiB. Pushes are larger: of 19,649
 pushes over 30 days, 151 (0.8%) were between 512 KiB and 1 MiB, and the ingress
 in front of that App rejected about eight deliveries a day for exceeding 1 MiB,
-event type unknown. Stampbot doesn't subscribe to pushes today, so in that
-sample the 1 MiB limit didn't cost it an event, but any change that adds `push`
-needs the ingress at least as permissive as Stampbot.
+event type unknown. Because the type is unknown, that sample can't show whether
+any of the rejected deliveries were events Stampbot handles. Stampbot doesn't
+subscribe to pushes today; any change that adds `push` makes the question
+sharper, and in either case the ingress needs to be at least as permissive as
+Stampbot so the rejection is Stampbot's to log.
 
 Set the controller's limit to GitHub's cap so Stampbot is the layer that decides.
 For ingress-nginx, whose default is `1m`, add an annotation through
