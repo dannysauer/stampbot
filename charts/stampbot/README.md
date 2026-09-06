@@ -108,6 +108,42 @@ install them. This table marks each boundary.
 
 Helm does not install or upgrade these CRDs.
 
+### Keep the ingress from being the smaller limit
+
+Stampbot rejects a webhook body over 1 MiB with a `413` and counts it in
+`stampbot_errors_total{error_type="payload_too_large"}`. GitHub can send a
+payload of up to 25 MB, and it doesn't retry a failed delivery. If the ingress
+controller in front of Stampbot has a smaller limit than Stampbot does, the
+controller rejects the delivery first and the only record is in the controller's
+own log.
+
+The events Stampbot subscribes to stay small. Over one organization's week,
+the largest `pull_request` delivery was 149 KB, the largest `issue_comment` was
+513 KB, and the largest `pull_request_review_comment` was 61 KB. Pushes are
+larger: about one in a hundred is over 512 KB, and bodies over 1 MiB do arrive.
+Stampbot doesn't subscribe to pushes today, so the 1 MiB limit has not cost it
+an event, but any change that adds `push` needs the ingress at least as
+permissive as Stampbot.
+
+Set the controller's limit to GitHub's cap so Stampbot is the layer that decides.
+For ingress-nginx, whose default is `1m`, add an annotation through
+`ingress.annotations`:
+
+```yaml
+ingress:
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 25m
+```
+
+Traefik has no request-body limit unless you add a `buffering` middleware; if
+you do, set `maxRequestBodyBytes` to `26214400` or higher. Envoy-based
+controllers such as Contour and Istio don't limit body size by default. Cloud
+Run accepts requests up to 32 MiB.
+
+The limit itself is documented in the [reference](../../docs/reference.md) and
+the [security requirements](../../docs/security-requirements.md); this section
+is about not undercutting it from the outside.
+
 ## Install from the OCI registry
 
 ### Create the namespace and credential Secret
