@@ -141,11 +141,17 @@ ingress:
     nginx.ingress.kubernetes.io/proxy-body-size: 25m
 ```
 
-Traefik has no request-body limit unless you add a `buffering` middleware; if
-you do, set `maxRequestBodyBytes` to `26214400` or higher. Envoy-based
-controllers such as Contour and Istio don't limit body size by default. If you
-run Stampbot on Cloud Run instead, its 32 MiB request limit is already above
-GitHub's cap; see the [Cloud Run guide](../../docs/deploy-gcp-cloudrun.md).
+Whatever the controller, give it a finite limit. Stampbot checks
+`Content-Length` before reading, but a chunked request carries no
+`Content-Length`, and Stampbot then reads the whole body into memory before it
+can measure and reject it. A controller that streams bodies through with no cap
+turns that into a way for an unauthenticated client to exhaust a pod's memory.
+Traefik streams by default, so add a `buffering` middleware to the route and set
+`maxRequestBodyBytes` to `26214400`. Envoy-based controllers such as Contour and
+Istio also stream by default; configure a request-body limit of the same size on
+the route. Don't leave either unlimited. If you run Stampbot on Cloud Run
+instead, its own 32 MiB request limit is the finite cap; see the
+[Cloud Run guide](../../docs/deploy-gcp-cloudrun.md).
 
 The limit itself is documented in the [reference](../../docs/reference.md) and
 the [security requirements](../../docs/security-requirements.md); this section
