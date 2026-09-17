@@ -35,7 +35,8 @@ flowchart LR
 
 GitHub signs the raw request body with the App's webhook secret. The HTTP layer
 checks that signature before parsing JSON or routing the event. It also rejects
-bodies larger than 1 MiB.
+bodies larger than 1 MiB, counting the bytes as they arrive so an oversize body
+is refused before it is all in memory.
 
 A valid request moves to `WebhookHandler`. The handler loads policy for the
 target repository and decides whether the event calls for approval, dismissal,

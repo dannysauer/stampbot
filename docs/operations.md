@@ -48,7 +48,7 @@ Tempo.
 | `200`, `error` | Policy, payload fields, or a GitHub operation failed. | Read the response message and matching logs. |
 | `400` | The event header is missing or the body is not JSON. | Redeliver the unchanged event. |
 | `401` | The signature is missing or invalid. | Compare the App webhook secret with the runtime Secret. |
-| `413` | The body exceeds 1 MiB. | Save only the delivery metadata and report a reproducible case. |
+| `413` | The body exceeds 1 MiB, by its `Content-Length` or by the bytes read. | Save only the delivery metadata and report a reproducible case. |
 | `503` | One or more App credentials are missing. | Check App ID, private key, and webhook secret. |
 | `500` | The handler raised unexpectedly. | Find the sanitized exception for the delivery window. |
 

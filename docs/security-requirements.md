@@ -10,6 +10,9 @@ model or a review of the environment where Stampbot runs.
 - Compare signatures in constant time.
 - Reject a missing or invalid signature before parsing JSON.
 - Keep the declared and actual body limit at 1 MiB or lower.
+- Enforce the actual body limit while reading the request, not after. A chunked
+  request carries no `Content-Length`, so a body buffered before it is measured
+  costs memory an unauthenticated client controls.
 - Treat every payload field as untrusted after signature verification.
 
 A matching signature proves that the sender knew the webhook secret and that

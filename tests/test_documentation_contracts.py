@@ -53,3 +53,30 @@ def test_policy_read_failure_boundaries_are_documented() -> None:
         documentation = _normalized(path)
         assert all(statement in documentation for statement in statements)
         assert all(old_statement not in documentation for old_statement in forbidden)
+
+
+def test_webhook_body_limit_enforcement_point_is_documented() -> None:
+    """The docs must say the size limit applies while reading, not after."""
+    required = {
+        "docs/security-requirements.md": (
+            "Enforce the actual body limit while reading the request, not after.",
+        ),
+        "docs/architecture.md": (
+            "counting the bytes as they arrive so an oversize body is refused "
+            "before it is all in memory",
+        ),
+        "docs/reference.md": (
+            "or the bytes read pass 1 MiB. Stampbot stops buffering at that "
+            "point; the server drains and discards the rest of the request.",
+        ),
+    }
+    forbidden = (
+        "It also rejects bodies larger than 1 MiB.",
+        "The declared or actual body exceeds 1 MiB.",
+        "Stampbot stops reading at that point.",
+    )
+
+    for path, statements in required.items():
+        documentation = _normalized(path)
+        assert all(statement in documentation for statement in statements)
+        assert all(old_statement not in documentation for old_statement in forbidden)
