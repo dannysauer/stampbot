@@ -56,27 +56,31 @@ COPY --from=builder /usr/local/lib/python3.14/site-packages /usr/local/lib/pytho
 # `pkg:pypi/setuptools` would also mask a future finding in a genuine
 # dependency of that name.
 #
-# Uninstall before rm so the RECORD-driven removal takes the console scripts in
-# /usr/local/bin and setuptools' `distutils-precedence.pth`, which would
-# otherwise error on every interpreter start. The rm then sweeps what layering
-# the builder's pip over the base image's leaves behind, including the
-# /usr/local/bin/pip symlink that only one of the two RECORDs lists. The final
-# check fails the build if any of the three is still importable, so a change to
-# the base image cannot quietly reintroduce them, and ensurepip's bundled wheel
-# goes too so a scanner that reads inside archives cannot bring the same
-# findings back.
-RUN python -m pip uninstall --yes --break-system-packages setuptools wheel pip && \
-    rm -rf /usr/local/lib/python3.14/site-packages/pip \
+# Delete rather than `pip uninstall`, because the pip in this stage cannot run.
+# The COPY above merges over the base image's site-packages without deleting,
+# and constraints.txt pins an older pip than the base image ships, so the
+# result mixes two versions: `python -m pip` dies with an ImportError out of
+# pip._internal. That has been true of the shipped image all along and went
+# unnoticed only because nothing here invokes pip. Removing the files by hand
+# means the console scripts and setuptools' `distutils-precedence.pth`, which
+# would otherwise error on every interpreter start, have to be named
+# explicitly. ensurepip's bundled wheel goes too, so a scanner that reads
+# inside archives cannot bring the same findings back. The check at the end
+# fails the build if any of the three is still importable, so a change to the
+# base image cannot quietly reintroduce them.
+RUN rm -rf /usr/local/lib/python3.14/site-packages/pip \
            /usr/local/lib/python3.14/site-packages/pip-*.dist-info \
            /usr/local/lib/python3.14/site-packages/setuptools \
            /usr/local/lib/python3.14/site-packages/setuptools-*.dist-info \
            /usr/local/lib/python3.14/site-packages/pkg_resources \
+           /usr/local/lib/python3.14/site-packages/pkg_resources-*.dist-info \
            /usr/local/lib/python3.14/site-packages/_distutils_hack \
            /usr/local/lib/python3.14/site-packages/distutils-precedence.pth \
            /usr/local/lib/python3.14/site-packages/wheel \
            /usr/local/lib/python3.14/site-packages/wheel-*.dist-info \
            /usr/local/lib/python3.14/ensurepip/_bundled \
-           /usr/local/bin/pip* && \
+           /usr/local/bin/pip* \
+           /usr/local/bin/wheel && \
     python -c "import importlib.util as u, sys; \
 left = [m for m in ('pip', 'setuptools', 'pkg_resources') if u.find_spec(m)]; \
 sys.exit('still present: ' + repr(left)) if left else None"
