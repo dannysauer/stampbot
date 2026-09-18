@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
   "author": "Danny Sauer <github@dannysauer.com>",
-  "timestamp": "2026-07-22T11:42:04Z",
-  "version": 42,
+  "timestamp": "2026-09-18T04:55:00Z",
+  "version": 43,
   "statements": [
     {
       "vulnerability": {
@@ -628,6 +628,180 @@
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
       "impact_statement": "The assessed Debian runtime image includes perl-base 5.40.1-6, but Stampbot's container entrypoint, health check, and application code do not invoke Perl or the Storable module. CVE-2026-57433 requires a crafted blob to reach Storable thaw or retrieve, and no identified Stampbot execution path reaches those functions."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-76642",
+        "name": "CVE-2026-76642",
+        "description": "util-linux: failed external mount helper still runs privileged X-mount post-hooks"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/bsdutils"
+        },
+        {
+          "@id": "pkg:deb/debian/libblkid1"
+        },
+        {
+          "@id": "pkg:deb/debian/liblastlog2-2"
+        },
+        {
+          "@id": "pkg:deb/debian/libmount1"
+        },
+        {
+          "@id": "pkg:deb/debian/libsmartcols1"
+        },
+        {
+          "@id": "pkg:deb/debian/libuuid1"
+        },
+        {
+          "@id": "pkg:deb/debian/login"
+        },
+        {
+          "@id": "pkg:deb/debian/mount"
+        },
+        {
+          "@id": "pkg:deb/debian/util-linux"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The vulnerable code is in mount(8), shipped by the mount and util-linux packages. The other packages listed here are reported alongside them because Debian builds all of them from the src:util-linux source package; they do not contain the affected code. Exploitation needs an fstab entry authorizing an unprivileged user to mount a filesystem with X-mount.* options. Stampbot neither writes /etc/fstab nor invokes mount(8): the image runs `python -m stampbot` and a urllib health check, and nothing in it shells out to mount. Deployed with this repository's Helm chart the container additionally runs as UID 1000 with allowPrivilegeEscalation: false, which sets no_new_privs so the SUID bit on mount(8) confers nothing, drops every Linux capability, and mounts its root filesystem read-only. Those are chart defaults rather than properties of the image, so they are defence in depth here, not the basis of this assessment."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-78408",
+        "name": "CVE-2026-78408",
+        "description": "util-linux: nsenter --join-cgroup leaks root cgroup migration authority"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/bsdutils"
+        },
+        {
+          "@id": "pkg:deb/debian/libblkid1"
+        },
+        {
+          "@id": "pkg:deb/debian/liblastlog2-2"
+        },
+        {
+          "@id": "pkg:deb/debian/libmount1"
+        },
+        {
+          "@id": "pkg:deb/debian/libsmartcols1"
+        },
+        {
+          "@id": "pkg:deb/debian/libuuid1"
+        },
+        {
+          "@id": "pkg:deb/debian/login"
+        },
+        {
+          "@id": "pkg:deb/debian/mount"
+        },
+        {
+          "@id": "pkg:deb/debian/util-linux"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The vulnerable code is in nsenter(1), shipped by the util-linux package. The other packages listed here are reported alongside it because Debian builds all of them from the src:util-linux source package; they do not contain the affected code. Exploitation needs a privileged operator to run `nsenter --join-cgroup` against a process the attacker controls, which leaves a root-opened cgroup.procs descriptor usable after the credential change. Nothing in the image runs nsenter: it runs `python -m stampbot` and a urllib health check, and nothing in it shells out to nsenter. nsenter(1) is not SUID, so an unprivileged process in the container cannot obtain that descriptor on its own."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-78409",
+        "name": "CVE-2026-78409",
+        "description": "util-linux: X-mount.subdir detached-tree resolution can escape via intermediate symlinks"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/bsdutils"
+        },
+        {
+          "@id": "pkg:deb/debian/libblkid1"
+        },
+        {
+          "@id": "pkg:deb/debian/liblastlog2-2"
+        },
+        {
+          "@id": "pkg:deb/debian/libmount1"
+        },
+        {
+          "@id": "pkg:deb/debian/libsmartcols1"
+        },
+        {
+          "@id": "pkg:deb/debian/libuuid1"
+        },
+        {
+          "@id": "pkg:deb/debian/login"
+        },
+        {
+          "@id": "pkg:deb/debian/mount"
+        },
+        {
+          "@id": "pkg:deb/debian/util-linux"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The vulnerable code is in mount(8), shipped by the mount and util-linux packages. The other packages listed here are reported alongside them because Debian builds all of them from the src:util-linux source package; they do not contain the affected code. Exploitation needs an fstab entry authorizing an unprivileged user to mount a filesystem with X-mount.* options. Stampbot neither writes /etc/fstab nor invokes mount(8): the image runs `python -m stampbot` and a urllib health check, and nothing in it shells out to mount. Deployed with this repository's Helm chart the container additionally runs as UID 1000 with allowPrivilegeEscalation: false, which sets no_new_privs so the SUID bit on mount(8) confers nothing, drops every Linux capability, and mounts its root filesystem read-only. Those are chart defaults rather than properties of the image, so they are defence in depth here, not the basis of this assessment."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-78410",
+        "name": "CVE-2026-78410",
+        "description": "util-linux: restricted bind mounts do not pin the source, allowing X-mount.owner/group/mode redirection"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/bsdutils"
+        },
+        {
+          "@id": "pkg:deb/debian/libblkid1"
+        },
+        {
+          "@id": "pkg:deb/debian/liblastlog2-2"
+        },
+        {
+          "@id": "pkg:deb/debian/libmount1"
+        },
+        {
+          "@id": "pkg:deb/debian/libsmartcols1"
+        },
+        {
+          "@id": "pkg:deb/debian/libuuid1"
+        },
+        {
+          "@id": "pkg:deb/debian/login"
+        },
+        {
+          "@id": "pkg:deb/debian/mount"
+        },
+        {
+          "@id": "pkg:deb/debian/util-linux"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The vulnerable code is in mount(8), shipped by the mount and util-linux packages. The other packages listed here are reported alongside them because Debian builds all of them from the src:util-linux source package; they do not contain the affected code. Exploitation needs an fstab entry authorizing an unprivileged user to mount a filesystem with X-mount.* options. Stampbot neither writes /etc/fstab nor invokes mount(8): the image runs `python -m stampbot` and a urllib health check, and nothing in it shells out to mount. Deployed with this repository's Helm chart the container additionally runs as UID 1000 with allowPrivilegeEscalation: false, which sets no_new_privs so the SUID bit on mount(8) confers nothing, drops every Linux capability, and mounts its root filesystem read-only. Those are chart defaults rather than properties of the image, so they are defence in depth here, not the basis of this assessment."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-16742",
+        "name": "CVE-2026-16742",
+        "description": "systemd: systemd-homed local privilege escalation via missing home-record signature verification"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libsystemd0"
+        },
+        {
+          "@id": "pkg:deb/debian/libudev1"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "The flaw is in the systemd-homed daemon, which adopts a home record without verifying its signature. libsystemd0 and libudev1 are present in the image, but they are the client libraries; systemd-homed is not installed and no service manager runs in the container. Trivy attributes the CVE to these two packages because Debian builds them from the src:systemd source package, not because the vulnerable daemon is present."
     }
   ]
 }
