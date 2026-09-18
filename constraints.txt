@@ -1,4 +1,7 @@
 # Build tool version constraints
-# These are installed before requirements.txt to ensure secure/compatible tooling
-pip==26.1.2 \
-    --hash=sha256:382ff9f685ee3bc25864f820aa50505825f10f5458ffff07e30a6d96e5715cab
+# These are installed before requirements.txt to ensure secure/compatible tooling.
+# Keep pip at or above the version CPython's ensurepip seeds into a new venv;
+# pinning lower would downgrade the installer past its own security fixes.
+pip==26.2.1 \
+    --hash=sha256:71138adf1f4ca900cdb7d289c21b7494329f2332b6d85f0e1c42108c0384ed3e \
+    --hash=sha256:f6ad667e89a1fe78046c8f13232b247200f5258d7828f3f7883d660878e0813f
