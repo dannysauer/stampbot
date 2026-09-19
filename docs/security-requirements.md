@@ -13,6 +13,9 @@ model or a review of the environment where Stampbot runs.
 - Enforce the actual body limit while reading the request, not after. A chunked
   request carries no `Content-Length`, so a body buffered before it is measured
   costs memory an unauthenticated client controls.
+- Accumulate the body in one contiguous buffer. The client also chooses the
+  chunk size, and a list of chunks pays a separate object header and pointer
+  per chunk, so an upload paced in tiny chunks would cost many times its length.
 - Treat every payload field as untrusted after signature verification.
 
 A matching signature proves that the sender knew the webhook secret and that

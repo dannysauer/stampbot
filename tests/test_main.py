@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import socket
+import tracemalloc
 import urllib.request
 from unittest.mock import MagicMock, patch
 
@@ -13,7 +14,7 @@ import pytest
 import structlog.contextvars
 from fastapi.testclient import TestClient
 
-from stampbot.main import MAX_WEBHOOK_BODY_SIZE
+from stampbot.main import MAX_WEBHOOK_BODY_SIZE, _read_body_within_limit
 from stampbot.webhook_handler import webhook_handler
 
 
@@ -440,6 +441,36 @@ async def test_webhook_streamed_body_over_limit_is_rejected_while_reading():
     assert offered < total
     # Rejected during the read, so it never reached signature verification.
     verify.assert_not_called()
+
+
+async def test_read_body_within_limit_holds_tiny_chunks_in_one_buffer():
+    """Many tiny chunks cost about the body's size, not a per-chunk overhead.
+
+    The client chooses the chunk size. Kept as a list, every chunk carries its
+    own object header and list slot, so two-byte chunks would multiply the
+    memory held for a body by about twenty before the limit saw anything. The
+    peak-allocation bound fails against that list-of-chunks implementation.
+    """
+    payload = _payload_of_exactly(64 * 1024)
+    chunk_size = 2
+
+    class TinyChunkRequest:
+        async def stream(self):
+            for start in range(0, len(payload), chunk_size):
+                yield payload[start : start + chunk_size]
+
+    tracemalloc.start()
+    try:
+        tracemalloc.reset_peak()
+        body = await _read_body_within_limit(TinyChunkRequest())  # type: ignore[arg-type]
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert body == payload
+    # A contiguous buffer plus the final copy stays near twice the body; a list
+    # of two-byte chunks reaches roughly twenty times it.
+    assert peak < 4 * len(payload)
 
 
 async def test_webhook_streamed_body_at_limit_is_processed():

@@ -432,6 +432,11 @@ async def _read_body_within_limit(request: Request) -> bytes:
     bytes as they arrive bounds that to ``MAX_WEBHOOK_BODY_SIZE`` plus the chunk
     that crosses it.
 
+    The bytes accumulate in one contiguous buffer rather than a list of chunks.
+    The client also controls chunk size, and a list would charge a separate
+    object header and pointer per chunk: a body paced in two-byte chunks would
+    cost about twenty times its length before the limit noticed anything.
+
     Args:
         request: The incoming request, whose stream has not been consumed.
 
@@ -446,15 +451,13 @@ async def _read_body_within_limit(request: Request) -> bytes:
         ``request.body()`` or ``request.json()`` raises ``RuntimeError``.
         Everything downstream must use the returned bytes.
     """
-    chunks: list[bytes] = []
-    size = 0
+    body = bytearray()
     async for chunk in request.stream():
-        size += len(chunk)
-        if size > MAX_WEBHOOK_BODY_SIZE:
+        if len(body) + len(chunk) > MAX_WEBHOOK_BODY_SIZE:
             errors_total.labels(error_type="payload_too_large").inc()
             raise HTTPException(status_code=413, detail="Request body too large")
-        chunks.append(chunk)
-    return b"".join(chunks)
+        body += chunk
+    return bytes(body)
 
 
 @app.post("/webhook")
