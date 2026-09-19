@@ -108,6 +108,60 @@ install them. This table marks each boundary.
 
 Helm does not install or upgrade these CRDs.
 
+### Match the ingress body limit to Stampbot's
+
+Stampbot rejects a webhook body over 1 MiB with a `413` and counts it in
+`stampbot_errors_total{error_type="payload_too_large"}`. GitHub can send a
+payload of up to 25 MB, and it doesn't retry a failed delivery on its own; the
+attempt stays in the App's **Recent Deliveries** page, where you can inspect it
+and redeliver it by hand. The ingress controller in front of Stampbot should
+enforce the same 1 MiB, for two different reasons.
+
+A smaller controller limit drops deliveries Stampbot would have accepted, and
+Stampbot's own logs and metrics never see them. A larger one is worse. Stampbot
+checks `Content-Length` before reading, but a chunked request carries no
+`Content-Length`, and Stampbot reads the whole body into memory before it can
+measure and reject it. With the controller allowing 25 MiB, about twenty
+concurrent oversized requests from an unauthenticated client fill the chart's
+default 512 MiB memory limit. Enforcing the limit while reading is tracked in
+[#323](https://github.com/dannysauer/stampbot/issues/323); until that lands,
+the controller is the layer that protects the pod, and its limit must be finite
+and no larger than Stampbot's.
+
+The event types Stampbot subscribes to stay small. Over one week across three
+organizations, on a GitHub App receiving the same events, the largest
+`pull_request` delivery was 149 KiB, the largest `issue_comment` 513 KiB, and
+the largest `pull_request_review_comment` 61 KiB. Pushes are larger: of 19,649
+pushes over 30 days, 151 (0.8%) were between 512 KiB and 1 MiB, and the ingress
+in front of that App rejected about eight deliveries a day for exceeding 1 MiB,
+event type unknown. Because the type is unknown, that sample can't show whether
+any of the rejected deliveries were events Stampbot handles. Stampbot doesn't
+subscribe to pushes today.
+
+For ingress-nginx, `1m` is the default, so nothing needs adding unless a
+cluster-wide `proxy-body-size` has raised it. Setting it on the Ingress through
+`ingress.annotations` pins it:
+
+```yaml
+ingress:
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 1m
+```
+
+Traefik streams bodies by default, so add a `buffering` middleware to the route
+with `maxRequestBodyBytes: 1048576`. Istio also streams by default; an
+`EnvoyFilter` that inserts the `buffer` HTTP filter with `max_request_bytes:
+1048576` on the route enforces it. Contour's HTTPProxy has no body-size setting,
+so put a proxy or WAF that enforces one in front of it, or don't expose the
+webhook through Contour until #323 lands. Cloud Run enforces its own 32 MiB
+request limit, which is finite but well above Stampbot's; see the
+[Cloud Run guide](../../docs/deploy-gcp-cloudrun.md) and treat #323 as the fix
+for that gap too.
+
+The limit itself is documented in the [reference](../../docs/reference.md) and
+the [security requirements](../../docs/security-requirements.md); this section
+is about keeping the controller in step with it.
+
 ## Install from the OCI registry
 
 ### Create the namespace and credential Secret
@@ -872,7 +926,7 @@ fields through without a chart-specific sub-schema.
 | `metrics.serviceMonitor.scrapeTimeout` | Non-empty string | `10s` | Sets the per-scrape timeout. |
 | `ingress.enabled` | Boolean | `false` | Creates an Ingress that targets only the main Service. |
 | `ingress.className` | String | Empty | Sets `spec.ingressClassName` when non-empty. |
-| `ingress.annotations` | Map | `{}` | Adds annotations to the Ingress. |
+| `ingress.annotations` | Map | `{}` | Adds annotations to the Ingress. See [Match the ingress body limit to Stampbot's](#match-the-ingress-body-limit-to-stampbots) for the body-size annotation. |
 | `ingress.hosts` | List; each item needs `host` and `paths` | `stampbot.local` with `/` Prefix | Sets host rules. Each path needs `path` and `pathType`; path type is `Exact`, `Prefix`, or `ImplementationSpecific`. |
 | `ingress.tls` | Raw TLS-entry list | `[]` | Sets Ingress TLS hosts and Secret names. |
 | `networkPolicy.enabled` | Boolean | `false` | Creates one NetworkPolicy for Stampbot Pods. |
