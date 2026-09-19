@@ -422,6 +422,44 @@ def _delivery_id_label(raw: str | None) -> str | None:
     return raw
 
 
+async def _read_body_within_limit(request: Request) -> bytes:
+    """Read the request body, stopping as soon as it passes the size limit.
+
+    ``Request.body()`` buffers the whole stream before anything can measure it.
+    A chunked request carries no ``Content-Length``, so the pre-read check
+    cannot see its size, and an unauthenticated client could make the process
+    hold an arbitrarily large body in memory before the limit applied. Counting
+    bytes as they arrive bounds that to ``MAX_WEBHOOK_BODY_SIZE`` plus the chunk
+    that crosses it.
+
+    The bytes accumulate in one contiguous buffer rather than a list of chunks.
+    The client also controls chunk size, and a list would charge a separate
+    object header and pointer per chunk: a body paced in two-byte chunks would
+    cost about twenty times its length before the limit noticed anything.
+
+    Args:
+        request: The incoming request, whose stream has not been consumed.
+
+    Returns:
+        The complete body.
+
+    Raises:
+        HTTPException: 413 once the bytes read exceed ``MAX_WEBHOOK_BODY_SIZE``.
+
+    Note:
+        This consumes the stream without caching it on the request, so a later
+        ``request.body()`` or ``request.json()`` raises ``RuntimeError``.
+        Everything downstream must use the returned bytes.
+    """
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > MAX_WEBHOOK_BODY_SIZE:
+            errors_total.labels(error_type="payload_too_large").inc()
+            raise HTTPException(status_code=413, detail="Request body too large")
+        body += chunk
+    return bytes(body)
+
+
 @app.post("/webhook")
 async def webhook(
     request: Request,
@@ -457,19 +495,15 @@ async def webhook(
         errors_total.labels(error_type="missing_event").inc()
         raise HTTPException(status_code=400, detail="Missing X-GitHub-Event header")
 
-    # Check content length before reading body to prevent memory exhaustion
+    # Refuse a declared-oversize body without reading any of it.
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > MAX_WEBHOOK_BODY_SIZE:
         errors_total.labels(error_type="payload_too_large").inc()
         raise HTTPException(status_code=413, detail="Request body too large")
 
-    # Get raw body for signature verification
-    body = await request.body()
-
-    # Double-check actual body size (in case content-length was missing/incorrect)
-    if len(body) > MAX_WEBHOOK_BODY_SIZE:
-        errors_total.labels(error_type="payload_too_large").inc()
-        raise HTTPException(status_code=413, detail="Request body too large")
+    # Read the raw body for signature verification, enforcing the limit as the
+    # bytes arrive rather than after they are all in memory.
+    body = await _read_body_within_limit(request)
 
     # Verify signature
     if not webhook_handler.verify_signature(body, x_hub_signature_256):
@@ -480,9 +514,10 @@ async def webhook(
 
     webhook_signature_validations_total.labels(result="valid").inc()
 
-    # Parse JSON payload
+    # Parse the bytes we already read. Calling request.json() here would try to
+    # consume an exhausted stream.
     try:
-        payload = await request.json()
+        payload = json.loads(body)
     except Exception as e:
         errors_total.labels(error_type="payload_invalid").inc()
         logger.error("Failed to parse webhook payload: %s", e)

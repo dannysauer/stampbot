@@ -63,7 +63,7 @@ constant time.
 | `200` | Authentication and parsing succeeded. The handler result may be `success`, `ignored`, `ok`, or `error`. |
 | `400` | The event header is missing or the body is invalid JSON. |
 | `401` | The signature is missing or does not match. |
-| `413` | The declared or actual body exceeds 1 MiB. |
+| `413` | The declared body exceeds 1 MiB, or the bytes read pass 1 MiB. Stampbot stops buffering at that point; the server drains and discards the rest of the request. |
 | `503` | At least one App credential is missing. |
 | `500` | The handler raised an unhandled exception. |
 

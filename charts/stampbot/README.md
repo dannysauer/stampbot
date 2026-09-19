@@ -118,15 +118,14 @@ and redeliver it by hand. The ingress controller in front of Stampbot should
 enforce the same 1 MiB, for two different reasons.
 
 A smaller controller limit drops deliveries Stampbot would have accepted, and
-Stampbot's own logs and metrics never see them. A larger one is worse. Stampbot
-checks `Content-Length` before reading, but a chunked request carries no
-`Content-Length`, and Stampbot reads the whole body into memory before it can
-measure and reject it. With the controller allowing 25 MiB, about twenty
-concurrent oversized requests from an unauthenticated client fill the chart's
-default 512 MiB memory limit. Enforcing the limit while reading is tracked in
-[#323](https://github.com/dannysauer/stampbot/issues/323); until that lands,
-the controller is the layer that protects the pod, and its limit must be finite
-and no larger than Stampbot's.
+Stampbot's own logs and metrics never see them. A larger one wastes the pod's
+time. Stampbot checks `Content-Length` before reading, and a chunked request,
+which carries none, is counted as it arrives and refused the moment it passes
+1 MiB, so memory stays bounded whatever the controller allows. But the server
+drains and discards the rest of an oversized request rather than closing the
+connection, so every byte the controller lets through still crosses the wire
+and occupies a worker while the pod throws it away. The controller refuses it
+earlier and cheaper, and keeps its own log of what it refused.
 
 The event types Stampbot subscribes to stay small. Over one week across three
 organizations, on a GitHub App receiving the same events, the largest
@@ -152,11 +151,11 @@ Traefik streams bodies by default, so add a `buffering` middleware to the route
 with `maxRequestBodyBytes: 1048576`. Istio also streams by default; an
 `EnvoyFilter` that inserts the `buffer` HTTP filter with `max_request_bytes:
 1048576` on the route enforces it. Contour's HTTPProxy has no body-size setting,
-so put a proxy or WAF that enforces one in front of it, or don't expose the
-webhook through Contour until #323 lands. Cloud Run enforces its own 32 MiB
-request limit, which is finite but well above Stampbot's; see the
-[Cloud Run guide](../../docs/deploy-gcp-cloudrun.md) and treat #323 as the fix
-for that gap too.
+so put a proxy or WAF that enforces one in front of it, or accept that Stampbot
+alone refuses oversized deliveries there and only its `413` count records them.
+Cloud Run enforces its own 32 MiB request limit, which is finite but well above
+Stampbot's, so the same applies; see the
+[Cloud Run guide](../../docs/deploy-gcp-cloudrun.md).
 
 The limit itself is documented in the [reference](../../docs/reference.md) and
 the [security requirements](../../docs/security-requirements.md); this section
