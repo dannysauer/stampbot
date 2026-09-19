@@ -8,14 +8,20 @@ WORKDIR /app
 # Copy dependency files for layer caching
 COPY constraints.txt requirements.txt ./
 
-# Install security-patched, pinned pip first, then dependencies. Only the
-# installed dependencies reach the runtime stage; pip and setuptools are
-# removed there.
+# Build into a virtual environment so the runtime stage copies exactly one
+# directory holding exactly the declared dependencies, and never the builder's
+# system site-packages. Pin the venv's pip to constraints.txt first, install the
+# hash-locked requirements with it, then remove pip, setuptools and
+# wheel from the venv through their own RECORD files. Nothing installs packages
+# at runtime, and shipping the installers only adds scanner findings for code
+# that never runs.
 RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m venv /opt/venv && \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    pip install --no-cache-dir --require-hashes -r constraints.txt && \
+    /opt/venv/bin/pip install --no-cache-dir --require-hashes -r constraints.txt && \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    pip install --no-cache-dir --require-hashes -r requirements.txt
+    /opt/venv/bin/pip install --no-cache-dir --require-hashes -r requirements.txt && \
+    /opt/venv/bin/pip uninstall --yes pip setuptools wheel
 
 # Production stage
 FROM python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
@@ -39,51 +45,33 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# Copy Python dependencies from builder
-COPY --from=builder /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
+# Copy the dependency environment. This is an allowlist: only /opt/venv crosses
+# the stage boundary, the runtime's own site-packages is never overlaid, and
+# nothing arrives that requirements.txt did not declare. The image-contents CI
+# job compares the venv's installed distributions with that file on every pull
+# request, so a stray package fails a named check rather than a build.
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
 
-# Nothing in the container runs pip, setuptools, or pkg_resources: the app
-# starts with `python -m stampbot` and the health check uses urllib. Verified by
-# importing the whole runtime stack with all three blocked.
-#
-# The scan of this image reports msgpack 1.1.2 (GHSA-6v7p-g79w-8964) and
-# setuptools 70.3.0 (CVE-2025-47273) as PyPI packages, and a jaraco.context
-# advisory already sits in .trivyignore. None of the three is declared in
-# requirements.txt, so they arrive with the base image or the pip installation
-# rather than with our dependencies. Remove the packaging tooling wholesale
-# instead of guessing which path each finding takes. Deleting packages nothing
-# uses beats asserting they are harmless: a VEX statement on
-# `pkg:pypi/setuptools` would also mask a future finding in a genuine
-# dependency of that name.
-#
-# Delete rather than `pip uninstall`, because the pip in this stage cannot run.
-# The COPY above merges over the base image's site-packages without deleting,
-# and constraints.txt pins an older pip than the base image ships, so the
-# result mixes two versions: `python -m pip` dies with an ImportError out of
-# pip._internal. That has been true of the shipped image all along and went
-# unnoticed only because nothing here invokes pip. Removing the files by hand
-# means the console scripts and setuptools' `distutils-precedence.pth`, which
-# would otherwise error on every interpreter start, have to be named
-# explicitly. ensurepip's bundled wheel goes too, so a scanner that reads
-# inside archives cannot bring the same findings back. The check at the end
-# fails the build if any of the three is still importable, so a change to the
-# base image cannot quietly reintroduce them.
-RUN rm -rf /usr/local/lib/python3.14/site-packages/pip \
-           /usr/local/lib/python3.14/site-packages/pip-*.dist-info \
-           /usr/local/lib/python3.14/site-packages/setuptools \
-           /usr/local/lib/python3.14/site-packages/setuptools-*.dist-info \
-           /usr/local/lib/python3.14/site-packages/pkg_resources \
-           /usr/local/lib/python3.14/site-packages/pkg_resources-*.dist-info \
-           /usr/local/lib/python3.14/site-packages/_distutils_hack \
-           /usr/local/lib/python3.14/site-packages/distutils-precedence.pth \
-           /usr/local/lib/python3.14/site-packages/wheel \
-           /usr/local/lib/python3.14/site-packages/wheel-*.dist-info \
-           /usr/local/lib/python3.14/ensurepip/_bundled \
-           /usr/local/bin/pip* \
-           /usr/local/bin/wheel && \
-    python -c "import importlib.util as u, sys; \
+# The base image still ships its own pip, with a bundled wheel under ensurepip.
+# Nothing in the container installs packages, so remove it. Address the base
+# interpreter by path: the venv on PATH has no pip and does not see the system
+# one. The uninstall follows pip's own RECORD and the wheel directory is
+# located through the ensurepip module, so neither depends on a hardcoded
+# site-packages layout. The base image adds a `pip -> pip3` symlink outside
+# pip's RECORD, so dangling links are swept by what they are rather than by
+# name. The checks fail the build if an installer is still
+# importable from either interpreter that ships: the base one, and the venv
+# one the application runs on.
+RUN /usr/local/bin/python3 -m pip uninstall --yes --break-system-packages pip && \
+    find /usr/local/bin -xtype l -delete && \
+    /usr/local/bin/python3 -c "import ensurepip, pathlib, shutil; \
+shutil.rmtree(pathlib.Path(ensurepip.__file__).parent / '_bundled', ignore_errors=True)" && \
+    for py in /usr/local/bin/python3 /opt/venv/bin/python; do \
+      "$py" -c "import importlib.util as u, sys; \
 left = [m for m in ('pip', 'setuptools', 'pkg_resources') if u.find_spec(m)]; \
-sys.exit('still present: ' + repr(left)) if left else None"
+sys.exit(sys.executable + ' still imports: ' + repr(left)) if left else None" || exit 1; \
+    done
 
 # Copy application code
 COPY --chown=stampbot:stampbot stampbot/ ./stampbot/

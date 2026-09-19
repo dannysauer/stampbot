@@ -120,6 +120,13 @@ named.
 - If you suppress a finding, record why and set an expiry or follow-up.
 - State which release signatures, checksums, attestations, and VEX documents
   actually exist.
+- Ship only the dependencies `poetry.lock` resolves. `requirements.txt` is
+  its export and the allowlist for the runtime image: a Lint step confirms
+  the two match, the build removes the installers, and the `Image Contents`
+  check compares the image's installed distributions with the file on every
+  pull request. That check detects drift between the lockfile and the image;
+  it does not defend against a compromised dependency, which is what
+  `--require-hashes` and review of lockfile changes are for.
 - Pin verified chart versions and image digests during controlled promotion.
 
 Use [Verify a release](release-verification.md) for the current artifact and
