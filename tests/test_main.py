@@ -5,12 +5,17 @@ import hashlib
 import hmac
 import json
 import socket
+import tracemalloc
 import urllib.request
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 import structlog.contextvars
 from fastapi.testclient import TestClient
+
+from stampbot.main import MAX_WEBHOOK_BODY_SIZE, _read_body_within_limit
+from stampbot.webhook_handler import webhook_handler
 
 
 def test_lifespan_startup_shutdown_configured():
@@ -364,13 +369,13 @@ def test_webhook_valid_ping(test_client: TestClient):
 
 
 def test_webhook_content_length_too_large(test_client: TestClient):
-    """Test webhook rejects requests with Content-Length exceeding limit."""
+    """A declared-oversize body is refused without reading it."""
     response = test_client.post(
         "/webhook",
         content=b"x",  # Small actual body
         headers={
             "Content-Type": "application/json",
-            "Content-Length": "20000000",  # 20MB - exceeds 10MB limit
+            "Content-Length": str(MAX_WEBHOOK_BODY_SIZE + 1),
             "X-GitHub-Event": "ping",
             "X-Hub-Signature-256": "sha256=fake",
         },
@@ -379,29 +384,137 @@ def test_webhook_content_length_too_large(test_client: TestClient):
     assert response.json()["detail"] == "Request body too large"
 
 
-def test_webhook_body_too_large(test_client: TestClient):
-    """Test webhook rejects requests where actual body exceeds limit.
+def _asgi_client() -> httpx.AsyncClient:
+    """Return a client that drives the ASGI app with a genuinely streamed body.
 
-    This tests the secondary body size check (lines 231-232) which catches
-    cases where Content-Length header is missing or incorrect.
+    ``TestClient`` joins a generator body into one buffer before the app sees
+    it, so it cannot show that a read stopped early. ``ASGITransport`` sends one
+    ASGI message per chunk, which is what a chunked GitHub delivery looks like.
     """
-    # Create a body larger than MAX_WEBHOOK_BODY_SIZE (10MB)
-    large_body = b"x" * (10 * 1024 * 1024 + 1)  # 10MB + 1 byte
+    from stampbot.main import app
 
-    # Set Content-Length to a small value to bypass the header check (line 222)
-    # but the actual body size check (line 230) should still catch it
-    response = test_client.post(
-        "/webhook",
-        content=large_body,
-        headers={
-            "Content-Type": "application/json",
-            "Content-Length": "100",  # Lie about size to bypass first check
-            "X-GitHub-Event": "ping",
-            "X-Hub-Signature-256": "sha256=fake",
-        },
-    )
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver")
+
+
+def _payload_of_exactly(size: int) -> bytes:
+    """Build a ping payload whose encoded length is exactly ``size`` bytes."""
+    overhead = len(json.dumps({"zen": ""}, separators=(",", ":")).encode())
+    payload = json.dumps({"zen": "y" * (size - overhead)}, separators=(",", ":")).encode()
+    assert len(payload) == size
+    return payload
+
+
+async def test_webhook_streamed_body_over_limit_is_rejected_while_reading():
+    """An oversize streamed body is refused during the read, not after it.
+
+    Without a ``Content-Length`` the pre-read check cannot see the size, so this
+    is the case that used to reach ``Request.body()`` and buffer everything. The
+    offered-bytes assertion is the regression guard: it fails if the limit moves
+    back to a check that runs once the whole body is already in memory.
+    """
+    chunk_size = 64 * 1024
+    total = 4 * MAX_WEBHOOK_BODY_SIZE
+    offered = 0
+
+    async def body():
+        nonlocal offered
+        for _ in range(total // chunk_size):
+            offered += chunk_size
+            yield b"x" * chunk_size
+
+    with patch.object(webhook_handler, "verify_signature", return_value=True) as verify:
+        async with _asgi_client() as client:
+            response = await client.post(
+                "/webhook",
+                content=body(),
+                headers={
+                    "Content-Type": "application/json",
+                    "X-GitHub-Event": "ping",
+                    "X-Hub-Signature-256": "sha256=fake",
+                },
+            )
+
     assert response.status_code == 413
     assert response.json()["detail"] == "Request body too large"
+    # Stopped within one chunk of the limit, nowhere near the 4 MiB on offer.
+    assert offered <= MAX_WEBHOOK_BODY_SIZE + chunk_size
+    assert offered < total
+    # Rejected during the read, so it never reached signature verification.
+    verify.assert_not_called()
+
+
+async def test_read_body_within_limit_holds_tiny_chunks_in_one_buffer():
+    """Many tiny chunks cost about the body's size, not a per-chunk overhead.
+
+    The client chooses the chunk size. Kept as a list, every chunk carries its
+    own object header and list slot, so two-byte chunks would multiply the
+    memory held for a body by about twenty before the limit saw anything. The
+    peak-allocation bound fails against that list-of-chunks implementation.
+    """
+    payload = _payload_of_exactly(64 * 1024)
+    chunk_size = 2
+
+    class TinyChunkRequest:
+        async def stream(self):
+            for start in range(0, len(payload), chunk_size):
+                yield payload[start : start + chunk_size]
+
+    tracemalloc.start()
+    try:
+        tracemalloc.reset_peak()
+        body = await _read_body_within_limit(TinyChunkRequest())  # type: ignore[arg-type]
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert body == payload
+    # A contiguous buffer plus the final copy stays near twice the body; a list
+    # of two-byte chunks reaches roughly twenty times it.
+    assert peak < 4 * len(payload)
+
+
+async def test_webhook_streamed_body_at_limit_is_processed():
+    """A streamed body of exactly the limit is read and handled normally."""
+    payload = _payload_of_exactly(MAX_WEBHOOK_BODY_SIZE)
+    chunk_size = 64 * 1024
+
+    async def body():
+        for start in range(0, len(payload), chunk_size):
+            yield payload[start : start + chunk_size]
+
+    with patch.object(webhook_handler, "verify_signature", return_value=True):
+        async with _asgi_client() as client:
+            response = await client.post(
+                "/webhook",
+                content=body(),
+                headers={
+                    "Content-Type": "application/json",
+                    "X-GitHub-Event": "ping",
+                    "X-Hub-Signature-256": "sha256=fake",
+                },
+            )
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "pong"
+
+
+def test_webhook_content_length_at_limit_is_processed(test_client: TestClient):
+    """A declared body of exactly the limit passes the pre-read check."""
+    payload = _payload_of_exactly(MAX_WEBHOOK_BODY_SIZE)
+
+    with patch.object(webhook_handler, "verify_signature", return_value=True):
+        response = test_client.post(
+            "/webhook",
+            content=payload,  # httpx sets Content-Length from the byte length.
+            headers={
+                "Content-Type": "application/json",
+                "X-GitHub-Event": "ping",
+                "X-Hub-Signature-256": "sha256=fake",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "pong"
 
 
 def test_response_without_content_length():
