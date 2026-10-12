@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 
-FROM python:3.14@sha256:504679006065cdab9a85e983e269140d3c5a279492395a6863b25b1ffb377f86 AS builder
+FROM python:3.14@sha256:b9767f56a1cc620aa72d38cc3557d26412e38a4597c92953476136b78894ccbd AS builder
 
 # Set working directory
 WORKDIR /app
@@ -24,7 +24,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     /opt/venv/bin/pip uninstall --yes pip setuptools wheel
 
 # Production stage
-FROM python:3.14-slim@sha256:c3e521df8b2b498a7a682e7e18676771cb80c6b75b8699af886b2d554ce40151
+FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170
 
 # The release workflow injects its computed version once for every runtime
 # surface. Unversioned local builds deliberately fall back to package metadata
