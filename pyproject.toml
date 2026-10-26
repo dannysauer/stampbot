@@ -24,10 +24,10 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.15"
-fastapi = "0.146.0"
+fastapi = "0.162.0"
 uvicorn = {extras = ["standard"], version = "0.54.0"}
 pydantic = "2.14.1"
-pydantic-settings = "2.16.0"
+pydantic-settings = "2.16.1"
 dynaconf = "3.3.5"
 PyGithub = "2.10.0"
 PyJWT = {extras = ["crypto"], version = "2.15.1"}
@@ -43,13 +43,13 @@ structlog = "26.1.0"
 httpx = "0.28.1"
 toml = "0.10.2"
 regex = "2026.9.29"
-cachetools = "7.2.3"
+cachetools = "7.2.5"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "9.1.1"
 pytest-cov = "7.1.0"
-pytest-asyncio = "1.4.0"
-ruff = "0.17.1"
+pytest-asyncio = "1.4.1"
+ruff = "0.17.2"
 mypy = "2.4.0"
 types-toml = "0.10.8.20260518"
 types-cachetools = "7.0.0.20260713"
