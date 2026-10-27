@@ -132,8 +132,10 @@ GitHub sends `opened` and one `labeled` event for each label present when a
 pull request is created, and it can send them to different replicas within a
 second. Every one of those events may approve. After each approval Stampbot
 re-reads its reviews and dismisses every approval of the same head except the
-oldest, with the message `Duplicate Stampbot approval`. Those dismissals appear
-as `stampbot_pr_dismissals_total{trigger_type="duplicate"}`. Approvals of an
+newest, with the message `Duplicate Stampbot approval`. GitHub counts only a
+reviewer's latest review, so keeping the newest leaves the pull request
+approved. Those dismissals appear as
+`stampbot_pr_dismissals_total{trigger_type="duplicate"}`. Approvals of an
 older head, or whose commit GitHub did not report, are never dismissed by this
 cleanup. If the cleanup fails, including when the review list cannot be read, the
 webhook response still reports success, the extra approval stays, and the

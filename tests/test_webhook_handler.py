@@ -124,7 +124,7 @@ async def test_pr_opened_and_labeled_race_leaves_one_approval(webhook_handler, m
 
     Neither replica saw the other's review before approving. After approving,
     each re-reads the reviews and dismisses every approval of the head except
-    the oldest, so both reach the same answer.
+    the newest, so both reach the same answer.
     """
     payload = load_fixture("pr_labeled_autoapprove")
     mock_github_client.find_bot_approval_reviews.side_effect = [
@@ -142,8 +142,32 @@ async def test_pr_opened_and_labeled_race_leaves_one_approval(webhook_handler, m
     assert result["status"] == "success"
     mock_github_client.approve_pr.assert_called_once()
     mock_github_client.dismiss_approval.assert_called_once_with(
-        12345, "octocat/hello-world", 42, 200, "Duplicate Stampbot approval"
+        12345, "octocat/hello-world", 42, 100, "Duplicate Stampbot approval"
     )
+
+
+@pytest.mark.asyncio
+async def test_pr_duplicate_cleanup_keeps_pr_approved(webhook_handler, mock_github_client):
+    """Test duplicate cleanup leaves the pull request approved.
+
+    GitHub counts only a reviewer's latest review toward required approvals, so
+    dismissing the newest Stampbot approval leaves the pull request unapproved
+    even while an older approval stays active.
+    """
+    payload = load_fixture("pr_labeled_autoapprove")
+    mock_github_client.find_bot_approval_reviews.side_effect = [
+        [],  # pre-check: nothing yet
+        [  # post-approval scan: two approvals of the same head
+            {"id": 100, "state": "APPROVED", "commit_id": "abc123def456"},
+            {"id": 200, "state": "APPROVED", "commit_id": "abc123def456"},
+        ],
+    ]
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "success"
+    dismissed = [call.args[3] for call in mock_github_client.dismiss_approval.call_args_list]
+    assert 200 not in dismissed  # the latest review must stay an approval
 
 
 @pytest.mark.asyncio
