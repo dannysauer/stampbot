@@ -928,7 +928,7 @@ class WebhookHandler:
         Two replicas handling the ``opened`` and ``labeled`` events of one new
         pull request can both pass that check, so after a successful approval
         the reviews are read again and every Stampbot approval of the same head
-        except the oldest is dismissed. Approving twice and dismissing one is
+        except the newest is dismissed. Approving twice and dismissing one is
         preferred to deferring, which could miss an approval when the other
         event never arrives.
 
@@ -1014,8 +1014,9 @@ class WebhookHandler:
                 errors_total.labels(error_type="approval_failed").inc()
             else:
                 # Another replica may have approved the same head in the same
-                # second. Keep the oldest approval; the outcome of this cleanup
-                # never changes the result of the approval that was posted.
+                # second. Keep the newest approval: GitHub counts only a
+                # reviewer's latest review, so dismissing it would leave the
+                # pull request unapproved.
                 await self._dismiss_approvals(
                     installation_id,
                     repo_full_name,
@@ -1023,7 +1024,7 @@ class WebhookHandler:
                     "Duplicate Stampbot approval",
                     "duplicate",
                     head_sha=head_sha,
-                    keep_oldest=True,
+                    keep_newest=True,
                 )
 
             add_span_attributes(span, {"approval.result": status})
@@ -1040,7 +1041,7 @@ class WebhookHandler:
         trigger_type: str,
         *,
         head_sha: str | None = None,
-        keep_oldest: bool = False,
+        keep_newest: bool = False,
     ) -> bool:
         """Dismiss active Stampbot approvals on a PR.
 
@@ -1052,7 +1053,7 @@ class WebhookHandler:
             trigger_type: What triggered the dismissal (label_removed, chatops, duplicate)
             head_sha: Only approvals covering this head are dismissed. None means every
                 active approval.
-            keep_oldest: Leave the oldest matching approval in place, which turns the
+            keep_newest: Leave the newest matching approval in place, which turns the
                 call into duplicate cleanup.
 
         Returns:
@@ -1079,12 +1080,12 @@ class WebhookHandler:
                     # Nothing can be dismissed without the list, and the
                     # failure has to reach the metric operators watch.
                     raise RuntimeError("Stampbot reviews could not be listed")
-                if keep_oldest:
+                if keep_newest:
                     # Duplicate cleanup only touches approvals proven to be of
-                    # this head, and leaves the oldest of them in place.
+                    # this head, and leaves the newest of them in place.
                     review_ids = self._active_approvals_for_head(
                         reviews, head_sha, proven_only=True
-                    )[1:]
+                    )[:-1]
                 else:
                     review_ids = self._active_approvals_for_head(reviews, head_sha)
 

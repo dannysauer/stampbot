@@ -73,7 +73,7 @@ The same flow in words:
 - `opened`, `reopened`, and `labeled` may create a label-driven approval.
   GitHub sends both `opened` and `labeled` for a pull request created with a
   label, so two replicas can approve at once. Stampbot accepts that and
-  dismisses every approval of the head except the oldest afterwards, rather
+  dismisses every approval of the head except the newest afterwards, rather
   than letting one event defer to another and risk a missed approval when the
   other never arrives.
 - Every configured eligibility category must pass before that approval.
