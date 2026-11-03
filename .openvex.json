@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
   "author": "Danny Sauer <github@dannysauer.com>",
-  "timestamp": "2026-09-18T04:55:00Z",
-  "version": 43,
+  "timestamp": "2026-11-03T10:48:18Z",
+  "version": 44,
   "statements": [
     {
       "vulnerability": {
@@ -802,6 +802,21 @@
       "status": "not_affected",
       "justification": "vulnerable_code_not_present",
       "impact_statement": "The flaw is in the systemd-homed daemon, which adopts a home record without verifying its signature. libsystemd0 and libudev1 are present in the image, but they are the client libraries; systemd-homed is not installed and no service manager runs in the container. Trivy attributes the CVE to these two packages because Debian builds them from the src:systemd source package, not because the vulnerable daemon is present."
+    },
+    {
+      "vulnerability": {
+        "@id": "https://nvd.nist.gov/vuln/detail/CVE-2026-119373",
+        "name": "CVE-2026-119373",
+        "description": "sqlite: Denial of service via heap-based buffer overflow in FTS5"
+      },
+      "products": [
+        {
+          "@id": "pkg:deb/debian/libsqlite3-0"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "libsqlite3-0 is in the image because the python:3.14-slim base image installs it for CPython's _sqlite3 extension module, which loads only when code imports sqlite3. Neither Stampbot's code nor any runtime dependency in requirements.txt imports sqlite3, and Stampbot keeps no database. The FTS5 overflow can only run when a process opens a database and runs full-text search queries, which Stampbot never does."
     }
   ]
 }
