@@ -31,19 +31,23 @@ def TestOneInput(data: bytes) -> None:
     """Exercise bounded combinations of repo approval policy inputs."""
     fields = _fields(data)
 
-    config = RepoConfig(
-        approval_labels=_slice(fields, 0) or ["stamp"],
-        auto_approve_on_label=bool(data[:1] and data[0] % 2),
-        reapprove=bool(data[2:3] and data[2] % 2),
-        chatops_enabled=bool(data[1:2] and data[1] % 2),
-        chatops_required_permission="maintain",
-        approve_commands=_slice(fields, 4) or ["stamp"],
-        unapprove_commands=_slice(fields, 8) or ["unstamp"],
-        required_labels=_slice(fields, 12),
-        required_title_patterns=[re.escape(pattern) for pattern in _slice(fields, 16)],
-        allowed_users=_slice(fields, 20),
-        allowed_teams=_slice(fields, 24),
-    )
+    try:
+        config = RepoConfig(
+            approval_labels=_slice(fields, 0) or ["stamp"],
+            auto_approve_on_label=bool(data[:1] and data[0] % 2),
+            reapprove=bool(data[2:3] and data[2] % 2),
+            chatops_enabled=bool(data[1:2] and data[1] % 2),
+            chatops_required_permission="maintain",
+            approve_commands=_slice(fields, 4) or ["stamp"],
+            unapprove_commands=_slice(fields, 8) or ["unstamp"],
+            required_labels=_slice(fields, 12),
+            required_title_patterns=[re.escape(pattern) for pattern in _slice(fields, 16)],
+            allowed_authors=_slice(fields, 20),
+            allowed_teams=_slice(fields, 24),
+        )
+    except ValueError:
+        # Fuzzed principal entries are often not valid logins or teams.
+        return
 
     pr_labels = _slice(fields, 28)
     pr_title = fields[32] if len(fields) > 32 else ""
