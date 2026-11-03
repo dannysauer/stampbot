@@ -19,6 +19,7 @@ operational procedures, reference facts, and design discussion separate.
 | Set service options or repository approval policy | [Configuration reference](configuration.md) |
 | Look up routes, events, commands, metrics, or artifacts | [Interface reference](reference.md) |
 | Diagnose a webhook, review, credential, or deployment failure | [Operations runbook](operations.md) |
+| Record a scanner finding that doesn't affect Stampbot | [Record a VEX statement](vex.md) |
 
 ## Understand the design
 

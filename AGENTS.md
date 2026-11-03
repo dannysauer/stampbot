@@ -295,6 +295,14 @@ fields, hook ordering) rather than image availability.
 replicaCount: 2
 ```
 
+### Handling a Vulnerability Scan Finding
+
+When Trivy reports a vulnerability that can't affect Stampbot, add an OpenVEX
+statement to `.openvex.json` with evidence; don't add it to `.trivyignore`.
+VEX statements ship with the release image, so downstream users see why the
+finding doesn't apply. Follow [docs/vex.md](docs/vex.md). Fix the dependency or
+base image instead when you can't show the vulnerable code is unreachable.
+
 ### Adding Dependencies
 
 1. Add to `pyproject.toml` under `[tool.poetry.dependencies]`
