@@ -107,7 +107,7 @@ failures are never cached. `stampbot_repo_config_loads_total{status="cached"}`
 counts events served from that cache; a cache hit creates no
 `webhook.get_repo_config` span.
 
-See [Configuration reference](configuration.md#repository-policy) for every
+See the [repository policy reference](repository-policy.md#policy-keys) for every
 field and validation rule.
 
 ## Label-driven approval

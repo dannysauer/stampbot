@@ -9,6 +9,8 @@ from unittest.mock import Mock, PropertyMock, call, patch
 import pytest
 from github.GithubException import GithubException
 
+from stampbot.github_client import TeamLookup
+
 TEST_PEM_KEY = "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----"
 TEST_TOKEN = "test-token"  # noqa: S105
 
@@ -1676,10 +1678,10 @@ class TestUserHasPermission:
             assert result is False
 
 
-class TestGetUserTeamSlugs:
-    """Tests for get_user_team_slugs method."""
+class TestCheckTeamMembership:
+    """Tests for check_team_membership method."""
 
-    def test_get_user_team_slugs_success(self):
+    def test_check_team_membership_success(self):
         """Test successful team membership check."""
 
         with (
@@ -1689,6 +1691,7 @@ class TestGetUserTeamSlugs:
             patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
             patch("stampbot.github_client.Github") as mock_github_cls,
             patch("stampbot.github_client.create_span") as mock_span,
+            patch("stampbot.github_client.add_span_attributes") as mock_add_attributes,
         ):
             mock_settings.app_id = 12345
             mock_settings.private_key = TEST_PEM_KEY
@@ -1724,58 +1727,19 @@ class TestGetUserTeamSlugs:
             from stampbot.github_client import GitHubAppClient
 
             client = GitHubAppClient()
-            result = client.get_user_team_slugs(
+            result = client.check_team_membership(
                 123456, "acme", "alice", ["release-team", "deploy-team"]
             )
 
-            assert result == ["release-team", "deploy-team"]
-            assert mock_org.get_team_by_slug.call_count == 2
+            # One match passes the filter, so the lookup stops there
+            assert result == TeamLookup(("release-team",), ())
+            assert mock_org.get_team_by_slug.call_count == 1
+            mock_add_attributes.assert_called_with(
+                None,
+                {"github.member_teams": 1, "github.missing_teams": 0, "github.teams_checked": 1},
+            )
 
-    def test_get_user_team_slugs_with_org_prefix(self):
-        """Test team membership check with org/team format."""
-        with (
-            patch("stampbot.github_client.is_configured", return_value=True),
-            patch("stampbot.github_client.settings") as mock_settings,
-            patch("stampbot.github_client.Auth.AppAuth"),
-            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
-            patch("stampbot.github_client.Github") as mock_github_cls,
-            patch("stampbot.github_client.create_span") as mock_span,
-        ):
-            mock_settings.app_id = 12345
-            mock_settings.private_key = TEST_PEM_KEY
-            mock_settings.otel_enabled = False
-
-            mock_integration = Mock()
-            mock_token = Mock()
-            mock_token.token = TEST_TOKEN
-            mock_integration.get_access_token.return_value = mock_token
-            mock_integration_cls.return_value = mock_integration
-
-            mock_user = Mock()
-            mock_team = Mock()
-            mock_team.has_in_members.return_value = True
-            mock_org = Mock()
-            mock_org.get_team_by_slug.return_value = mock_team
-
-            mock_github = Mock()
-            mock_github.get_organization.return_value = mock_org
-            mock_github.get_user.return_value = mock_user
-            mock_github.get_rate_limit.return_value = Mock(core=Mock(remaining=4500, limit=5000))
-            mock_github_cls.return_value = mock_github
-
-            mock_span.return_value.__enter__ = Mock(return_value=None)
-            mock_span.return_value.__exit__ = Mock(return_value=False)
-
-            from stampbot.github_client import GitHubAppClient
-
-            client = GitHubAppClient()
-            result = client.get_user_team_slugs(123456, "acme", "alice", ["acme/release-team"])
-
-            # Should extract "release-team" from "acme/release-team"
-            mock_org.get_team_by_slug.assert_called_with("release-team")
-            assert result == ["release-team"]
-
-    def test_get_user_team_slugs_not_member(self):
+    def test_check_team_membership_not_member(self):
         """Test team membership check when user is not a member."""
         with (
             patch("stampbot.github_client.is_configured", return_value=True),
@@ -1813,11 +1777,11 @@ class TestGetUserTeamSlugs:
             from stampbot.github_client import GitHubAppClient
 
             client = GitHubAppClient()
-            result = client.get_user_team_slugs(123456, "acme", "alice", ["release-team"])
+            result = client.check_team_membership(123456, "acme", "alice", ["release-team"])
 
-            assert result == []
+            assert result == TeamLookup()
 
-    def test_get_user_team_slugs_team_not_found(self):
+    def test_check_team_membership_team_not_found(self):
         """Test team membership check when team doesn't exist."""
         from github.GithubException import GithubException
 
@@ -1855,12 +1819,110 @@ class TestGetUserTeamSlugs:
             from stampbot.github_client import GitHubAppClient
 
             client = GitHubAppClient()
-            result = client.get_user_team_slugs(123456, "acme", "alice", ["nonexistent-team"])
+            result = client.check_team_membership(
+                123456, "acme", "alice", ["nonexistent-team", "release-team"]
+            )
 
-            # Should return empty list but not raise
-            assert result == []
+            # A missing team stops the lookup so the caller can report it
+            assert result == TeamLookup((), ("nonexistent-team",))
+            mock_org.get_team_by_slug.assert_called_once_with("nonexistent-team")
 
-    def test_get_user_team_slugs_general_exception(self):
+    def test_check_team_membership_skips_unreadable_team(self):
+        """Test a non-404 error skips that team and checks the next one."""
+        from github.GithubException import GithubException
+
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth"),
+            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
+            patch("stampbot.github_client.Github") as mock_github_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            mock_integration = Mock()
+            mock_token = Mock()
+            mock_token.token = TEST_TOKEN
+            mock_integration.get_access_token.return_value = mock_token
+            mock_integration_cls.return_value = mock_integration
+
+            mock_org = Mock()
+            member_team = Mock()
+            member_team.has_in_members.return_value = True
+            mock_org.get_team_by_slug.side_effect = [
+                GithubException(500, {"message": "Server Error"}, None),
+                member_team,
+            ]
+
+            mock_github = Mock()
+            mock_github.get_organization.return_value = mock_org
+            mock_github.get_rate_limit.return_value = Mock(core=Mock(remaining=4500, limit=5000))
+            mock_github_cls.return_value = mock_github
+
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+            result = client.check_team_membership(
+                123456, "acme", "alice", ["nonexistent-team", "release-team"]
+            )
+
+            assert result == TeamLookup(("release-team",), ())
+
+    def test_check_team_membership_skips_failed_membership_check(self):
+        """Test a failed membership call skips that team instead of ending the lookup."""
+        from github.GithubException import GithubException
+
+        with (
+            patch("stampbot.github_client.is_configured", return_value=True),
+            patch("stampbot.github_client.settings") as mock_settings,
+            patch("stampbot.github_client.Auth.AppAuth"),
+            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
+            patch("stampbot.github_client.Github") as mock_github_cls,
+            patch("stampbot.github_client.create_span") as mock_span,
+        ):
+            mock_settings.app_id = 12345
+            mock_settings.private_key = TEST_PEM_KEY
+            mock_settings.otel_enabled = False
+
+            mock_integration = Mock()
+            mock_token = Mock()
+            mock_token.token = TEST_TOKEN
+            mock_integration.get_access_token.return_value = mock_token
+            mock_integration_cls.return_value = mock_integration
+
+            mock_org = Mock()
+            failing_team = Mock()
+            failing_team.has_in_members.side_effect = GithubException(
+                403, {"message": "Forbidden"}, None
+            )
+            member_team = Mock()
+            member_team.has_in_members.return_value = True
+            mock_org.get_team_by_slug.side_effect = [failing_team, member_team]
+
+            mock_github = Mock()
+            mock_github.get_organization.return_value = mock_org
+            mock_github.get_rate_limit.return_value = Mock(core=Mock(remaining=4500, limit=5000))
+            mock_github_cls.return_value = mock_github
+
+            mock_span.return_value.__enter__ = Mock(return_value=None)
+            mock_span.return_value.__exit__ = Mock(return_value=False)
+
+            from stampbot.github_client import GitHubAppClient
+
+            client = GitHubAppClient()
+            result = client.check_team_membership(
+                123456, "acme", "alice", ["nonexistent-team", "release-team"]
+            )
+
+            assert result == TeamLookup(("release-team",), ())
+
+    def test_check_team_membership_general_exception(self):
         """Test team membership check with general exception."""
         with (
             patch("stampbot.github_client.is_configured", return_value=True),
@@ -1890,10 +1952,10 @@ class TestGetUserTeamSlugs:
             from stampbot.github_client import GitHubAppClient
 
             client = GitHubAppClient()
-            result = client.get_user_team_slugs(123456, "acme", "alice", ["release-team"])
+            result = client.check_team_membership(123456, "acme", "alice", ["release-team"])
 
-            # Should return empty list on error
-            assert result == []
+            # A failed lookup matches nothing
+            assert result == TeamLookup()
 
 
 class TestRepoHasLabel:

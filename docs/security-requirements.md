@@ -28,7 +28,7 @@ untrusted input.
 
 - Use GitHub App and installation credentials, never a personal access token.
 - Request only the permissions in the
-  [configuration reference](configuration.md#github-app-permissions).
+  [service settings reference](service-settings.md#github-app-permissions).
 - Check repository permission before an approve or unapprove ChatOps command.
 - Create and dismiss reviews only under Stampbot's App identity.
 - Never merge pull requests or change branch protection.
@@ -39,7 +39,9 @@ GitHub branch rules remain the final enforcement boundary.
 ## Fail closed on policy input
 
 - Require every configured label-driven filter category to pass.
-- Treat user and team allowlists as alternatives within the author category.
+- Treat login and team entries in `allowed_authors` as alternatives within the
+  author category.
+- Reject an `allowed_authors` team outside the repository owner's organization.
 - Keep ChatOps authorization separate from label-driven filters.
 - Stop automation for readable but invalid TOML.
 - Stop automation when GitHub cannot complete a target-repository policy read.

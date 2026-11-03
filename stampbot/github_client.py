@@ -8,6 +8,7 @@ import re
 import stat
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TypedDict
 
@@ -134,6 +135,19 @@ def _build_retry() -> Retry:
         status_forcelist=[500, 502, 503, 504],
         allowed_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     )
+
+
+@dataclass(frozen=True)
+class TeamLookup:
+    """Result of checking a user against listed teams.
+
+    Attributes:
+        member_of: Listed team slugs the user belongs to.
+        missing: Listed team slugs GitHub couldn't find.
+    """
+
+    member_of: tuple[str, ...] = ()
+    missing: tuple[str, ...] = ()
 
 
 class GitHubAppClient:
@@ -1193,74 +1207,96 @@ class GitHubAppClient:
                 )
                 return False
 
-    def get_user_team_slugs(
+    def check_team_membership(
         self,
         installation_id: int,
         org_name: str,
         username: str,
-        allowed_teams: list[str],
-    ) -> list[str]:
-        """Get team slugs the user is a member of from the allowed teams list.
+        team_slugs: list[str],
+    ) -> TeamLookup:
+        """Check whether a user belongs to any listed team.
+
+        The lookup stops at the first match, because one match passes the
+        author filter and each team costs two GitHub API calls. It also stops
+        at the first team GitHub can't find, because a listed team that doesn't
+        resolve means the policy is wrong, and Stampbot shouldn't approve
+        around it.
 
         Args:
             installation_id: GitHub App installation ID
-            org_name: Organization name
+            org_name: Organization that owns every team in ``team_slugs``
             username: GitHub username to check
-            allowed_teams: List of team slugs to check (can be "org/team" or just "team")
+            team_slugs: Team slugs in ``org_name`` to check
 
         Returns:
-            List of team slugs the user is a member of
+            The first team the user belongs to, or the first team GitHub
+            couldn't find. Both are empty when the user matches no team or the
+            lookup fails.
         """
         start_time = time.time()
 
         with create_span(
-            "github.get_user_team_slugs",
+            "github.check_team_membership",
             {
                 "github.org": org_name,
                 "github.username": username,
                 "github.installation_id": installation_id,
-                "github.teams_to_check": len(allowed_teams),
+                "github.teams_to_check": len(team_slugs),
             },
         ) as span:
             member_teams: list[str] = []
+            missing_teams: list[str] = []
+            teams_checked = 0
 
             try:
                 client = self._get_installation_client(installation_id)
                 org = client.get_organization(org_name)
                 user = client.get_user(username)
 
-                for team_ref in allowed_teams:
-                    # Extract team slug (handle both "org/team" and "team" formats)
-                    team_slug = team_ref.split("/")[-1] if "/" in team_ref else team_ref
-
+                for team_slug in team_slugs:
+                    teams_checked += 1
                     try:
                         team = org.get_team_by_slug(team_slug)
-                        # Check if user is a member
-                        if team.has_in_members(user):  # type: ignore[arg-type]
-                            member_teams.append(team_slug)
-                            logger.debug(
-                                "User %s is a member of team %s",
-                                username,
-                                team_slug,
-                                extra={
-                                    "org": org_name,
-                                    "username": username,
-                                    "team": team_slug,
-                                },
-                            )
                     except GithubException as e:
-                        # Team not found or no access - skip silently
-                        logger.debug(
-                            "Could not check team %s membership: %s",
+                        if e.status == 404:
+                            # GitHub also answers 404 when the App can't read
+                            # organization members, so the message covers both.
+                            missing_teams.append(team_slug)
+                            logger.warning(
+                                "Team %s/%s doesn't exist or Stampbot can't read it",
+                                org_name,
+                                team_slug,
+                                extra={"org": org_name, "team": team_slug},
+                            )
+                            break
+                        logger.warning(
+                            "Could not check team %s/%s: %s",
+                            org_name,
                             team_slug,
-                            e.data.get("message", str(e)) if hasattr(e, "data") else str(e),
-                            extra={
-                                "org": org_name,
-                                "team": team_slug,
-                                "username": username,
-                            },
+                            _sanitize_error(e),
+                            extra={"org": org_name, "team": team_slug, "username": username},
                         )
                         continue
+                    try:
+                        is_member = team.has_in_members(user)  # type: ignore[arg-type]
+                    except GithubException as e:
+                        logger.warning(
+                            "Could not check membership in team %s/%s: %s",
+                            org_name,
+                            team_slug,
+                            _sanitize_error(e),
+                            extra={"org": org_name, "team": team_slug, "username": username},
+                        )
+                        continue
+                    if is_member:
+                        member_teams.append(team_slug)
+                        logger.debug(
+                            "User %s is a member of team %s",
+                            username,
+                            team_slug,
+                            extra={"org": org_name, "username": username, "team": team_slug},
+                        )
+                        break
 
                 duration = time.time() - start_time
                 github_api_request_duration_seconds.labels(operation="get_user_teams").observe(
@@ -1274,12 +1310,13 @@ class GitHubAppClient:
                     span,
                     {
                         "github.member_teams": len(member_teams),
-                        "github.teams_checked": len(allowed_teams),
+                        "github.missing_teams": len(missing_teams),
+                        "github.teams_checked": teams_checked,
                     },
                 )
                 set_span_ok(span)
 
-                return member_teams
+                return TeamLookup(tuple(member_teams), tuple(missing_teams))
 
             except Exception as e:
                 duration = time.time() - start_time
@@ -1302,7 +1339,7 @@ class GitHubAppClient:
                         "error": _sanitize_error(e),
                     },
                 )
-                return []
+                return TeamLookup()
 
 
 # Global client instance

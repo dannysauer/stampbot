@@ -135,7 +135,8 @@ fails closed.
 | `charts/stampbot/` | Kubernetes packaging and deployment policy |
 
 The [interface reference](reference.md) describes the surfaces these components
-expose. The [configuration reference](configuration.md) describes their inputs.
+expose. The [repository policy reference](repository-policy.md) and the
+[service settings reference](service-settings.md) describe their inputs.
 
 ## Trust boundaries
 
@@ -153,7 +154,7 @@ The App private key and webhook secret are credentials. They belong in a secret
 store, never in repository policy, logs, examples, or issue reports.
 Installation tokens are short-lived and installation-scoped, but they still
 carry the App permissions listed in the
-[configuration reference](configuration.md#github-app-permissions).
+[service settings reference](service-settings.md#github-app-permissions).
 
 `/setup` returns generated credentials during the manifest flow. It is disabled
 by default, uses only the configured trusted base URL, and closes automatically

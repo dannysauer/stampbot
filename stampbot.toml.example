@@ -36,9 +36,9 @@ unapprove_commands = ["unapprove", "unstamp"]
 # Maximum 20 patterns and 256 characters per pattern; each match has a 10 ms limit.
 # required_title_patterns = ["^feat:", "^fix:"]
 
-# PR author (GitHub login) must be in this list to be eligible
-# allowed_users = ["bot-user", "trusted-contributor"]
-
-# PR author must be a member of at least one of these teams to be eligible
-# Format: "org/team-slug" or just "team-slug"
-# allowed_teams = ["my-org/release-team"]
+# PR author must be listed here, directly or through team membership. Entries
+# use CODEOWNERS syntax: a login ("renovate[bot]" or "@octocat") or a team in
+# this repository's organization ("@my-org/release-team"). GitHub Apps author
+# pull requests as "<app-name>[bot]" and can't join teams, so list them by login.
+# This filter checks who opened the pull request, not who added the label.
+# allowed_authors = ["renovate[bot]", "@my-org/release-team"]

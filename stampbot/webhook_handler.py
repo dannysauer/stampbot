@@ -14,7 +14,14 @@ from typing import Any
 from fastapi.concurrency import run_in_threadpool
 from opentelemetry.trace import Span
 
-from stampbot.config import RepoConfig, repo_config_cache_seconds, settings
+from stampbot.config import (
+    AUTHOR_NOT_ALLOWED,
+    OPERATOR_DEFAULTS_FIX,
+    SERVICE_DEFAULTS_SOURCE,
+    RepoConfig,
+    repo_config_cache_seconds,
+    settings,
+)
 from stampbot.github_client import BotReview, _sanitize_error, github_client
 from stampbot.logger import get_logger
 from stampbot.metrics import (
@@ -59,6 +66,7 @@ class PullRequestEvent:
     repo_full_name: str
     pr_number: int
     owner_login: str | None
+    owner_type: str | None
     pr: dict[str, Any]
     event_label: str | None
     repo_config: RepoConfig
@@ -269,6 +277,7 @@ class WebhookHandler:
                 repo_full_name=repo_full_name,
                 pr_number=pr_number,
                 owner_login=owner_login,
+                owner_type=owner_type,
                 pr=pr,
                 event_label=payload.get("label", {}).get("name"),
                 repo_config=repo_config,
@@ -292,6 +301,59 @@ class WebhookHandler:
                 await self._warn_missing_approval_labels(event)
 
             return result
+
+    @staticmethod
+    def _team_fix(config: RepoConfig, fix: str) -> str:
+        """Return the fix for a team problem, aimed at whoever can apply it.
+
+        Args:
+            config: Repository policy.
+            fix: What to change when the rule is in a policy file.
+
+        Returns:
+            ``fix``, or a pointer to the Stampbot operator when the rule is in
+            the service-wide defaults.
+        """
+        if config.author_filter_from_defaults:
+            return OPERATOR_DEFAULTS_FIX
+        return fix
+
+    async def _report_team_problem(self, event: PullRequestEvent, problem: str, fix: str) -> None:
+        """Tell the pull request why a team rule kept Stampbot from approving.
+
+        Only an added approval label or a reopened pull request gets a comment,
+        so the comment appears once per request for approval instead of once
+        per push or label change.
+
+        Args:
+            event: Pull request event whose approval was blocked.
+            problem: What's wrong with the team rule, as a clause.
+            fix: What to change, in one or two sentences.
+        """
+        source = event.repo_config.author_filter_source
+        logger.warning(
+            "Team rule in %s blocked approval of PR #%d: %s",
+            source,
+            event.pr_number,
+            problem,
+            extra={"repo": event.repo_full_name, "pr_number": event.pr_number},
+        )
+        requested = event.action == "reopened" or (
+            event.action == "labeled" and event.event_label in event.repo_config.approval_labels
+        )
+        if not requested:
+            return
+        body = (
+            f"Someone added a team restriction in {source}, but {problem}, "
+            f"so I didn't approve this pull request.\n\n{fix}"
+        )
+        await run_in_threadpool(
+            github_client.create_issue_comment,
+            event.installation_id,
+            event.repo_full_name,
+            event.pr_number,
+            body,
+        )
 
     def _decide(self, event: PullRequestEvent) -> tuple[Decision, str | None]:
         """Map a pull request event to the action Stampbot takes.
@@ -404,14 +466,42 @@ class WebhookHandler:
         pr_author = event.pr.get("user", {}).get("login", "")
 
         author_team_slugs: list[str] | None = None
-        if config.needs_team_check(pr_author) and event.owner_login:
-            author_team_slugs = await run_in_threadpool(
-                github_client.get_user_team_slugs,
+        team_problem: tuple[str, str] | None = None
+        if config.needs_team_check(pr_author) and event.owner_type == "User":
+            teams = ", ".join(
+                f"`{team.display(event.owner_login)}`" for team in config.allowed_authors.teams
+            )
+            team_problem = (
+                "GitHub doesn't support teams on personal accounts",
+                self._team_fix(
+                    config,
+                    f"I ignored {teams}. Replace it with the logins of the people whose pull "
+                    "requests Stampbot should approve, such as `octocat`.",
+                ),
+            )
+        elif config.needs_team_check(pr_author) and event.owner_login:
+            lookup = await run_in_threadpool(
+                github_client.check_team_membership,
                 event.installation_id,
                 event.owner_login,
                 pr_author,
-                config.allowed_teams,
+                config.allowed_authors.team_slugs(),
             )
+            author_team_slugs = list(lookup.member_of)
+            if lookup.missing:
+                missing = (
+                    "one of the teams it lists"
+                    if config.author_filter_from_defaults
+                    else f"the team `@{event.owner_login}/{lookup.missing[0]}`"
+                )
+                team_problem = (
+                    f"I can't find {missing}",
+                    self._team_fix(
+                        config,
+                        "Check the spelling of the team name. If it's correct, make sure "
+                        "the Stampbot GitHub App has read access to organization members.",
+                    ),
+                )
 
         is_eligible, reason = await run_in_threadpool(
             config.is_pr_eligible,
@@ -436,6 +526,8 @@ class WebhookHandler:
                 span,
                 {"webhook.result": "not_eligible", "webhook.ineligible_reason": reason},
             )
+            if team_problem and reason == AUTHOR_NOT_ALLOWED:
+                await self._report_team_problem(event, *team_problem)
             set_span_ok(span)
             return {"status": "ignored", "message": f"PR not eligible: {reason}"}
 
@@ -814,11 +906,12 @@ class WebhookHandler:
             set_span_ok(span)
             return {"status": "ignored", "message": f"Unknown command: {command}"}
 
-    def _format_help_message(self, repo_config: RepoConfig) -> str:
+    def _format_help_message(self, repo_config: RepoConfig, owner_login: str) -> str:
         """Format a help message for the effective repository configuration.
 
         Args:
             repo_config: Repository configuration
+            owner_login: Repository owner, shown for teams that don't name one
 
         Returns:
             Markdown help text.
@@ -871,14 +964,19 @@ class WebhookHandler:
                 "required title patterns: "
                 + ", ".join(f"`{pattern}`" for pattern in repo_config.required_title_patterns)
             )
-        if repo_config.allowed_users:
-            filters.append(
-                "allowed users: " + ", ".join(f"`{user}`" for user in repo_config.allowed_users)
-            )
-        if repo_config.allowed_teams:
-            filters.append(
-                "allowed teams: " + ", ".join(f"`{team}`" for team in repo_config.allowed_teams)
-            )
+        authors = repo_config.allowed_authors
+        if authors:
+            if repo_config.author_filter_from_defaults and authors.teams:
+                # Don't publish the operator's default team names.
+                entries = [f"`@{login}`" for login in authors.logins]
+                count = len(authors.teams)
+                entries.append(
+                    f"members of {count} team{'s' if count > 1 else ''} "
+                    f"set in {SERVICE_DEFAULTS_SOURCE}"
+                )
+            else:
+                entries = [f"`{entry}`" for entry in authors.describe(owner_login)]
+            filters.append("allowed pull request authors: " + ", ".join(entries))
 
         if filters:
             lines.extend(["", "Additional approval filters apply:"])
@@ -909,7 +1007,7 @@ class WebhookHandler:
             installation_id,
             repo_full_name,
             issue_number,
-            self._format_help_message(repo_config),
+            self._format_help_message(repo_config, repo_full_name.split("/")[0]),
         )
 
     async def _approve_pr(

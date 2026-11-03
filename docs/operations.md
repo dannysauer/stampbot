@@ -93,7 +93,7 @@ then disable both flags.
 
 ## Check GitHub App access
 
-Use the [permission table](configuration.md#github-app-permissions) as the
+Use the [permission table](service-settings.md#github-app-permissions) as the
 source of truth.
 
 | Symptom | Check |
@@ -101,7 +101,9 @@ source of truth.
 | Approval lookup, creation, or dismissal fails | Pull requests has read and write access. |
 | Repository policy is missing | Contents has read access and the App is installed on the repository. |
 | Organization fallback is missing | The App is installed on the organization's `.github` repository. |
-| Every team-filtered author is rejected | Members has read access and the team slug is correct. |
+| Stampbot comments that it can't find a team | The team slug is spelled correctly, and Members has read access. GitHub reports both problems the same way. |
+| Stampbot comments that GitHub doesn't support teams on personal accounts | The repository belongs to a user. Replace team entries with logins. |
+| Policy fails with `Stampbot only looks up teams in the repository owner's organization` | An `allowed_authors` or `allowed_teams` entry names another organization. The error names the file and the corrected entry. |
 | An authorized ChatOps user is rejected | Administration has read access. |
 | Comments never arrive | Issue comment and review comment events are subscribed. |
 
@@ -127,20 +129,31 @@ gh api "repos/${OWNER}/.github/contents/stampbot.toml" --jq .download_url
 The repository file wins. Stampbot checks the organization file only when the
 repository file is absent and the owner is an organization.
 
-Validate a downloaded file from a Stampbot source checkout:
+Validate a downloaded file from a Stampbot source checkout. The script also
+checks that every team in `allowed_authors` belongs to `OWNER`:
 
 ```bash
 POLICY_FILE=/path/to/stampbot.toml
-.venv/bin/python - "${POLICY_FILE}" <<'PY'
+.venv/bin/python - "${POLICY_FILE}" "${OWNER}" <<'PY'
 from pathlib import Path
 import sys
 
 from stampbot.config import RepoConfig
 
-RepoConfig.from_toml(Path(sys.argv[1]).read_text())
+config = RepoConfig.from_toml(Path(sys.argv[1]).read_text())
+if not config.author_filter_from_defaults:
+    config.author_filter_source = sys.argv[1]
+config.check_team_owner(sys.argv[2])
+for setting in config.deprecated_settings:
+    print(f"{setting} is deprecated; move its entries to allowed_authors")
 print("stampbot.toml is valid")
 PY
 ```
+
+A valid file prints `stampbot.toml is valid`. An invalid one ends with a
+`ValueError` that describes the problem. The script fills unset keys from this
+checkout's `settings.toml` defaults, which may differ from the deployed
+service's defaults.
 
 A missing policy file moves lookup to the next source. GitHub also returns a
 repository-level `404` when `OWNER/.github` doesn't exist or the App installation
