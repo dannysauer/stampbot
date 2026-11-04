@@ -1,17 +1,21 @@
-# Configuration reference
+# Service settings reference
 
-Stampbot reads service settings for the running process and repository policy
-for approval decisions. The two layers don't share a file format or trust
-boundary.
+Service settings control the Stampbot process: where it listens, which GitHub
+App credentials it uses, and what telemetry it emits. Operators set them through
+environment variables or settings files.
+
+Approval rules for a repository live in its `stampbot.toml`, which the
+[repository policy reference](repository-policy.md) describes. Repository
+policy and service settings don't share a file format or a trust boundary.
 
 ## Service setting precedence
 
 Dynaconf loads settings in this order, from lowest to highest precedence:
 
-1. `settings.toml`;
-2. `.secrets.toml`;
-3. `.env`; and
-4. process environment variables.
+1. `settings.toml`
+2. `.secrets.toml`
+3. `.env`
+4. Process environment variables
 
 Environment variables use the `STAMPBOT_` prefix. Keep `.env` and
 `.secrets.toml` for local work; use the platform's secret store in production.
@@ -72,8 +76,10 @@ Ingress doesn't reference.
 
 ## Service-wide policy defaults
 
-The `[defaults]` table in `settings.toml` supplies repository policy when no
-repository or organization file exists:
+The `[defaults]` table in `settings.toml` supplies repository policy when
+neither the repository nor its organization has a `stampbot.toml`. It also
+fills in any key that a policy file leaves out. The keys are the ones in the
+[repository policy reference](repository-policy.md#policy-keys):
 
 ```toml
 [defaults]
@@ -86,103 +92,26 @@ approve_commands = ["approve", "stamp"]
 unapprove_commands = ["unapprove", "unstamp"]
 required_labels = []
 required_title_patterns = []
-allowed_users = []
-allowed_teams = []
+allowed_authors = []
 ```
 
 Dynaconf's double-underscore form addresses nested defaults. For example,
 `STAMPBOT_DEFAULTS__CHATOPS_REQUIRED_PERMISSION=write` changes the service-wide
 ChatOps threshold.
 
-## Repository policy lookup
+Stampbot validates defaults each time it loads policy for a repository that
+uses them. An invalid default stops automation for that repository, the same
+as an invalid policy file. Repository users see only that the defaults are
+invalid and that they should contact you; Stampbot logs the full error, with
+the setting and value, as `Invalid service default configuration`. A team in
+`allowed_authors` must belong to the organization that owns the event's
+repository, so a default that names a team is usually a mistake: it fails for
+every repository outside that organization, and it's ignored in repositories
+owned by personal accounts. Put team rules in each organization's `.github`
+policy instead.
 
-For each event, Stampbot checks these locations in order:
-
-1. `stampbot.toml` on the target repository's default branch;
-2. `stampbot.toml` in `OWNER/.github` when the owner is an organization; and
-3. the service-wide defaults.
-
-The first file found wins. Stampbot doesn't merge repository and organization
-files.
-
-Each replica keeps the result, including "no file found", in memory for
-`STAMPBOT_REPO_CONFIG_CACHE_SECONDS` (default 300). Within that window, events
-for the same installation, repository, and default branch reuse the parsed
-policy without reading GitHub. Invalid policy and read failures are not cached,
-so a corrected file applies on the next event.
-
-## Repository policy keys
-
-| Key | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `approval_labels` | list of strings | `["autoapprove", "stamp"]` | Labels that trigger approval. Removing any configured approval label can dismiss active Stampbot approvals. |
-| `auto_approve_on_label` | boolean | `true` | Enables label-driven approval and dismissal on label removal. |
-| `reapprove` | boolean | `false` | Lets a `synchronize` event approve a new head when an approval label remains. With `false`, a new head is approved only by a later `labeled` or `reopened` event or a ChatOps command. |
-| `chatops_enabled` | boolean | `true` | Enables `@stampbot` commands in pull request issue and review comments. |
-| `chatops_required_permission` | enum | `maintain` | Minimum permission for approve and unapprove commands: `none`, `read`, `triage`, `write`, `maintain`, or `admin`. |
-| `approve_commands` | list of strings | `["approve", "stamp"]` | Words that create approval after `@stampbot`. |
-| `unapprove_commands` | list of strings | `["unapprove", "unstamp"]` | Words that dismiss active Stampbot approvals. |
-| `required_labels` | list of strings | `[]` | At least one listed label must be present for label approval. |
-| `required_title_patterns` | list of regex strings | `[]` | At least one Python-compatible expression must match the title. At most 20 patterns are accepted; each is limited to 256 characters. |
-| `allowed_users` | list of GitHub logins | `[]` | Pull request authors allowed by the author filter. |
-| `allowed_teams` | list of team slugs | `[]` | Organization teams allowed by the author filter. Values may be `team-slug` or `org/team-slug`. |
-
-An empty filter list disables that filter. `allowed_users` and `allowed_teams`
-form one author category, so a direct user match or a team match passes it.
-
-### Title-pattern limits
-
-Title patterns use Python `re`-compatible behavior. Stampbot compiles them when
-it loads policy and evaluates them in order. Each pattern receives 10 ms
-against a title no longer than 256 characters; the first match passes.
-
-Matching runs in a worker thread. A timeout or engine failure rejects approval
-for that event and reports a bounded-evaluation reason. Rewrite an expensive
-expression instead of depending on more time.
-
-The policy parser validates TOML syntax, the permission enum, and title-pattern
-type, count, length, and syntax. It doesn't reject every unknown key or wrong
-TOML type. Use the types in this table.
-
-Command parsing reads one `\w+` word after `@stampbot`. Custom command words may
-contain letters, digits, and underscores; spaces and hyphens end the word.
-
-## Filter evaluation
-
-Filter categories combine with AND. Values within one category combine with OR.
-
-```toml
-approval_labels = ["autoapprove"]
-required_labels = ["safe-to-approve", "dependency-update"]
-required_title_patterns = ["^fix:", "^chore\\(deps\\):"]
-allowed_users = ["renovate", "dependabot"]
-allowed_teams = ["platform-automation"]
-```
-
-This policy needs the `autoapprove` label and one required label. The title must
-match one expression. The author must match either a listed user or a listed
-team.
-
-These filters apply only to label approval. ChatOps uses the commenter's
-repository permission.
-
-## Missing and invalid policy
-
-An absent policy file moves lookup to the next source. The `OWNER/.github`
-repository is optional: when it doesn't exist or the App installation doesn't
-include it, GitHub returns a repository-level `404` and Stampbot uses service
-defaults.
-
-A failure reading the target repository's policy stops automation for that
-event. Once GitHub makes the organization repository available to the App, a
-failure reading its policy does too. A readable but invalid policy also stops
-automation. Each failure increments the configuration-load error metric. On a
-newly opened pull request, Stampbot leaves a review comment: validation failures
-name the invalid setting, while read failures use a generic message. Other pull
-request and ChatOps events return an error without changing a review.
-
-A title-pattern timeout is different: the policy parsed successfully, but that
-pull request is ineligible. Stampbot creates no approval.
+The deprecated `allowed_users` and `allowed_teams` keys still work here and log
+a warning when Stampbot uses them.
 
 ## GitHub App permissions
 
@@ -192,7 +121,7 @@ pull request is ineligible. Stampbot creates no approval.
 | Contents | Read-only | Read repository and organization policy. | A missing file advances lookup. An unavailable optional `OWNER/.github` repository advances to service defaults. Other read failures stop automation for the event. |
 | Metadata | Read-only | Read required repository metadata. | The installation can't operate normally. |
 | Issues | Read-only | Receive and inspect pull request issue comments. | Issue-comment ChatOps is unavailable. |
-| Members | Read-only | Check organization team membership. | Team filters find no match. |
+| Members | Read-only | Check organization team membership. | GitHub can't find listed teams, so Stampbot doesn't approve and comments on the pull request. |
 | Administration | Read-only | Read collaborator permission for ChatOps. | Approve and unapprove commands fail closed. |
 
 The App manifest subscribes to these events:

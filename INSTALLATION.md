@@ -92,7 +92,7 @@ Subscribe to `pull_request`, `issue_comment`, and
 `pull_request_review_comment`. Then record the App ID, generate a private key,
 and install the App on its target repositories.
 
-The [permission reference](docs/configuration.md#github-app-permissions)
+The [permission reference](docs/service-settings.md#github-app-permissions)
 explains each grant and its failure mode.
 
 ## Configure credentials

@@ -8,6 +8,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 from github.GithubException import GithubException
 
+from stampbot.config import (
+    DEFAULTS_INVALID,
+    OPERATOR_DEFAULTS_FIX,
+    REPO_CONFIG_DEFAULTS,
+    SERVICE_DEFAULTS_SOURCE,
+    RepoConfig,
+)
+from stampbot.github_client import TeamLookup
 from tests.conftest import load_fixture
 
 
@@ -28,8 +36,15 @@ def mock_github_client():
         mock.get_pr_head_sha.return_value = "current-head"
         mock.repo_has_label.return_value = True
         mock.user_has_permission.return_value = True
-        mock.get_user_team_slugs.return_value = []  # No team memberships by default
+        mock.check_team_membership.return_value = TeamLookup()  # No memberships by default
         yield mock
+
+
+def load_org_fixture(name):
+    """Load a fixture whose repository belongs to an organization."""
+    payload = load_fixture(name)
+    payload["repository"]["owner"]["type"] = "Organization"
+    return payload
 
 
 @pytest.fixture
@@ -599,6 +614,7 @@ def test_decide(webhook_handler, action, event_label, labels, reapprove, expecte
         repo_full_name="octocat/hello-world",
         pr_number=42,
         owner_login="octocat",
+        owner_type="User",
         pr={"labels": [{"name": name} for name in labels]},
         event_label=event_label,
         repo_config=config,
@@ -621,6 +637,7 @@ def test_decide_respects_auto_approve_disabled(webhook_handler):
         repo_full_name="octocat/hello-world",
         pr_number=42,
         owner_login="octocat",
+        owner_type="User",
         pr={"labels": []},
         event_label="autoapprove",
         repo_config=config,
@@ -993,8 +1010,7 @@ approve_commands = ["approve-it"]
 unapprove_commands = ["hold-it"]
 required_labels = ["dependencies"]
 required_title_patterns = ["^chore:"]
-allowed_users = ["renovate[bot]"]
-allowed_teams = ["release-team"]
+allowed_authors = ["renovate[bot]", "@octocat/release-team"]
 """
 
     result = await webhook_handler.handle_event("issue_comment", payload)
@@ -1006,8 +1022,7 @@ allowed_teams = ["release-team"]
     assert "`ship-it`" in help_text
     assert "`dependencies`" in help_text
     assert "`^chore:`" in help_text
-    assert "`renovate[bot]`" in help_text
-    assert "`release-team`" in help_text
+    assert "allowed pull request authors: `@renovate[bot]`, `@octocat/release-team`" in help_text
 
 
 @pytest.mark.asyncio
@@ -1290,8 +1305,8 @@ async def test_missing_repo_config_with_invalid_service_defaults_fails_closed(
 
     assert result == {"status": "error", "message": "Invalid repository configuration"}
     review_body = mock_github_client.create_pr_review_comment.call_args.args[3]
-    assert "Invalid service default configuration" in review_body
-    assert "approve_commands must be a list of strings" in review_body
+    assert DEFAULTS_INVALID in review_body
+    assert "approve_commands" not in review_body
     mock_github_client.approve_pr.assert_not_called()
 
 
@@ -1313,8 +1328,8 @@ async def test_invalid_service_default_permission_fails_closed(
 
     assert result == {"status": "error", "message": "Invalid repository configuration"}
     review_body = mock_github_client.create_pr_review_comment.call_args.args[3]
-    assert "Invalid service default configuration" in review_body
-    assert "Invalid chatops_required_permission" in review_body
+    assert DEFAULTS_INVALID in review_body
+    assert "chatops_required_permission" not in review_body
     mock_github_client.approve_pr.assert_not_called()
 
 
@@ -1394,6 +1409,7 @@ async def test_invalid_repo_and_service_configs_use_builtin_fail_closed_config(
 
     assert result == {"status": "error", "message": "Invalid repository configuration"}
     review_body = mock_github_client.create_pr_review_comment.call_args.args[3]
+    # The file's own error is reported, since fixing the defaults wouldn't fix it.
     assert "Invalid chatops_required_permission" in review_body
     mock_github_client.approve_pr.assert_not_called()
 
@@ -1700,53 +1716,463 @@ async def test_pr_unlabeled_non_approval_label(webhook_handler, mock_github_clie
 
 @pytest.mark.asyncio
 async def test_pr_with_allowed_teams_triggers_team_check(webhook_handler, mock_github_client):
-    """Test PR with allowed_teams configured triggers team membership check."""
-    payload = load_fixture("pr_labeled_autoapprove")
-    # Config with allowed_teams - user not in allowed_users so needs team check
+    """Test a listed team triggers a membership check in the owner's organization."""
+    payload = load_org_fixture("pr_labeled_autoapprove")
+    # The author isn't listed by login, so Stampbot checks team membership
     mock_github_client.get_repo_file.return_value = """
-allowed_teams = ["acme/release-team"]
+allowed_authors = ["@octocat/release-team"]
 """
     # User is in the allowed team
-    mock_github_client.get_user_team_slugs.return_value = ["release-team"]
+    mock_github_client.check_team_membership.return_value = TeamLookup(("release-team",))
 
     result = await webhook_handler.handle_event("pull_request", payload)
 
     assert result["status"] == "success"
-    mock_github_client.get_user_team_slugs.assert_called_once()
+    mock_github_client.check_team_membership.assert_called_once_with(
+        12345, "octocat", "contributor", ["release-team"]
+    )
     mock_github_client.approve_pr.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_pr_with_allowed_teams_user_not_member(webhook_handler, mock_github_client):
     """Test PR rejected when user is not in any allowed team."""
-    payload = load_fixture("pr_labeled_autoapprove")
+    payload = load_org_fixture("pr_labeled_autoapprove")
     mock_github_client.get_repo_file.return_value = """
-allowed_teams = ["acme/release-team"]
+allowed_authors = ["@octocat/release-team"]
 """
     # User is NOT in the allowed team
-    mock_github_client.get_user_team_slugs.return_value = []
+    mock_github_client.check_team_membership.return_value = TeamLookup()
 
     result = await webhook_handler.handle_event("pull_request", payload)
 
     assert result["status"] == "ignored"
     assert "not eligible" in result["message"].lower()
-    mock_github_client.get_user_team_slugs.assert_called_once()
+    mock_github_client.check_team_membership.assert_called_once()
     mock_github_client.approve_pr.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_pr_with_allowed_users_skips_team_check(webhook_handler, mock_github_client):
-    """Test PR with user in allowed_users skips team membership check."""
-    payload = load_fixture("pr_labeled_autoapprove")
+    """Test an author listed by login skips the team membership check."""
+    payload = load_org_fixture("pr_labeled_autoapprove")
     # The fixture has user "contributor"
     mock_github_client.get_repo_file.return_value = """
-allowed_users = ["contributor"]
-allowed_teams = ["acme/release-team"]
+allowed_authors = ["contributor", "@octocat/release-team"]
 """
 
     result = await webhook_handler.handle_event("pull_request", payload)
 
     assert result["status"] == "success"
-    # Should NOT call get_user_team_slugs since user is in allowed_users
-    mock_github_client.get_user_team_slugs.assert_not_called()
+    # Should NOT call check_team_membership since the login is listed
+    mock_github_client.check_team_membership.assert_not_called()
     mock_github_client.approve_pr.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_pr_with_team_in_other_org_fails_closed(webhook_handler, mock_github_client):
+    """Test a team outside the owner's organization makes the policy invalid."""
+    payload = load_org_fixture("pr_labeled_autoapprove")
+    mock_github_client.get_repo_file.return_value = """
+allowed_authors = ["@acme/release-team"]
+"""
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "error"
+    assert result["message"] == "Invalid repository configuration"
+    mock_github_client.check_team_membership.assert_not_called()
+    mock_github_client.approve_pr.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pr_with_deprecated_author_settings_still_filters(
+    webhook_handler, mock_github_client
+):
+    """Test allowed_users and allowed_teams still filter authors after the rename."""
+    payload = load_org_fixture("pr_labeled_autoapprove")
+    mock_github_client.get_repo_file.return_value = """
+allowed_users = ["someone-else"]
+allowed_teams = ["release-team"]
+"""
+    mock_github_client.check_team_membership.return_value = TeamLookup(("release-team",))
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "success"
+    mock_github_client.check_team_membership.assert_called_once_with(
+        12345, "octocat", "contributor", ["release-team"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_opened_pr_names_team_in_other_org(webhook_handler, mock_github_client):
+    """Test the configuration-error review names the out-of-organization team."""
+    payload = load_org_fixture("pr_opened_with_autoapprove_label")
+    mock_github_client.get_repo_file.return_value = """
+allowed_authors = ["@acme/release-team"]
+"""
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result == {"status": "error", "message": "Invalid repository configuration"}
+    review_body = mock_github_client.create_pr_review_comment.call_args.args[3]
+    assert "'@acme/release-team'" in review_body
+    assert (
+        "The allowed_authors entry '@acme/release-team' in stampbot.toml in "
+        "octocat/hello-world names the 'acme' organization"
+    ) in review_body
+    assert "Change the entry to '@octocat/release-team' or remove it." in review_body
+    mock_github_client.approve_pr.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_service_default_team_in_other_org_fails_closed(webhook_handler, mock_github_client):
+    """Test a service-default team outside the owner's organization blocks approval."""
+    payload = load_org_fixture("pr_opened_with_autoapprove_label")
+    mock_github_client.get_repo_file.return_value = None
+    defaults = {**REPO_CONFIG_DEFAULTS, "allowed_authors": ["@acme/release-team"]}
+
+    with patch.object(RepoConfig, "_get_defaults", return_value=defaults):
+        result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result == {"status": "error", "message": "Invalid repository configuration"}
+    review_body = mock_github_client.create_pr_review_comment.call_args.args[3]
+    assert "in Stampbot's service-wide defaults" in review_body
+    assert "release-team" not in review_body
+    mock_github_client.approve_pr.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("from_defaults", [False, True])
+async def test_deprecated_author_settings_log_warning(
+    webhook_handler, mock_github_client, from_defaults
+):
+    """Test a policy using allowed_users logs a deprecation warning."""
+    payload = load_org_fixture("pr_labeled_autoapprove")
+    defaults = {**REPO_CONFIG_DEFAULTS, "allowed_users": ["contributor"]}
+    mock_github_client.get_repo_file.return_value = (
+        None if from_defaults else 'allowed_users = ["contributor"]'
+    )
+
+    with (
+        patch.object(RepoConfig, "_get_defaults", return_value=defaults),
+        patch("stampbot.repo_policy.logger") as mock_logger,
+    ):
+        result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "success"
+    warning_args = [call.args for call in mock_logger.warning.call_args_list]
+    assert any("allowed_users" in args for args in warning_args)
+
+
+@pytest.mark.asyncio
+async def test_inherited_deprecated_setting_warning_names_service_defaults(
+    webhook_handler, mock_github_client
+):
+    """Test a deprecated key inherited from defaults isn't blamed on the repository file."""
+    payload = load_org_fixture("pr_labeled_autoapprove")
+    defaults = {**REPO_CONFIG_DEFAULTS, "allowed_users": ["contributor"]}
+    mock_github_client.get_repo_file.return_value = 'approval_labels = ["autoapprove"]'
+
+    with (
+        patch.object(RepoConfig, "_get_defaults", return_value=defaults),
+        patch("stampbot.repo_policy.logger") as mock_logger,
+    ):
+        result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "success"
+    warning_args = [call.args for call in mock_logger.warning.call_args_list]
+    assert (SERVICE_DEFAULTS_SOURCE, "allowed_users") in [args[1:] for args in warning_args]
+
+
+@pytest.mark.asyncio
+async def test_help_shows_owner_for_bare_legacy_team(webhook_handler, mock_github_client):
+    """Test help renders a bare allowed_teams slug as a team in the owner's organization."""
+    payload = load_fixture("issue_comment_approve")
+    payload["comment"]["body"] = "@stampbot help"
+    mock_github_client.get_repo_file.return_value = 'allowed_teams = ["release-team"]'
+
+    await webhook_handler.handle_event("issue_comment", payload)
+
+    help_text = mock_github_client.create_issue_comment.call_args[0][3]
+    assert "allowed pull request authors: `@octocat/release-team`" in help_text
+
+
+@pytest.mark.asyncio
+async def test_personal_account_team_rule_explains_itself(webhook_handler, mock_github_client):
+    """Test teams on a personal account are skipped and the PR says why it wasn't approved."""
+    payload = load_fixture("pr_labeled_autoapprove")  # owned by the octocat user
+    mock_github_client.get_repo_file.return_value = 'allowed_authors = ["@octocat/release-team"]'
+
+    with patch("stampbot.repo_policy.logger") as mock_logger:
+        result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "ignored"
+    mock_github_client.check_team_membership.assert_not_called()
+    mock_github_client.approve_pr.assert_not_called()
+    body = mock_github_client.create_issue_comment.call_args.args[3]
+    assert body == (
+        "Someone added a team restriction in stampbot.toml in octocat/hello-world, but GitHub "
+        "doesn't support teams on personal accounts, so I didn't approve this pull request.\n\n"
+        "I ignored `@octocat/release-team`. Replace it with the logins of the people whose pull "
+        "requests Stampbot should approve, such as `octocat`."
+    )
+    warnings = [call.args for call in mock_logger.warning.call_args_list]
+    assert any("doesn't support teams on personal accounts" in args[0] for args in warnings)
+
+
+@pytest.mark.asyncio
+async def test_personal_account_login_still_approves(webhook_handler, mock_github_client):
+    """Test an author listed by login is approved without a team comment."""
+    payload = load_fixture("pr_labeled_autoapprove")
+    mock_github_client.get_repo_file.return_value = (
+        'allowed_authors = ["contributor", "@octocat/release-team"]'
+    )
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "success"
+    mock_github_client.create_issue_comment.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_missing_team_blocks_approval_with_comment(webhook_handler, mock_github_client):
+    """Test a listed team GitHub can't find fails closed and says how to fix it."""
+    payload = load_org_fixture("pr_labeled_autoapprove")
+    mock_github_client.get_repo_file.return_value = 'allowed_authors = ["@octocat/ghost-team"]'
+    mock_github_client.check_team_membership.return_value = TeamLookup((), ("ghost-team",))
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "ignored"
+    mock_github_client.approve_pr.assert_not_called()
+    body = mock_github_client.create_issue_comment.call_args.args[3]
+    assert body == (
+        "Someone added a team restriction in stampbot.toml in octocat/hello-world, but I can't "
+        "find the team `@octocat/ghost-team`, so I didn't approve this pull request.\n\n"
+        "Check the spelling of the team name. If it's correct, make sure the Stampbot GitHub "
+        "App has read access to organization members."
+    )
+
+
+@pytest.mark.asyncio
+async def test_non_member_gets_no_team_comment(webhook_handler, mock_github_client):
+    """Test an author outside every listed team is only ineligible, not a misconfiguration."""
+    payload = load_org_fixture("pr_labeled_autoapprove")
+    mock_github_client.get_repo_file.return_value = 'allowed_authors = ["@octocat/release-team"]'
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "ignored"
+    mock_github_client.create_issue_comment.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_policy_errors_name_the_file(webhook_handler, mock_github_client):
+    """Test a parse error tells the reader which policy file to fix."""
+    payload = load_fixture("pr_opened_with_autoapprove_label")
+    mock_github_client.get_repo_file.return_value = 'allowed_authors = ["has space"]'
+
+    await webhook_handler.handle_event("pull_request", payload)
+
+    review_body = mock_github_client.create_pr_review_comment.call_args.args[3]
+    assert (
+        "Stampbot can't use stampbot.toml in octocat/hello-world: allowed_authors entry "
+        "'has space' is not a valid GitHub login"
+    ) in review_body
+
+
+@pytest.mark.asyncio
+async def test_deprecated_warning_names_the_policy_file(webhook_handler, mock_github_client):
+    """Test a deprecated key in a repository file names that file."""
+    payload = load_fixture("pr_labeled_autoapprove")
+    mock_github_client.get_repo_file.return_value = 'allowed_users = ["contributor"]'
+
+    with patch("stampbot.repo_policy.logger") as mock_logger:
+        await webhook_handler.handle_event("pull_request", payload)
+
+    warnings = [call.args for call in mock_logger.warning.call_args_list]
+    assert ("stampbot.toml in octocat/hello-world", "allowed_users") in [
+        args[1:] for args in warnings
+    ]
+
+
+@pytest.mark.asyncio
+async def test_team_comment_waits_for_an_approval_request(webhook_handler, mock_github_client):
+    """Test a newly opened pull request doesn't get the comment; its labeled event does."""
+    payload = load_fixture("pr_opened_with_autoapprove_label")
+    mock_github_client.get_repo_file.return_value = 'allowed_authors = ["@octocat/release-team"]'
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "ignored"
+    mock_github_client.create_issue_comment.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_team_comment_skipped_when_another_filter_failed(webhook_handler, mock_github_client):
+    """Test the comment doesn't blame teams when the title filter is what failed."""
+    payload = load_fixture("pr_labeled_autoapprove")
+    mock_github_client.get_repo_file.return_value = """
+allowed_authors = ["@octocat/release-team"]
+required_title_patterns = ["^never-matches$"]
+"""
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "ignored"
+    mock_github_client.create_issue_comment.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_default_team_comment_points_to_operator(webhook_handler, mock_github_client):
+    """Test a team from service defaults sends readers to the operator without naming teams."""
+    payload = load_fixture("pr_labeled_autoapprove")
+    defaults = {**REPO_CONFIG_DEFAULTS, "allowed_authors": ["@acme/secret-team"]}
+
+    with patch.object(RepoConfig, "_get_defaults", return_value=defaults):
+        result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "ignored"
+    body = mock_github_client.create_issue_comment.call_args.args[3]
+    assert body.startswith(f"Someone added a team restriction in {SERVICE_DEFAULTS_SOURCE},")
+    assert "secret-team" not in body
+    assert body.endswith(OPERATOR_DEFAULTS_FIX)
+
+
+@pytest.mark.asyncio
+async def test_org_policy_is_named_in_messages(webhook_handler, mock_github_client):
+    """Test the organization's .github policy is named when it holds the bad rule."""
+    payload = load_org_fixture("pr_opened_with_autoapprove_label")
+
+    def get_repo_file(_installation, repo, *_args, **_kwargs):
+        return 'allowed_authors = ["@acme/x"]' if repo == "octocat/.github" else None
+
+    mock_github_client.get_repo_file.side_effect = get_repo_file
+
+    await webhook_handler.handle_event("pull_request", payload)
+
+    review_body = mock_github_client.create_pr_review_comment.call_args.args[3]
+    assert "in the organization policy (stampbot.toml in octocat/.github) names" in review_body
+
+
+@pytest.mark.asyncio
+async def test_unknown_owner_type_still_checks_teams(webhook_handler, mock_github_client):
+    """Test a payload without an owner type still looks teams up instead of skipping them."""
+    payload = load_fixture("pr_labeled_autoapprove")
+    del payload["repository"]["owner"]["type"]
+    mock_github_client.get_repo_file.return_value = 'allowed_authors = ["@octocat/release-team"]'
+    mock_github_client.check_team_membership.return_value = TeamLookup(("release-team",))
+
+    result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_missing_default_team_comment_hides_team_name(webhook_handler, mock_github_client):
+    """Test a missing team from service defaults isn't named in the comment."""
+    payload = load_org_fixture("pr_labeled_autoapprove")
+    defaults = {**REPO_CONFIG_DEFAULTS, "allowed_authors": ["@octocat/secret-team"]}
+    mock_github_client.check_team_membership.return_value = TeamLookup((), ("secret-team",))
+
+    with patch.object(RepoConfig, "_get_defaults", return_value=defaults):
+        result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result["status"] == "ignored"
+    body = mock_github_client.create_issue_comment.call_args.args[3]
+    assert "secret-team" not in body
+    assert "I can't find one of the teams it lists" in body
+    assert body.endswith(OPERATOR_DEFAULTS_FIX)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("teams", "expected"),
+    [
+        (["@octocat/secret-team"], "1 team"),
+        (["@octocat/secret-team", "@octocat/other-team"], "2 teams"),
+    ],
+)
+async def test_help_hides_default_team_names(webhook_handler, mock_github_client, teams, expected):
+    """Test help counts default teams instead of naming them."""
+    payload = load_fixture("issue_comment_approve")
+    payload["comment"]["body"] = "@stampbot help"
+    defaults = {**REPO_CONFIG_DEFAULTS, "allowed_authors": ["renovate[bot]", *teams]}
+
+    with patch.object(RepoConfig, "_get_defaults", return_value=defaults):
+        await webhook_handler.handle_event("issue_comment", payload)
+
+    help_text = mock_github_client.create_issue_comment.call_args[0][3]
+    assert (
+        "allowed pull request authors: `@renovate[bot]`, "
+        f"members of {expected} set in {SERVICE_DEFAULTS_SOURCE}"
+    ) in help_text
+    assert "secret-team" not in help_text
+
+
+@pytest.mark.asyncio
+async def test_policy_file_blames_invalid_defaults_without_details(
+    webhook_handler, mock_github_client
+):
+    """Test a file that inherits a bad default reports the defaults, redacted."""
+    payload = load_org_fixture("pr_opened_with_autoapprove_label")
+    mock_github_client.get_repo_file.return_value = 'approval_labels = ["autoapprove"]'
+    defaults = {**REPO_CONFIG_DEFAULTS, "allowed_authors": ["@octocat/secret team"]}
+
+    with (
+        patch.object(RepoConfig, "_get_defaults", return_value=defaults),
+        patch("stampbot.repo_policy.logger") as mock_logger,
+    ):
+        result = await webhook_handler.handle_event("pull_request", payload)
+
+    assert result == {"status": "error", "message": "Invalid repository configuration"}
+    review_body = mock_github_client.create_pr_review_comment.call_args.args[3]
+    assert DEFAULTS_INVALID in review_body
+    assert "secret" not in review_body
+    logged = [str(call.args) for call in mock_logger.warning.call_args_list]
+    assert any("secret team" in entry for entry in logged)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("repo_file", [None, 'approval_labels = ["autoapprove"]'])
+async def test_redacted_default_team_error_keeps_detail_in_logs(
+    webhook_handler, mock_github_client, repo_file
+):
+    """Test the operator log names the bad default team that the PR comment hides."""
+    payload = load_org_fixture("pr_opened_with_autoapprove_label")
+    mock_github_client.get_repo_file.return_value = repo_file
+    defaults = {**REPO_CONFIG_DEFAULTS, "allowed_authors": ["@acme/secret-team"]}
+
+    with (
+        patch.object(RepoConfig, "_get_defaults", return_value=defaults),
+        patch("stampbot.repo_policy.logger") as mock_logger,
+    ):
+        await webhook_handler.handle_event("pull_request", payload)
+
+    review_body = mock_github_client.create_pr_review_comment.call_args.args[3]
+    assert "secret-team" not in review_body
+    logged = [str(call.args) for call in mock_logger.warning.call_args_list]
+    assert any("@acme/secret-team" in entry for entry in logged)
+
+
+@pytest.mark.asyncio
+async def test_policy_error_is_not_blamed_on_overridden_bad_defaults(
+    webhook_handler, mock_github_client
+):
+    """Test a file's own error is reported even when the defaults it overrides are bad."""
+    payload = load_org_fixture("pr_opened_with_autoapprove_label")
+    mock_github_client.get_repo_file.return_value = """
+allowed_authors = ["renovate[bot]"]
+required_title_patterns = ["("]
+"""
+    defaults = {**REPO_CONFIG_DEFAULTS, "allowed_authors": ["has space"]}
+
+    with patch.object(RepoConfig, "_get_defaults", return_value=defaults):
+        await webhook_handler.handle_event("pull_request", payload)
+
+    review_body = mock_github_client.create_pr_review_comment.call_args.args[3]
+    assert "Stampbot can't use stampbot.toml in octocat/hello-world" in review_body
+    assert "Invalid regex pattern" in review_body
+    assert DEFAULTS_INVALID not in review_body

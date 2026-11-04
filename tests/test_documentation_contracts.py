@@ -30,7 +30,7 @@ def test_policy_read_failure_boundaries_are_documented() -> None:
             "Once GitHub makes the organization repository available to the App, "
             "a failure reading its policy does too.",
         ),
-        "docs/configuration.md": (
+        "docs/repository-policy.md": (
             "GitHub returns a repository-level `404` and Stampbot uses service defaults.",
             "A failure reading the target repository's policy stops automation for that event.",
             "Once GitHub makes the organization repository available to the App, "

@@ -10,6 +10,8 @@ from typing import Any
 import regex  # type: ignore[import-untyped]
 from dynaconf import Dynaconf  # type: ignore[import-untyped]
 
+from stampbot.principals import MAX_PRINCIPALS, PrincipalSet, parse_principals
+
 # GitHub currently limits pull request titles to 256 characters. Keep a local
 # bound because webhook JSON is still untrusted input. Repository patterns are
 # bounded separately so a policy cannot multiply matching work without limit.
@@ -33,11 +35,54 @@ REPO_CONFIG_DEFAULTS = {
     "required_labels": [],
     # PR title must match at least one of these regex patterns to be eligible
     "required_title_patterns": [],
-    # PR author must be one of these users (login names)
+    # PR author must be one of these logins or a member of one of these teams.
+    # CODEOWNERS syntax: "renovate[bot]", "@octocat", or "@org/team-slug".
+    "allowed_authors": [],
+    # Deprecated aliases of allowed_authors: logins only, and teams only.
     "allowed_users": [],
-    # PR author must be a member of one of these teams (org/team-slug or team-slug)
     "allowed_teams": [],
 }
+# Where policy came from when no repository or organization file supplied it.
+SERVICE_DEFAULTS_SOURCE = "Stampbot's service-wide defaults"
+# What a repository owner can do about a problem in the service-wide defaults.
+OPERATOR_DEFAULTS_FIX = (
+    "Only your Stampbot operator can change the service-wide defaults, so ask them to "
+    "fix it, or set allowed_authors in this repository's stampbot.toml to replace it."
+)
+# What repository users see when the service-wide defaults are invalid. The
+# details go to the operator's logs instead, because they can name settings,
+# such as default teams, that only the operator should see.
+DEFAULTS_INVALID = (
+    "Stampbot's service-wide defaults are invalid, so Stampbot is turned off for this "
+    "repository. Only your Stampbot operator can fix them, and Stampbot's logs have "
+    "the details."
+)
+
+
+class RedactedConfigError(ValueError):
+    """A configuration error whose message hides details from repository users.
+
+    Attributes:
+        detail: Full error for operator logs.
+    """
+
+    def __init__(self, message: str, detail: str) -> None:
+        """Store the redacted message and the full detail.
+
+        Args:
+            message: Text safe to show repository users.
+            detail: Full error for operator logs.
+        """
+        super().__init__(message)
+        self.detail = detail
+
+
+# Ineligibility reason when the pull request author fails the author filter.
+AUTHOR_NOT_ALLOWED = "PR author is not in allowed_authors"
+
+# Settings that together make up the pull request author filter. A policy file
+# that sets any of them replaces all of them from the service defaults.
+AUTHOR_FILTER_KEYS = ("allowed_authors", "allowed_users", "allowed_teams")
 REPO_PERMISSION_LEVELS = ["none", "read", "triage", "write", "maintain", "admin"]
 
 # App-level settings from environment variables and settings files
@@ -126,6 +171,7 @@ class RepoConfig:
         unapprove_commands: list[str],
         required_labels: list[str] | None = None,
         required_title_patterns: list[str] | None = None,
+        allowed_authors: list[str] | None = None,
         allowed_users: list[str] | None = None,
         allowed_teams: list[str] | None = None,
         config_error: str | None = None,
@@ -142,8 +188,11 @@ class RepoConfig:
             unapprove_commands: Commands that dismiss approval
             required_labels: Labels required for auto-approval eligibility (any match)
             required_title_patterns: Regex patterns for PR title (any match)
-            allowed_users: User logins allowed for auto-approval (any match)
-            allowed_teams: Team slugs allowed for auto-approval (any match)
+            allowed_authors: Pull request author logins and ``@org/team`` entries
+                allowed for label approval (any match)
+            allowed_users: Deprecated alias of ``allowed_authors`` for logins
+            allowed_teams: Deprecated alias of ``allowed_authors`` for teams;
+                bare slugs mean the repository owner's organization
             config_error: Config error message if config was invalid
         """
         self.approval_labels = approval_labels
@@ -165,9 +214,88 @@ class RepoConfig:
         title_patterns = required_title_patterns if required_title_patterns is not None else []
         self._compiled_title_patterns = self._compile_title_patterns(title_patterns)
         self.required_title_patterns = list(title_patterns)
-        self.allowed_users = allowed_users or []
-        self.allowed_teams = allowed_teams or []
+        self.allowed_authors, self.deprecated_settings = self._parse_author_filter(
+            allowed_authors, allowed_users, allowed_teams
+        )
+        # True when the author filter came from service defaults, not a policy file.
+        self.author_filter_from_defaults = False
+        # Plain description of where the author filter came from, for messages.
+        self.author_filter_source = SERVICE_DEFAULTS_SOURCE
         self.config_error = config_error
+        # Full error for operator logs; config_error may be a redacted summary.
+        self.config_error_detail = config_error
+
+    @staticmethod
+    def _parse_author_filter(
+        allowed_authors: object,
+        allowed_users: object,
+        allowed_teams: object,
+    ) -> tuple[PrincipalSet, tuple[str, ...]]:
+        """Merge the author filter and its deprecated aliases into one set.
+
+        Args:
+            allowed_authors: ``allowed_authors`` setting, or None.
+            allowed_users: Deprecated ``allowed_users`` setting, or None.
+            allowed_teams: Deprecated ``allowed_teams`` setting, or None.
+
+        Returns:
+            The merged entries and the names of deprecated settings in use.
+
+        Raises:
+            ValueError: If a setting is invalid or the merged list is too long.
+        """
+        authors = parse_principals(
+            [] if allowed_authors is None else allowed_authors, "allowed_authors"
+        )
+        users = parse_principals(
+            [] if allowed_users is None else allowed_users, "allowed_users", allow_teams=False
+        )
+        teams = parse_principals(
+            [] if allowed_teams is None else allowed_teams,
+            "allowed_teams",
+            bare_name_is_team=True,
+        )
+        merged = authors.union(users).union(teams)
+        if len(merged) > MAX_PRINCIPALS:
+            raise ValueError(
+                f"allowed_authors, allowed_users, and allowed_teams contain too many "
+                f"entries together (maximum: {MAX_PRINCIPALS})"
+            )
+        deprecated = tuple(
+            name
+            for name, entries in (("allowed_users", users), ("allowed_teams", teams))
+            if entries
+        )
+        return merged, deprecated
+
+    def check_team_owner(self, owner_login: str | None, owner_type: str | None = None) -> None:
+        """Reject an author-filter team outside the repository owner's organization.
+
+        A repository owned by a personal account skips the check: GitHub has no
+        teams there, so Stampbot ignores team entries and says so instead.
+
+        Args:
+            owner_login: Repository owner login.
+            owner_type: Repository owner account type (Organization or User).
+
+        Raises:
+            ValueError: If a team names another organization.
+        """
+        if owner_type == "User":
+            return
+        try:
+            self.allowed_authors.check_team_owner(owner_login, self.author_filter_source)
+        except ValueError as error:
+            if self.author_filter_from_defaults:
+                # Repository contributors see this error, so don't name the
+                # operator's default teams.
+                raise RedactedConfigError(
+                    f"A team in {SERVICE_DEFAULTS_SOURCE} belongs to an organization other "
+                    f"than this repository's owner, {owner_login or 'unknown'!r}, so "
+                    f"Stampbot can't check it. {OPERATOR_DEFAULTS_FIX}",
+                    detail=str(error),
+                ) from error
+            raise
 
     @staticmethod
     def _validate_command_list(commands: object, setting: str) -> list[str]:
@@ -248,7 +376,7 @@ class RepoConfig:
         return compiled_patterns
 
     @classmethod
-    def fail_closed(cls, message: str) -> RepoConfig:
+    def fail_closed(cls, message: str, detail: str | None = None) -> RepoConfig:
         """Return a valid config object that cannot authorize automation.
 
         This fallback deliberately uses code-defined values rather than
@@ -257,11 +385,12 @@ class RepoConfig:
 
         Args:
             message: Configuration error that caused the fallback.
+            detail: Fuller error for operator logs, when ``message`` is redacted.
 
         Returns:
             Structurally valid built-in configuration with config_error set.
         """
-        return cls(
+        config = cls(
             approval_labels=["autoapprove", "stamp"],
             auto_approve_on_label=True,
             reapprove=False,
@@ -271,10 +400,11 @@ class RepoConfig:
             unapprove_commands=["unapprove", "unstamp"],
             required_labels=[],
             required_title_patterns=[],
-            allowed_users=[],
-            allowed_teams=[],
             config_error=message or "Invalid configuration",
         )
+        if detail:
+            config.config_error_detail = detail
+        return config
 
     def is_pr_eligible(
         self,
@@ -335,27 +465,13 @@ class RepoConfig:
             else:
                 return False, "PR title does not match any required pattern"
 
-        # Check allowed users/teams filter (if either is configured)
-        if self.allowed_users or self.allowed_teams:
-            # User is allowed if they're in allowed_users
-            if pr_author in self.allowed_users:
+        # Check the pull request author filter (if configured)
+        if self.allowed_authors:
+            if self.allowed_authors.has_login(pr_author):
                 return True, None
-
-            # Or if they're a member of an allowed team
-            if self.allowed_teams and author_team_slugs:
-                for team in self.allowed_teams:
-                    # Support both "org/team" and "team" formats
-                    team_slug = team.split("/")[-1] if "/" in team else team
-                    if team_slug in author_team_slugs:
-                        return True, None
-
-            # Neither user nor team matched
-            if self.allowed_users and self.allowed_teams:
-                return False, "PR author not in allowed users or teams"
-            elif self.allowed_users:
-                return False, f"PR author not in allowed users: {', '.join(self.allowed_users)}"
-            else:
-                return False, "PR author not a member of any allowed team"
+            if author_team_slugs and self.allowed_authors.has_any_team(author_team_slugs):
+                return True, None
+            return False, AUTHOR_NOT_ALLOWED
 
         return True, None
 
@@ -366,13 +482,11 @@ class RepoConfig:
             pr_author: PR author's login
 
         Returns:
-            True if team check is needed (author not in allowed_users but teams configured)
+            True if teams are listed and the author isn't listed directly.
         """
-        if not self.allowed_teams:
+        if not self.allowed_authors.teams:
             return False
-        if self.allowed_users and pr_author in self.allowed_users:
-            return False
-        return True
+        return not self.allowed_authors.has_login(pr_author)
 
     @classmethod
     def _get_defaults(cls) -> dict[str, Any]:
@@ -395,7 +509,7 @@ class RepoConfig:
         return defaults
 
     @classmethod
-    def from_toml(cls, toml_content: str) -> RepoConfig:
+    def from_toml(cls, toml_content: str, defaults: dict[str, Any] | None = None) -> RepoConfig:
         """Parse TOML content and merge with app defaults.
 
         Uses dynaconf to properly merge repo-specific settings with
@@ -404,6 +518,8 @@ class RepoConfig:
 
         Args:
             toml_content: Raw TOML content from repo's stampbot.toml
+            defaults: Values for keys the file leaves out. Uses the service
+                defaults when omitted.
 
         Returns:
             RepoConfig with merged settings
@@ -411,7 +527,7 @@ class RepoConfig:
         import toml
 
         # Start with defaults
-        defaults = cls._get_defaults()
+        defaults = cls._get_defaults() if defaults is None else dict(defaults)
 
         # Parse the repo-specific TOML
         repo_settings: dict[str, Any] = {}
@@ -421,12 +537,18 @@ class RepoConfig:
             except Exception as e:
                 raise ValueError(f"Invalid TOML content: {e}") from e
 
-        # Merge: repo settings override defaults
+        # Merge: repo settings override defaults. The author filter keys act as
+        # one setting, so a file that sets any of them drops all three defaults.
+        author_filter_from_defaults = not any(key in repo_settings for key in AUTHOR_FILTER_KEYS)
+        if not author_filter_from_defaults:
+            defaults = {
+                key: value for key, value in defaults.items() if key not in AUTHOR_FILTER_KEYS
+            }
         merged = {**defaults, **repo_settings}
 
         title_patterns = merged.get("required_title_patterns", [])
 
-        return cls(
+        repo_config = cls(
             approval_labels=merged.get("approval_labels", []),
             auto_approve_on_label=merged.get("auto_approve_on_label", True),
             reapprove=merged.get("reapprove", False),
@@ -439,9 +561,18 @@ class RepoConfig:
             unapprove_commands=merged.get("unapprove_commands", ["unapprove", "unstamp"]),
             required_labels=merged.get("required_labels", []),
             required_title_patterns=title_patterns,
-            allowed_users=merged.get("allowed_users", []),
-            allowed_teams=merged.get("allowed_teams", []),
+            allowed_authors=merged.get("allowed_authors"),
+            allowed_users=merged.get("allowed_users"),
+            allowed_teams=merged.get("allowed_teams"),
         )
+        repo_config.author_filter_from_defaults = author_filter_from_defaults
+        if not author_filter_from_defaults:
+            # An empty deprecated key in a policy file still replaces the
+            # default filter, so its presence counts as use.
+            repo_config.deprecated_settings = tuple(
+                key for key in ("allowed_users", "allowed_teams") if key in repo_settings
+            )
+        return repo_config
 
     @classmethod
     def default(cls) -> RepoConfig:
@@ -451,7 +582,7 @@ class RepoConfig:
             RepoConfig using app-level defaults
         """
         defaults = cls._get_defaults()
-        return cls(
+        repo_config = cls(
             approval_labels=defaults["approval_labels"],
             auto_approve_on_label=defaults["auto_approve_on_label"],
             reapprove=defaults["reapprove"],
@@ -461,9 +592,12 @@ class RepoConfig:
             unapprove_commands=defaults["unapprove_commands"],
             required_labels=defaults["required_labels"],
             required_title_patterns=defaults["required_title_patterns"],
+            allowed_authors=defaults["allowed_authors"],
             allowed_users=defaults["allowed_users"],
             allowed_teams=defaults["allowed_teams"],
         )
+        repo_config.author_filter_from_defaults = True
+        return repo_config
 
     @classmethod
     def default_or_config_error(cls) -> RepoConfig:
@@ -475,4 +609,6 @@ class RepoConfig:
         try:
             return cls.default()
         except ValueError as e:
-            return cls.fail_closed(f"Invalid service default configuration: {e}")
+            return cls.fail_closed(
+                DEFAULTS_INVALID, detail=f"Invalid service default configuration: {e}"
+            )
