@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/dannysauer/stampbot/.openvex.json",
   "author": "Danny Sauer <github@dannysauer.com>",
-  "timestamp": "2026-11-03T10:48:18Z",
-  "version": 44,
+  "timestamp": "2026-11-04T06:42:57Z",
+  "version": 45,
   "statements": [
     {
       "vulnerability": {
@@ -46,9 +46,9 @@
           "@id": "pkg:pypi/jaraco.context"
         }
       ],
-      "status": "under_investigation",
-      "status_notes": "Transitive dependency with no direct control. Monitoring for upstream fix.",
-      "action_statement": "Update when a patched version becomes available."
+      "status": "not_affected",
+      "justification": "component_not_present",
+      "impact_statement": "jaraco.context reached earlier images only through the copy setuptools vendors. The Dockerfile removes pip, setuptools, and wheel from the virtual environment, removes pip and its bundled wheels from the base interpreter, and fails the build if either interpreter can still import pip, setuptools, or pkg_resources, so the image contains no jaraco.context."
     },
     {
       "vulnerability": {

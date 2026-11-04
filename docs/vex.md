@@ -15,9 +15,9 @@ root.
   `stampbot-1.11.9.vex.json`. The
   [release verification guide](release-verification.md) shows how to check it.
 
-Record findings in `.openvex.json`, not `.trivyignore`. An ignore entry only
-quiets this repository's scanner, while a VEX statement travels with the image
-to everyone downstream.
+Record findings in `.openvex.json`. The repository has no `.trivyignore`: an
+ignore entry would only quiet this repository's scanner, while a VEX statement
+travels with the image to everyone downstream.
 
 ## Before you start
 
@@ -33,10 +33,11 @@ image instead.
 
 If Stampbot is affected and no fix exists yet, a `not_affected` statement would
 be false. Add a statement with `"status": "under_investigation"` and an
-`action_statement` that says what will resolve it. That status doesn't stop
-Trivy from failing, so the repository currently also lists those IDs in
-`.trivyignore`, with a comment linking the advisory. Remove both once a fix
-ships.
+`action_statement` that says what will resolve it. That status doesn't suppress
+the finding, so a CRITICAL or HIGH one keeps failing the `Security Scan (PR)`
+check on every pull request until it's fixed. That's intended: an unfixed
+vulnerability that affects Stampbot needs a maintainer's decision, not a quiet
+scanner.
 
 The scheduled security scan asks a GitHub Models language model whether each
 new finding affects Stampbot. The model writes the justification and impact
@@ -98,5 +99,5 @@ The command prints the statement and exits with status 0. A non-zero status
 means the file didn't parse or the statement is missing.
 
 Then push the change. The `Security Scan (PR)` check reruns Trivy with the
-updated document. It passes once every CRITICAL or HIGH finding is fixed,
-covered by a `not_affected` statement, or listed in `.trivyignore`.
+updated document. It passes once every CRITICAL or HIGH finding is fixed or
+covered by a `not_affected` statement.
