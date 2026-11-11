@@ -43,7 +43,7 @@ structlog = "26.1.0"
 httpx = "0.28.1"
 toml = "0.10.2"
 regex = "2026.9.29"
-cachetools = "7.2.8"
+cachetools = "8.0.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "9.2.0"
