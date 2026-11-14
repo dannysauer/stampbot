@@ -24,10 +24,10 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.15"
-fastapi = "0.162.0"
+fastapi = "0.162.7"
 uvicorn = {extras = ["standard"], version = "0.54.0"}
-pydantic = "2.14.2"
-pydantic-settings = "2.16.2"
+pydantic = "2.14.3"
+pydantic-settings = "2.16.3"
 dynaconf = "3.3.5"
 PyGithub = "2.10.0"
 PyJWT = {extras = ["crypto"], version = "2.15.1"}
@@ -42,19 +42,19 @@ opentelemetry-exporter-otlp = "1.44.0"
 structlog = "26.1.0"
 httpx = "0.28.1"
 toml = "0.10.2"
-regex = "2026.9.29"
-cachetools = "7.2.8"
+regex = "2026.11.9"
+cachetools = "7.3.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "9.2.0"
 pytest-cov = "7.1.0"
-pytest-asyncio = "1.4.1.post1"
-ruff = "0.17.3"
+pytest-asyncio = "1.5.0"
+ruff = "0.17.5"
 mypy = "2.4.1"
 types-toml = "0.10.8.20260518"
 types-cachetools = "7.0.0.20260713"
 pre-commit = "4.7.0"
-cosmic-ray = "8.7.0"
+cosmic-ray = "8.9.0"
 
 [tool.poetry.group.secrets.dependencies]
 detect-secrets = "1.5.0"
