@@ -857,6 +857,41 @@ jobs:
           BULK_BRANCH="security/vex-bulk-$(date -u +%Y%m%d%H%M%S)"
           UPDATED_CVES=$(mktemp)
 
+          # File an issue asking a person to triage the finding. The loop calls
+          # this whenever the model can't settle a finding, so one bad reply
+          # never stops the rest of the run.
+          manual_review_issue() {
+            echo "::warning::$(printf '%s' "$REVIEW_REASON" | head -n1) Creating a manual review issue for $CVE_ID"
+            gh issue create \
+              --title "Security: Manual review needed for $CVE_ID" \
+              --label "security" \
+              --body "## Vulnerability Details
+
+          | Field | Value |
+          |-------|-------|
+          | CVE | $CVE_ID |
+          | Packages | $PACKAGE_NAMES |
+          | Severity | $SEVERITY |
+
+          ## Packages
+          $PACKAGE_SUMMARY
+
+          ## Description
+          $TITLE
+
+          $DESCRIPTION
+
+          ## Reference
+          $PRIMARY_URL
+
+          ## Action Required
+          $REVIEW_REASON
+
+          Please manually review whether this vulnerability affects stampbot and either:
+          1. Add a VEX statement to \`.openvex.json\` if not affected
+          2. Investigate remediation if affected"
+          }
+
           git checkout -B "$BULK_BRANCH" "$BASE_SHA"
 
           # Process each vulnerability
@@ -912,11 +947,14 @@ jobs:
             \"impact_statement\": \"Brief explanation of why the app is or is not affected\"
           }"
 
-            # Call GitHub Models API with retries
-            AI_RESPONSE=""
+            # Call GitHub Models API with retries. Keep the response body and
+            # curl's own errors apart: only the body is parsed.
+            REPLY_FILE=$(mktemp)
+            REVIEW_REASON=""
+            API_OK=false
             for attempt in 1 2 3; do
               echo "AI API attempt $attempt..."
-              AI_RESPONSE=$(curl -sS --fail-with-body \
+              if curl -sS --fail-with-body --output "$REPLY_FILE" \
                 -H "Authorization: Bearer $GITHUB_TOKEN" \
                 -H "Content-Type: application/json" \
                 "https://models.github.ai/inference/chat/completions" \
@@ -927,112 +965,57 @@ jobs:
                     messages: [{role: "user", content: $prompt}],
                     response_format: {type: "json_object"},
                     temperature: 0.1
-                  }')" 2>&1) && break
-              echo "Attempt $attempt failed, retrying..."
-              sleep $((attempt * 5))
+                  }')"; then
+                API_OK=true
+                break
+              fi
+              if [ "$attempt" -lt 3 ]; then
+                echo "Attempt $attempt failed, retrying..."
+                sleep $((attempt * 5))
+              fi
             done
 
-            if [ -z "$AI_RESPONSE" ]; then
-              echo "::warning::AI API failed after 3 attempts for $CVE_ID, creating manual review issue"
-              gh issue create \
-                --title "Security: Manual review needed for $CVE_ID" \
-                --label "security" \
-                --body "## Vulnerability Details
+            # parse-reply exits non-zero when the reply isn't usable, for example
+            # a code-fenced answer with extra text or a missing field.
+            VERDICT=""
+            if [ "$API_OK" != true ]; then
+              REVIEW_REASON="The AI API failed after 3 attempts."
+            elif ! VERDICT=$(python3 .github/scripts/vex_triage.py parse-reply "$REPLY_FILE" 2>"$REPLY_FILE.err"); then
+              REVIEW_REASON="The AI reply couldn't be used: $(cat "$REPLY_FILE.err")"
+            fi
 
-          | Field | Value |
-          |-------|-------|
-          | CVE | $CVE_ID |
-          | Packages | $PACKAGE_NAMES |
-          | Severity | $SEVERITY |
+            rm -f "$REPLY_FILE" "$REPLY_FILE.err"
 
-          ## Packages
-          $PACKAGE_SUMMARY
-
-          ## Description
-          $TITLE
-
-          $DESCRIPTION
-
-          ## Reference
-          $PRIMARY_URL
-
-          ## Action Required
-          AI analysis failed. Please manually review whether this vulnerability affects stampbot and either:
-          1. Add a VEX statement to \`.openvex.json\` if not affected
-          2. Investigate remediation if affected"
+            if [ -n "$REVIEW_REASON" ]; then
+              manual_review_issue
               echo "::endgroup::"
               continue
             fi
 
-            # Parse AI response
-            AI_CONTENT=$(echo "$AI_RESPONSE" | jq -r '.choices[0].message.content // empty')
-            if [ -z "$AI_CONTENT" ]; then
-              echo "::warning::Empty AI response for $CVE_ID"
-              echo "::endgroup::"
-              continue
-            fi
-
-            AFFECTED=$(echo "$AI_CONTENT" | jq -r '.affected')
-            JUSTIFICATION=$(echo "$AI_CONTENT" | jq -r '.justification')
-            IMPACT_STATEMENT=$(echo "$AI_CONTENT" | jq -r '.impact_statement')
+            AFFECTED=$(echo "$VERDICT" | jq -r '.affected')
+            JUSTIFICATION=$(echo "$VERDICT" | jq -r '.justification')
+            IMPACT_STATEMENT=$(echo "$VERDICT" | jq -r '.impact_statement')
 
             echo "AI Analysis: affected=$AFFECTED, justification=$JUSTIFICATION"
 
             if [ "$AFFECTED" = "false" ]; then
               echo "Updating VEX statement for $CVE_ID"
 
-              # Update .openvex.json
-              TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-              CURRENT_VERSION=$(jq '.version' .openvex.json)
-              NEW_VERSION=$((CURRENT_VERSION + 1))
-
-              # Add a new VEX statement, or complete the existing not_affected
-              # statement for this CVE with any missing vulnerable packages.
-              jq --arg cve_id "$CVE_ID" \
-                 --arg title "$TITLE" \
-                 --arg justification "$JUSTIFICATION" \
-                 --arg impact "$IMPACT_STATEMENT" \
-                 --arg timestamp "$TIMESTAMP" \
-                 --argjson products "$SUBCOMPONENTS" \
-                 --argjson new_version "$NEW_VERSION" \
-                 '
-                 def product_objects:
-                   $products | map({"@id": .});
-
-                 def non_container_products:
-                   [.products[]? | select(."@id" | startswith("pkg:oci/") | not)];
-
-                  .version = $new_version |
-                  .timestamp = $timestamp |
-                  if any(.statements[]?; .vulnerability.name == $cve_id and .status == "not_affected") then
-                    .statements = (
-                      .statements | map(
-                        if .vulnerability.name == $cve_id and .status == "not_affected" then
-                          .justification = $justification |
-                          .impact_statement = $impact |
-                          .products = ((non_container_products + product_objects) | unique_by(."@id"))
-                        else
-                          .
-                        end
-                      )
-                    )
-                  else
-                    .statements += [{
-                      vulnerability: {
-                        "@id": "https://nvd.nist.gov/vuln/detail/\($cve_id)",
-                        name: $cve_id,
-                        description: $title
-                      },
-                      products: product_objects,
-                      status: "not_affected",
-                      justification: $justification,
-                      impact_statement: $impact
-                    }]
-                  end
-                 ' .openvex.json > .openvex.json.tmp
-              mv .openvex.json.tmp .openvex.json
-
-              echo "- $CVE_ID: $PACKAGE_NAMES" >> "$UPDATED_CVES"
+              # --flag=value keeps text such as "--help" from being read as an
+              # option.
+              if python3 .github/scripts/vex_triage.py apply .openvex.json \
+                --id="$CVE_ID" \
+                --title="$TITLE" \
+                --justification="$JUSTIFICATION" \
+                --impact="$IMPACT_STATEMENT" \
+                --products="$SUBCOMPONENTS" \
+                --timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")" 2>"$REPLY_FILE.err"; then
+                echo "- $CVE_ID: $PACKAGE_NAMES" >> "$UPDATED_CVES"
+              else
+                REVIEW_REASON="The VEX update failed: $(cat "$REPLY_FILE.err")"
+                manual_review_issue
+              fi
+              rm -f "$REPLY_FILE.err"
             else
               # Create security issue
               echo "Creating security issue for $CVE_ID"
@@ -1079,6 +1062,8 @@ jobs:
           fi
 
           UPDATED_CVE_LIST=$(cat "$UPDATED_CVES")
+
+          python3 .github/scripts/vex_triage.py validate .openvex.json
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
