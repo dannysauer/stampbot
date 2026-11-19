@@ -36,9 +36,12 @@ reapprove = false
 chatops_required_permission = "maintain"
 ```
 
-Label approval can also require another label, a matching title, a named author,
-or membership in an organization team. Every configured filter category must
-pass. Values inside a category are alternatives.
+Label approval can also require another label, a matching title, or a
+particular pull request author. `allowed_authors` lists those authors by login,
+such as `renovate[bot]`, or by team, such as `@acme/release-team`. Every
+configured filter category must pass. Values inside a category are
+alternatives. The author filter checks who opened the pull request, not who
+added the label.
 
 ChatOps follows a separate rule. A commenter with the configured repository
 permission can write `@stampbot approve` or `@stampbot unapprove`; label filters
@@ -49,8 +52,8 @@ makes the old approval stale. Stampbot approves the new head when
 `reapprove = true`, when an approval label is added again, or when an
 authorized maintainer asks for one.
 
-The [configuration reference](docs/configuration.md) lists every key, limit,
-default, and fallback.
+The [repository policy reference](docs/repository-policy.md) lists every key,
+limit, default, and fallback.
 
 ## Try it from source
 

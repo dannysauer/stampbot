@@ -16,7 +16,8 @@ operational procedures, reference facts, and design discussion separate.
 
 | You need to… | Read |
 | --- | --- |
-| Set service options or repository approval policy | [Configuration reference](configuration.md) |
+| Write a repository's approval policy (`stampbot.toml`) | [Repository policy reference](repository-policy.md) |
+| Set service options, credentials, or policy defaults | [Service settings reference](service-settings.md) |
 | Look up routes, events, commands, metrics, or artifacts | [Interface reference](reference.md) |
 | Diagnose a webhook, review, credential, or deployment failure | [Operations runbook](operations.md) |
 | Record a scanner finding that doesn't affect Stampbot | [Record a VEX statement](vex.md) |

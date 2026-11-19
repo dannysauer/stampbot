@@ -7,7 +7,12 @@ from cachetools import TTLCache
 from fastapi.concurrency import run_in_threadpool
 from opentelemetry.trace import Span
 
-from stampbot.config import RepoConfig
+from stampbot.config import (
+    DEFAULTS_INVALID,
+    REPO_CONFIG_DEFAULTS,
+    RedactedConfigError,
+    RepoConfig,
+)
 from stampbot.github_client import github_client
 from stampbot.logger import get_logger
 from stampbot.metrics import repo_config_loads_total
@@ -115,7 +120,14 @@ class RepoPolicyResolver:
                 )
 
                 if content:
-                    return self._parse(span, content, source_repo=repo_full_name)
+                    return self._parse(
+                        span,
+                        content,
+                        where=f"stampbot.toml in {repo_full_name}",
+                        source_repo=repo_full_name,
+                        owner_login=owner_login,
+                        owner_type=owner_type,
+                    )
 
                 org_repo_full_name = None
                 if (
@@ -133,23 +145,37 @@ class RepoPolicyResolver:
                         missing_repository_is_optional=True,
                     )
                     if org_content:
-                        return self._parse(span, org_content, source_repo=org_repo_full_name)
+                        return self._parse(
+                            span,
+                            org_content,
+                            where=(
+                                f"the organization policy (stampbot.toml in {org_repo_full_name})"
+                            ),
+                            source_repo=org_repo_full_name,
+                            owner_login=owner_login,
+                            owner_type=owner_type,
+                        )
 
                 repo_config = RepoConfig.default_or_config_error()
+                if not repo_config.config_error:
+                    try:
+                        repo_config.check_team_owner(owner_login, owner_type)
+                    except ValueError as e:
+                        repo_config = RepoConfig.fail_closed(str(e), detail=_detail(e))
                 if repo_config.config_error:
                     error = ValueError(repo_config.config_error)
                     repo_config_loads_total.labels(status="error").inc()
                     logger.warning(
                         "Invalid service default configuration for %s: %s",
                         repo_full_name,
-                        repo_config.config_error,
-                        extra={"repo": repo_full_name, "error": repo_config.config_error},
+                        repo_config.config_error_detail,
+                        extra={"repo": repo_full_name, "error": repo_config.config_error_detail},
                     )
                     add_span_attributes(
                         span,
                         {
                             "config.result": "error",
-                            "config.error": repo_config.config_error,
+                            "config.error": repo_config.config_error_detail,
                             "config.source_repo": "service_defaults",
                         },
                     )
@@ -157,6 +183,7 @@ class RepoPolicyResolver:
                     return repo_config
 
                 repo_config_loads_total.labels(status="default").inc()
+                _warn_about_author_filter(repo_config, owner_type)
                 logger.info(
                     "No stampbot.toml found in %s%s, using defaults",
                     repo_full_name,
@@ -182,33 +209,110 @@ class RepoPolicyResolver:
                 )
 
     @staticmethod
-    def _parse(span: Span | None, toml_content: str, source_repo: str) -> RepoConfig:
+    def _parse(
+        span: Span | None,
+        toml_content: str,
+        *,
+        where: str,
+        source_repo: str,
+        owner_login: str | None,
+        owner_type: str | None,
+    ) -> RepoConfig:
         """Parse policy content with metrics and tracing.
 
         Args:
             span: Active tracing span (None if tracing disabled)
             toml_content: Raw TOML content
+            where: Plain description of the policy file, used in messages
             source_repo: Repository name where the policy was found
+            owner_login: Owner of the repository the event came from
+            owner_type: Owner account type (Organization or User)
 
         Returns:
             RepoConfig instance (fail-closed with config_error on invalid content)
         """
         try:
-            repo_config = RepoConfig.from_toml(toml_content)
+            try:
+                repo_config = RepoConfig.from_toml(toml_content)
+            except ValueError as e:
+                # A policy file inherits every key it leaves out, so the error
+                # may come from the service defaults. Parse the file again over
+                # the built-in defaults, which are always valid: if it still
+                # fails, the file is wrong; if not, an inherited default is.
+                try:
+                    RepoConfig.from_toml(toml_content, defaults=REPO_CONFIG_DEFAULTS)
+                except ValueError as file_error:
+                    raise ValueError(f"Stampbot can't use {where}: {file_error}") from e
+                logger.warning(
+                    "Invalid service default configuration for %s: %s",
+                    source_repo,
+                    e,
+                    extra={"repo": source_repo, "error": str(e)},
+                )
+                raise RedactedConfigError(DEFAULTS_INVALID, detail=str(e)) from e
+            if not repo_config.author_filter_from_defaults:
+                repo_config.author_filter_source = where
+            repo_config.check_team_owner(owner_login, owner_type)
         except ValueError as e:
             repo_config_loads_total.labels(status="error").inc()
             add_span_attributes(
                 span,
                 {
                     "config.result": "error",
-                    "config.error": str(e),
+                    "config.error": _detail(e),
                     "config.source_repo": source_repo,
                 },
             )
             set_span_error(span, e)
-            return RepoConfig.fail_closed(str(e))
+            if isinstance(e, RedactedConfigError):
+                logger.warning(
+                    "Invalid service default configuration for %s: %s",
+                    source_repo,
+                    e.detail,
+                    extra={"repo": source_repo, "error": e.detail},
+                )
+            return RepoConfig.fail_closed(str(e), detail=_detail(e))
 
         repo_config_loads_total.labels(status="found").inc()
+        _warn_about_author_filter(repo_config, owner_type)
         add_span_attributes(span, {"config.result": "found", "config.source_repo": source_repo})
         set_span_ok(span)
         return repo_config
+
+
+def _warn_about_author_filter(repo_config: RepoConfig, owner_type: str | None) -> None:
+    """Log what a repository owner should change in the author filter.
+
+    Args:
+        repo_config: Parsed policy.
+        owner_type: Repository owner account type (Organization or User).
+    """
+    source = repo_config.author_filter_source
+    for setting in repo_config.deprecated_settings:
+        logger.warning(
+            "%s uses the deprecated %s setting. Move its entries to allowed_authors.",
+            source,
+            setting,
+            extra={"config_source": source, "setting": setting},
+        )
+    if owner_type == "User" and repo_config.allowed_authors.teams:
+        teams = ", ".join(team.display() for team in repo_config.allowed_authors.teams)
+        logger.warning(
+            "%s lists teams (%s), but GitHub doesn't support teams on personal accounts, "
+            "so Stampbot ignores them. List people by login instead.",
+            source,
+            teams,
+            extra={"config_source": source, "teams": teams},
+        )
+
+
+def _detail(error: ValueError) -> str:
+    """Return the full text of a policy error, for operator logs.
+
+    Args:
+        error: Error raised while loading policy.
+
+    Returns:
+        The unredacted detail when the error carries one, else its message.
+    """
+    return error.detail if isinstance(error, RedactedConfigError) else str(error)

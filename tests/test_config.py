@@ -1,20 +1,25 @@
 """Tests for configuration module."""
 
+import re
 from unittest.mock import MagicMock, patch
 
 import pytest
 import regex
 
 from stampbot.config import (
+    DEFAULTS_INVALID,
     MAX_PR_TITLE_LENGTH,
     MAX_TITLE_PATTERN_COUNT,
     MAX_TITLE_PATTERN_LENGTH,
+    REPO_CONFIG_DEFAULTS,
+    SERVICE_DEFAULTS_SOURCE,
     TITLE_PATTERN_TIMEOUT_SECONDS,
     RepoConfig,
     get_setting,
     is_configured,
     repo_config_cache_seconds,
 )
+from stampbot.principals import MAX_PRINCIPAL_LENGTH, MAX_PRINCIPALS
 
 
 def test_repo_config_from_toml():
@@ -106,9 +111,9 @@ def test_repo_config_default_or_config_error_fails_closed(setting, value, messag
 
         config = RepoConfig.default_or_config_error()
 
-    assert config.config_error is not None
-    assert "Invalid service default configuration" in config.config_error
-    assert message in config.config_error
+    assert config.config_error == DEFAULTS_INVALID
+    assert "Invalid service default configuration" in config.config_error_detail
+    assert message in config.config_error_detail
     assert config.approve_commands == ["approve", "stamp"]
     assert config.unapprove_commands == ["unapprove", "unstamp"]
 
@@ -498,121 +503,212 @@ required_title_patterns = ["^chore:"]
     assert "does not match any required pattern" in reason
 
 
-def test_is_pr_eligible_allowed_user():
-    """Test is_pr_eligible returns True when author is in allowed_users."""
-    config = RepoConfig.from_toml('allowed_users = ["dependabot[bot]", "renovate[bot]"]')
-    is_eligible, reason = config.is_pr_eligible([], "Update deps", "dependabot[bot]")
-    assert is_eligible is True
-    assert reason is None
+def test_is_pr_eligible_allowed_author_login():
+    """Test a listed login passes the author filter, with or without a leading @."""
+    config = RepoConfig.from_toml('allowed_authors = ["dependabot[bot]", "@renovate[bot]"]')
+    assert config.is_pr_eligible([], "Update deps", "dependabot[bot]") == (True, None)
+    assert config.is_pr_eligible([], "Update deps", "renovate[bot]") == (True, None)
 
 
-def test_is_pr_eligible_user_not_allowed():
-    """Test is_pr_eligible returns False when author is not in allowed_users."""
-    config = RepoConfig.from_toml('allowed_users = ["dependabot[bot]", "renovate[bot]"]')
+def test_is_pr_eligible_allowed_author_login_ignores_case():
+    """Test logins compare case-insensitively, as GitHub does."""
+    config = RepoConfig.from_toml('allowed_authors = ["Renovate[bot]"]')
+    assert config.is_pr_eligible([], "Update deps", "renovate[BOT]") == (True, None)
+
+
+def test_is_pr_eligible_author_not_allowed():
+    """Test an unlisted author fails the author filter."""
+    config = RepoConfig.from_toml('allowed_authors = ["dependabot[bot]", "renovate[bot]"]')
     is_eligible, reason = config.is_pr_eligible([], "Update deps", "random-user")
     assert is_eligible is False
-    assert "not in allowed users" in reason
+    assert reason == "PR author is not in allowed_authors"
 
 
-def test_is_pr_eligible_allowed_team():
-    """Test is_pr_eligible returns True when author is in an allowed team."""
-    config = RepoConfig.from_toml('allowed_teams = ["my-org/release-team"]')
+def test_is_pr_eligible_allowed_author_team():
+    """Test membership in a listed team passes the author filter."""
+    config = RepoConfig.from_toml('allowed_authors = ["@my-org/Release-Team"]')
     is_eligible, reason = config.is_pr_eligible(
         [], "Update deps", "team-member", author_team_slugs=["release-team"]
     )
-    assert is_eligible is True
-    assert reason is None
+    assert (is_eligible, reason) == (True, None)
 
 
 def test_is_pr_eligible_team_not_matched():
-    """Test is_pr_eligible returns False when author is not in any allowed team."""
-    config = RepoConfig.from_toml('allowed_teams = ["my-org/release-team"]')
+    """Test membership in an unlisted team fails the author filter."""
+    config = RepoConfig.from_toml('allowed_authors = ["@my-org/release-team"]')
     is_eligible, reason = config.is_pr_eligible(
         [], "Update deps", "non-member", author_team_slugs=["other-team"]
     )
     assert is_eligible is False
-    assert "not a member of any allowed team" in reason
+    assert reason == "PR author is not in allowed_authors"
 
 
-def test_is_pr_eligible_user_or_team():
-    """Test is_pr_eligible returns True when user matches even if not in team."""
-    toml_content = """
-allowed_users = ["special-user"]
-allowed_teams = ["my-org/release-team"]
-"""
-    config = RepoConfig.from_toml(toml_content)
-    # User is in allowed_users, so no team check needed
-    is_eligible, reason = config.is_pr_eligible([], "Update deps", "special-user")
-    assert is_eligible is True
-    assert reason is None
-
-
-def test_is_pr_eligible_neither_user_nor_team():
-    """Test is_pr_eligible returns False when neither user nor team matches."""
-    toml_content = """
-allowed_users = ["special-user"]
-allowed_teams = ["my-org/release-team"]
-"""
-    config = RepoConfig.from_toml(toml_content)
-    is_eligible, reason = config.is_pr_eligible(
-        [], "Update deps", "random-user", author_team_slugs=["other-team"]
-    )
-    assert is_eligible is False
-    assert "not in allowed users or teams" in reason
-
-
-def test_is_pr_eligible_not_in_users_but_in_team():
-    """Test is_pr_eligible returns True when user not in allowed_users but is in allowed_team."""
-    toml_content = """
-allowed_users = ["special-user"]
-allowed_teams = ["my-org/release-team"]
-"""
-    config = RepoConfig.from_toml(toml_content)
-    # User is NOT in allowed_users but IS in allowed_teams
-    is_eligible, reason = config.is_pr_eligible(
-        [], "Update deps", "team-member", author_team_slugs=["release-team"]
-    )
-    assert is_eligible is True
-    assert reason is None
-
-
-def test_is_pr_eligible_multiple_teams_second_matches():
-    """Test is_pr_eligible returns True when user is in second of multiple allowed teams."""
+def test_is_pr_eligible_login_or_team():
+    """Test logins and teams in one list are alternatives."""
     config = RepoConfig.from_toml(
-        'allowed_teams = ["my-org/admin-team", "my-org/release-team", "my-org/deploy-team"]'
+        'allowed_authors = ["renovate[bot]", "@my-org/admin-team", "@my-org/release-team"]'
     )
-    # User is only in release-team (the second one)
-    is_eligible, reason = config.is_pr_eligible(
+    assert config.is_pr_eligible([], "Update deps", "renovate[bot]") == (True, None)
+    assert config.is_pr_eligible(
         [], "Update deps", "team-member", author_team_slugs=["release-team"]
+    ) == (True, None)
+    assert (
+        config.is_pr_eligible([], "Update deps", "random-user", author_team_slugs=["other-team"])[0]
+        is False
     )
-    assert is_eligible is True
-    assert reason is None
 
 
-def test_needs_team_check_no_teams_configured():
-    """Test needs_team_check returns False when no teams configured."""
-    config = RepoConfig.from_toml('allowed_users = ["some-user"]')
-    assert config.needs_team_check("any-user") is False
-
-
-def test_needs_team_check_user_in_allowed_users():
-    """Test needs_team_check returns False when user is in allowed_users."""
-    toml_content = """
-allowed_users = ["special-user"]
-allowed_teams = ["my-org/release-team"]
-"""
-    config = RepoConfig.from_toml(toml_content)
-    assert config.needs_team_check("special-user") is False
-
-
-def test_needs_team_check_user_not_in_allowed_users():
-    """Test needs_team_check returns True when user not in allowed_users but teams configured."""
-    toml_content = """
-allowed_users = ["special-user"]
-allowed_teams = ["my-org/release-team"]
-"""
-    config = RepoConfig.from_toml(toml_content)
+def test_needs_team_check():
+    """Test team lookup happens only when teams are listed and the login isn't."""
+    assert RepoConfig.from_toml('allowed_authors = ["some-user"]').needs_team_check("x") is False
+    config = RepoConfig.from_toml('allowed_authors = ["special-user", "@my-org/release-team"]')
+    assert config.needs_team_check("Special-User") is False
     assert config.needs_team_check("other-user") is True
+
+
+def test_deprecated_author_settings_merge_into_allowed_authors():
+    """Test allowed_users and allowed_teams still work and are reported as deprecated."""
+    config = RepoConfig.from_toml(
+        """
+allowed_authors = ["@my-org/deploy-team"]
+allowed_users = ["special-user"]
+allowed_teams = ["my-org/release-team", "admin-team"]
+"""
+    )
+    assert config.allowed_authors.describe() == [
+        "@special-user",
+        "@my-org/deploy-team",
+        "@my-org/release-team",
+        "admin-team (team)",
+    ]
+    assert config.deprecated_settings == ("allowed_users", "allowed_teams")
+    assert config.allowed_authors.team_slugs() == ["deploy-team", "release-team", "admin-team"]
+
+
+@pytest.mark.parametrize("key", ["allowed_users", "allowed_teams"])
+def test_empty_deprecated_key_is_reported(key):
+    """Test an empty deprecated key counts as use, since it replaces the default filter."""
+    config = RepoConfig.from_toml(f"{key} = []")
+    assert config.deprecated_settings == (key,)
+
+
+def test_allowed_authors_reports_no_deprecated_settings():
+    """Test the new setting alone reports nothing deprecated."""
+    config = RepoConfig.from_toml('allowed_authors = ["renovate[bot]"]')
+    assert config.deprecated_settings == ()
+
+
+def test_repo_author_filter_replaces_service_default_author_filter():
+    """Test a policy that sets any author key drops every author key from defaults."""
+    defaults = {
+        **REPO_CONFIG_DEFAULTS,
+        "allowed_teams": ["default-team"],
+    }
+    with patch.object(RepoConfig, "_get_defaults", return_value=defaults):
+        config = RepoConfig.from_toml('allowed_authors = ["renovate[bot]"]')
+        inherited = RepoConfig.from_toml('approval_labels = ["ship-it"]')
+
+    assert config.allowed_authors.describe() == ["@renovate[bot]"]
+    assert inherited.allowed_authors.describe("acme") == ["@acme/default-team"]
+    assert config.author_filter_from_defaults is False
+    assert inherited.author_filter_from_defaults is True
+
+
+@pytest.mark.parametrize(
+    ("toml_content", "message"),
+    [
+        ('allowed_authors = "renovate[bot]"', "allowed_authors must be a list of strings"),
+        ("allowed_authors = [1]", "allowed_authors must contain only strings"),
+        ('allowed_authors = ["has space"]', "is not a valid GitHub login"),
+        ('allowed_authors = [""]', "is not a valid GitHub login"),
+        ('allowed_authors = ["@"]', "is not a valid GitHub login"),
+        ('allowed_authors = ["@org/"]', "is not a valid team"),
+        ('allowed_authors = ["@a/b/c"]', "is not a valid team"),
+        ('allowed_users = ["my-org/team"]', "list teams in allowed_authors instead"),
+        ('allowed_teams = ["bad team"]', "is not a valid team"),
+        (f'allowed_authors = ["{"a" * (MAX_PRINCIPAL_LENGTH + 1)}"]', "longer than"),
+        (
+            "allowed_authors = [" + ", ".join(f'"u{i}"' for i in range(MAX_PRINCIPALS + 1)) + "]",
+            "too many entries",
+        ),
+        (
+            "allowed_authors = ["
+            + ", ".join(f'"u{i}"' for i in range(MAX_PRINCIPALS))
+            + ']\nallowed_users = ["extra"]',
+            "too many entries together",
+        ),
+    ],
+)
+def test_invalid_author_filter_is_rejected(toml_content, message):
+    """Test malformed author entries fail policy validation."""
+    with pytest.raises(ValueError, match=re.escape(message)):
+        RepoConfig.from_toml(toml_content)
+
+
+def test_check_team_owner_accepts_owner_org_and_bare_slugs():
+    """Test teams in the owner's organization, in any case, pass the owner check."""
+    config = RepoConfig.from_toml(
+        """
+allowed_authors = ["@My-Org/release-team", "renovate[bot]"]
+allowed_teams = ["admin-team"]
+"""
+    )
+    config.check_team_owner("my-org")
+
+
+def test_check_team_owner_rejects_other_org():
+    """Test a team outside the owner's organization fails with a fix to apply."""
+    config = RepoConfig.from_toml('allowed_authors = ["@my-org/release-team"]')
+    config.author_filter_source = "stampbot.toml in other-org/repo"
+    with pytest.raises(ValueError) as error:
+        config.check_team_owner("other-org")
+
+    assert str(error.value) == (
+        "The allowed_authors entry '@my-org/release-team' in stampbot.toml in other-org/repo "
+        "names the 'my-org' organization, but this repository belongs to 'other-org'. "
+        "Stampbot only looks up teams in the repository owner's organization. "
+        "Change the entry to '@other-org/release-team' or remove it."
+    )
+
+
+def test_check_team_owner_rejects_unknown_owner():
+    """Test a team entry fails closed when GitHub didn't name the owner."""
+    config = RepoConfig.from_toml('allowed_authors = ["@my-org/release-team"]')
+    with pytest.raises(ValueError, match="GitHub's event didn't say who owns this repository"):
+        config.check_team_owner(None)
+
+
+def test_check_team_owner_names_deprecated_setting():
+    """Test the owner error names the setting the team came from."""
+    config = RepoConfig.from_toml('allowed_teams = ["my-org/release-team"]')
+    with pytest.raises(ValueError, match=r"^The allowed_teams entry '@my-org/release-team' in"):
+        config.check_team_owner("other-org")
+
+
+def test_check_team_owner_blames_service_defaults():
+    """Test a bad team inherited from defaults names the defaults, not the policy file."""
+    defaults = {**REPO_CONFIG_DEFAULTS, "allowed_authors": ["@my-org/release-team"]}
+    with patch.object(RepoConfig, "_get_defaults", return_value=defaults):
+        inherited = RepoConfig.from_toml('approval_labels = ["ship-it"]')
+        default = RepoConfig.default()
+
+    for config in (inherited, default):
+        with pytest.raises(ValueError) as error:
+            config.check_team_owner("other-org")
+        assert str(error.value).startswith(f"A team in {SERVICE_DEFAULTS_SOURCE} belongs to")
+        assert "release-team" not in str(error.value)
+
+
+def test_invalid_legacy_service_default_fails_closed():
+    """Test an invalid allowed_users default stops automation instead of matching."""
+    defaults = {**REPO_CONFIG_DEFAULTS, "allowed_users": ["has space"]}
+    with patch.object(RepoConfig, "_get_defaults", return_value=defaults):
+        config = RepoConfig.default_or_config_error()
+
+    assert config.config_error == DEFAULTS_INVALID
+    assert (
+        "allowed_users entry 'has space' is not a valid GitHub login" in config.config_error_detail
+    )
 
 
 @pytest.mark.parametrize(
