@@ -10,9 +10,9 @@ anyio==4.16.0 ; python_version >= "3.11" and python_version < "3.15" \
 asgiref==3.13.0 ; python_version >= "3.11" and python_version < "3.15" \
     --hash=sha256:034cc8cbf72d00553b4be256703ac545120b4e50af13b49dec99da899aeeecb4 \
     --hash=sha256:f9596a2434512686473d50f96ff6207fbba49ae1a785dfac614df4aeb085674d
-cachetools==7.3.2 ; python_version >= "3.11" and python_version < "3.15" \
-    --hash=sha256:43e5db663b58c4337a9959069d93f54dd2e065fdd0438a504cd1100fbeb48beb \
-    --hash=sha256:afb4b563cb37e7a121a6ea45a0deec42916c64eed58875cc15d8cf9eaca89fb2
+cachetools==8.0.2 ; python_version >= "3.11" and python_version < "3.15" \
+    --hash=sha256:30ac523adfc118b51d2b2e7bad8a0ddb31370dfe2700c7f10ca224f36ccf81e0 \
+    --hash=sha256:502bf3c17c6e35d78ccdaa70da8c7001b28634541f5cde0dee33c93bb252277d
 certifi==2026.10.23 ; python_version >= "3.11" and python_version < "3.15" \
     --hash=sha256:a9895e6e2758b371e0545e321a3a8fd1fcfd9829ada8824a936dfb16aaaf36cd \
     --hash=sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1
