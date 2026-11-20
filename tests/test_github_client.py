@@ -8,6 +8,7 @@ from unittest.mock import Mock, PropertyMock, call, patch
 
 import pytest
 from github.GithubException import GithubException
+from github.Repository import Repository
 
 TEST_PEM_KEY = "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----"
 TEST_TOKEN = "test-token"  # noqa: S105
@@ -1528,152 +1529,48 @@ class TestFindBotApprovalReviews:
 class TestUserHasPermission:
     """Tests for user_has_permission method."""
 
-    def test_user_has_permission_true(self):
-        """Test required permission satisfied returns True."""
-        with (
-            patch("stampbot.github_client.is_configured", return_value=True),
-            patch("stampbot.github_client.settings") as mock_settings,
-            patch("stampbot.github_client.Auth.AppAuth"),
-            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
-            patch("stampbot.github_client.Github") as mock_github_cls,
-            patch("stampbot.github_client.create_span") as mock_span,
-        ):
-            mock_settings.app_id = 12345
-            mock_settings.private_key = TEST_PEM_KEY
-            mock_settings.otel_enabled = False
+    @pytest.fixture
+    def permission_request(self):
+        """Serve the collaborator response through a real PyGithub repository."""
+        from stampbot.github_client import GitHubAppClient
 
-            mock_integration = Mock()
-            mock_token = Mock()
-            mock_token.token = TEST_TOKEN
-            mock_integration.get_access_token.return_value = mock_token
-            mock_integration_cls.return_value = mock_integration
+        requester = Mock(base_url="https://api.github.com")
+        repo = Repository(requester, {}, {"url": "/repos/owner/repo"}, completed=True)
+        client = GitHubAppClient()
+        with patch.object(client, "_get_installation_client") as get_client:
+            get_client.return_value.get_repo.return_value = repo
+            yield client, requester.requestJsonAndCheck
 
-            mock_repo = Mock()
-            mock_repo.get_collaborator_permission.return_value = "write"
-            mock_github = Mock()
-            mock_github.get_repo.return_value = mock_repo
-            mock_github.get_rate_limit.return_value = Mock(core=Mock(remaining=1, limit=2))
-            mock_github_cls.return_value = mock_github
+    @pytest.mark.parametrize(
+        ("response", "required", "allowed"),
+        [
+            ({"permission": "write", "role_name": "maintain"}, "maintain", True),
+            ({"permission": "write", "role_name": "maintain"}, "admin", False),
+            ({"permission": "write", "role_name": "write"}, "maintain", False),
+            ({"permission": "read", "role_name": "triage"}, "triage", True),
+            ({"permission": "read", "role_name": "triage"}, "write", False),
+            ({"permission": "read", "role_name": "read"}, "triage", False),
+            ({"permission": "write", "role_name": "release manager"}, "write", True),
+            ({"permission": "write", "role_name": "release manager"}, "maintain", False),
+            ({"permission": "admin"}, "maintain", True),
+            ({"permission": "unknown"}, "none", False),
+            ({"permission": "admin"}, "unknown", False),
+        ],
+    )
+    def test_permission_threshold(self, permission_request, response, required, allowed):
+        """Compare the collaborator's repository access with the configured threshold."""
+        client, request = permission_request
+        request.return_value = ({}, response)
 
-            mock_span.return_value.__enter__ = Mock(return_value=None)
-            mock_span.return_value.__exit__ = Mock(return_value=False)
+        assert client.user_has_permission(123456, "owner/repo", "alice", required) is allowed
+        request.assert_called_once_with("GET", "/repos/owner/repo/collaborators/alice/permission")
 
-            from stampbot.github_client import GitHubAppClient
+    def test_user_has_permission_error(self, permission_request):
+        """Deny the command when GitHub cannot confirm the collaborator's access."""
+        client, request = permission_request
+        request.side_effect = GithubException(403, {}, {})
 
-            client = GitHubAppClient()
-            result = client.user_has_permission(123456, "owner/repo", "alice", "write")
-
-            assert result is True
-
-    def test_user_has_permission_false(self):
-        """Test insufficient permission returns False."""
-        with (
-            patch("stampbot.github_client.is_configured", return_value=True),
-            patch("stampbot.github_client.settings") as mock_settings,
-            patch("stampbot.github_client.Auth.AppAuth"),
-            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
-            patch("stampbot.github_client.Github") as mock_github_cls,
-            patch("stampbot.github_client.create_span") as mock_span,
-        ):
-            mock_settings.app_id = 12345
-            mock_settings.private_key = TEST_PEM_KEY
-            mock_settings.otel_enabled = False
-
-            mock_integration = Mock()
-            mock_token = Mock()
-            mock_token.token = TEST_TOKEN
-            mock_integration.get_access_token.return_value = mock_token
-            mock_integration_cls.return_value = mock_integration
-
-            mock_repo = Mock()
-            mock_repo.get_collaborator_permission.return_value = "read"
-            mock_github = Mock()
-            mock_github.get_repo.return_value = mock_repo
-            mock_github.get_rate_limit.return_value = Mock(core=Mock(remaining=1, limit=2))
-            mock_github_cls.return_value = mock_github
-
-            mock_span.return_value.__enter__ = Mock(return_value=None)
-            mock_span.return_value.__exit__ = Mock(return_value=False)
-
-            from stampbot.github_client import GitHubAppClient
-
-            client = GitHubAppClient()
-            result = client.user_has_permission(123456, "owner/repo", "bob", "write")
-
-            assert result is False
-
-    def test_user_has_permission_error(self):
-        """Test permission check returns False on error."""
-        with (
-            patch("stampbot.github_client.is_configured", return_value=True),
-            patch("stampbot.github_client.settings") as mock_settings,
-            patch("stampbot.github_client.Auth.AppAuth"),
-            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
-            patch("stampbot.github_client.Github") as mock_github_cls,
-            patch("stampbot.github_client.create_span") as mock_span,
-        ):
-            mock_settings.app_id = 12345
-            mock_settings.private_key = TEST_PEM_KEY
-            mock_settings.otel_enabled = False
-
-            mock_integration = Mock()
-            mock_token = Mock()
-            mock_token.token = TEST_TOKEN
-            mock_integration.get_access_token.return_value = mock_token
-            mock_integration_cls.return_value = mock_integration
-
-            mock_repo = Mock()
-            mock_repo.get_collaborator_permission.side_effect = Exception("API Error")
-            mock_github = Mock()
-            mock_github.get_repo.return_value = mock_repo
-            mock_github_cls.return_value = mock_github
-
-            mock_span.return_value.__enter__ = Mock(return_value=None)
-            mock_span.return_value.__exit__ = Mock(return_value=False)
-
-            from stampbot.github_client import GitHubAppClient
-
-            client = GitHubAppClient()
-            result = client.user_has_permission(123456, "owner/repo", "carol", "maintain")
-
-            assert result is False
-
-    def test_user_has_permission_invalid_levels(self):
-        """Test invalid permission levels return False."""
-        with (
-            patch("stampbot.github_client.is_configured", return_value=True),
-            patch("stampbot.github_client.settings") as mock_settings,
-            patch("stampbot.github_client.Auth.AppAuth"),
-            patch("stampbot.github_client.GithubIntegration") as mock_integration_cls,
-            patch("stampbot.github_client.Github") as mock_github_cls,
-            patch("stampbot.github_client.create_span") as mock_span,
-        ):
-            mock_settings.app_id = 12345
-            mock_settings.private_key = TEST_PEM_KEY
-            mock_settings.otel_enabled = False
-
-            mock_integration = Mock()
-            mock_token = Mock()
-            mock_token.token = TEST_TOKEN
-            mock_integration.get_access_token.return_value = mock_token
-            mock_integration_cls.return_value = mock_integration
-
-            mock_repo = Mock()
-            mock_repo.get_collaborator_permission.return_value = "unknown"
-            mock_github = Mock()
-            mock_github.get_repo.return_value = mock_repo
-            mock_github.get_rate_limit.return_value = Mock(core=Mock(remaining=1, limit=2))
-            mock_github_cls.return_value = mock_github
-
-            mock_span.return_value.__enter__ = Mock(return_value=None)
-            mock_span.return_value.__exit__ = Mock(return_value=False)
-
-            from stampbot.github_client import GitHubAppClient
-
-            client = GitHubAppClient()
-            result = client.user_has_permission(123456, "owner/repo", "dana", "unknown")
-
-            assert result is False
+        assert client.user_has_permission(123456, "owner/repo", "alice", "maintain") is False
 
 
 class TestGetUserTeamSlugs:

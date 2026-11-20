@@ -10,6 +10,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Literal, TypedDict
+from urllib.parse import quote
 
 from cachetools import TTLCache
 from github import Auth, Github, GithubIntegration
@@ -18,7 +19,7 @@ from github.GithubException import GithubException
 from github.Repository import Repository
 from urllib3.util.retry import Retry
 
-from stampbot.config import is_configured, settings
+from stampbot.config import REPO_PERMISSION_LEVELS, is_configured, settings
 from stampbot.installation_auth import InstrumentedInstallationAuth
 from stampbot.logger import get_logger
 from stampbot.metrics import (
@@ -1140,16 +1141,19 @@ class GitHubAppClient:
                 client = self._get_installation_client(installation_id)
                 repo = client.get_repo(repo_full_name)
 
-                permission = repo.get_collaborator_permission(username)
-                permission_order = ["none", "read", "triage", "write", "maintain", "admin"]
+                _, access = repo.requester.requestJsonAndCheck(
+                    "GET", f"{repo.url}/collaborators/{quote(username, safe='')}/permission"
+                )
+                # GitHub maps maintain to write and triage to read in the legacy field.
+                permission = access.get("role_name")
+                if permission not in REPO_PERMISSION_LEVELS:
+                    permission = access["permission"]
                 try:
-                    permission_index = permission_order.index(permission)
-                    required_index = permission_order.index(required_permission)
+                    granted = REPO_PERMISSION_LEVELS.index(permission)
+                    required = REPO_PERMISSION_LEVELS.index(required_permission)
+                    has_permission = granted >= required
                 except ValueError:
-                    permission_index = -1
-                    required_index = 99
-
-                has_permission = permission_index >= required_index
+                    has_permission = False
 
                 duration = time.time() - start_time
                 github_api_request_duration_seconds.labels(operation="get_permission").observe(

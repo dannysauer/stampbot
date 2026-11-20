@@ -127,6 +127,10 @@ so a corrected file applies on the next event.
 | `allowed_users` | list of GitHub logins | `[]` | Pull request authors allowed by the author filter. |
 | `allowed_teams` | list of team slugs | `[]` | Organization teams allowed by the author filter. Values may be `team-slug` or `org/team-slug`. |
 
+`chatops_required_permission` checks the commenter's built-in GitHub role.
+For a custom role, Stampbot uses the base access level GitHub reports in the
+`permission` field.
+
 An empty filter list disables that filter. `allowed_users` and `allowed_teams`
 form one author category, so a direct user match or a team match passes it.
 
